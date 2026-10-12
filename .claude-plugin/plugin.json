@@ -1,6 +1,6 @@
 {
   "name": "anvil",
   "version": "0.1.0",
-  "description": "个人自用的 Claude Code mod：缓存保活、会话仪表盘、中英翻译输入框",
+  "description": "个人自用的 Claude Code mod：额度利用率（缓存保活）、会话信息显示、英文沟通（中译英输入框）",
   "author": { "name": "kelch" }
 }
