@@ -1,0 +1,6 @@
+{
+  "name": "anvil",
+  "version": "0.1.0",
+  "description": "个人自用的 Claude Code mod：缓存保活、会话仪表盘、中英翻译输入框",
+  "author": { "name": "kelch" }
+}

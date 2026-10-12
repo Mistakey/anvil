@@ -1,0 +1,5 @@
+# 引擎每次加载时按当前构建生成的类型声明
+.claude-plugin/types/
+node_modules/
+.forge/local/
+.forge/materials/
