@@ -2,6 +2,7 @@ import type {
   AgentSpawnInput,
   CommandRunInput,
   HookStream,
+  ModelForkResult,
   On,
   PaneOpenArgs,
   PromptSubmitInput,
@@ -32,7 +33,18 @@ export type WorldOptions = {
   stop?: { reason: string }
   /** `$.session.messages()` 读到的主会话对话，测试中途可改；不给时插件读不到对话 */
   transcript?: { messages: SessionMessage[] }
+  /**
+   * `$.model.fork`（缓存保活）依次给出的回答，测试中途可往里加；用完后答 nothing-to-fork，
+   * 保活随即停下，不碰保活的测试因此不受它影响。`throw` 表示这次调用直接抛错。
+   */
+  forks?: ForkAnswer[]
 }
+
+/** 一次 fork 的回答：读写数（回复正常），整份结果，或抛错 */
+export type ForkAnswer = { read: number; write: number } | ModelForkResult | { throw: string }
+
+/** 读到整段缓存、只写了自己那一条：续上了 */
+export const WARM: ForkAnswer = { read: 150000, write: 40 }
 
 // 插件之下的世界：替引擎回答插件用到的调用，并记下插件注册的命令、写进 `$.state` 的值、
 // 进入会话的消息和放回主输入框的文本
@@ -85,7 +97,21 @@ export function world(on: On, options: WorldOptions = {}) {
     box.text = e.mode === 'replace' ? e.text : box.text + e.text
     return { isFilled: true }
   })
-  return { commands, state, entered, fills, fillModes, box }
+  const forks: string[] = []
+  on('model.fork', ($, e) => {
+    forks.push(e.prompt)
+    const answer = options.forks?.shift()
+    if (answer === undefined) return { value: { isAnswered: false, reason: 'nothing-to-fork' } }
+    if ('throw' in answer) throw new Error(answer.throw)
+    if ('isAnswered' in answer) return { value: answer }
+    const value: ModelForkResult = {
+      isAnswered: true,
+      text: 'warm',
+      usage: { input_tokens: 3, output_tokens: 2, cache_read_input_tokens: answer.read, cache_creation_input_tokens: answer.write },
+    }
+    return { value }
+  })
+  return { commands, state, entered, fills, fillModes, box, forks }
 }
 
 /**

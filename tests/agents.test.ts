@@ -165,13 +165,14 @@ test('按 a 展开子 agent 列表：全部显示，其余两个列表收成一�
   // 我的消息、自动模式拒绝各收成一行（不再是框），用量、缓存不变
   const messages = await ui.find({ key: 'section:messages' })
   expect(messages?.props.borderStyle).toBeUndefined()
+  expect(await ui.find({ key: 'box:messages' })).toBeUndefined()
   expect(flat(messages)).toMatch(/^▸ \S+ 我的消息 ─+ 0 条$/)
   expect(flat(await ui.find({ key: 'section:denials' }))).toMatch(/^▸ \S+ 自动模式拒绝 ─+ 0 条$/)
-  expect((await ui.find({ key: 'section:usage' }))?.props.borderStyle).toBe('round')
+  expect((await ui.find({ key: 'box:usage' }))?.props.borderStyle).toBe('round')
 
   await ui.press({ key: 'list:agents' })
   expect(await ui.find({ key: 'agent:2' })).toBeUndefined()
-  expect((await ui.find({ key: 'section:messages' }))?.props.borderStyle).toBe('round')
+  expect((await ui.find({ key: 'box:messages' }))?.props.borderStyle).toBe('round')
   await ui.unmount()
 })
 
@@ -226,7 +227,7 @@ test('Esc 把焦点交回主输入框后全收起；再进面板也是收起的'
   await clock.advance(0)
   expect(await ui.find({ key: 'detail:ag1:answer' })).toBeUndefined()
   expect(await ui.find({ key: 'agent:1' }), '失焦后').toBeUndefined()
-  expect((await ui.find({ key: 'section:messages' }))?.props.borderStyle).toBe('round')
+  expect((await ui.find({ key: 'box:messages' }))?.props.borderStyle).toBe('round')
 
   await ui.redraw(pane(true).props)
   expect(await ui.find({ key: 'agent:1' }), '再进面板').toBeUndefined()

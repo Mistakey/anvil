@@ -5,7 +5,7 @@ import type { Elements, ModelCompleteRequest, ModelCompleteResult, PromptFilled,
 
 import type { TranslateBox } from '../types'
 import type { Subcommand } from './command'
-import { TITLE_IN_BORDER } from './panel'
+import { TITLE_IN_BORDER, bordered } from './panel'
 import { COLOR, ICON } from './style'
 import { cells, wrap } from './text'
 
@@ -112,9 +112,9 @@ export function countWords(text: string): number {
   return text.split(/\s+/).filter(word => /[\p{L}\p{N}]/u.test(word)).length
 }
 
-/** 追加到主输入框末尾的文字：草稿不空、末尾又没有空白时，先隔一个空格 */
+/** 追加到主输入框末尾的文字：草稿不空、末尾又不是换行时，先补一个换行，让译文自己起一行 */
 export function appendText(draft: string, translation: string): string {
-  return draft === '' || /\s$/.test(draft) ? translation : ` ${translation}`
+  return draft === '' || draft.endsWith('\n') ? translation : `\n${translation}`
 }
 
 /** 写入被拒的原因 */
@@ -201,15 +201,9 @@ export function drawTranslateBox(els: Els, view: BandView): RenderElement {
       {TITLE_IN_BORDER ? ` ${TITLE} ` : TITLE}
     </Text>
   )
-  return (
-    <Box key="translate" flexDirection="column" borderStyle="round" borderColor={border(view.box)} paddingX={1} width={columns} flexShrink={0}>
-      {TITLE_IN_BORDER ? (
-        <Box key="title:translate" position="absolute" top={-1} left={1}>
-          {head}
-        </Box>
-      ) : (
-        head
-      )}
+  const box = (
+    <Box key="box:translate" flexDirection="column" borderStyle="round" borderColor={border(view.box)} paddingX={1} width={columns} flexShrink={0}>
+      {TITLE_IN_BORDER ? null : head}
       <Box key="row:translate" columnGap={2} width={inner}>
         <Box flexGrow={1} flexShrink={1} minWidth={0}>
           <Input
@@ -226,4 +220,5 @@ export function drawTranslateBox(els: Els, view: BandView): RenderElement {
       {beside ? null : line}
     </Box>
   )
+  return bordered(els, { key: 'translate', columns, box, head: TITLE_IN_BORDER ? head : null })
 }

@@ -101,15 +101,26 @@ test('按 Enter：订阅模型（默认 Haiku）翻译，以 append 追加到主
   expect(state.get('anvil.translate')).toMatchObject({ phase: 'done', text: CHINESE, words: 4 })
 })
 
-test('主输入框里已有文字时，译文隔一个空格接在后面', async ($, on) => {
-  const { fillModes, box } = engine(on, { box: { text: 'Please review.' } })
+test('主输入框里已有文字、末尾不是换行时，译文另起一行', async ($, on) => {
+  const { fillModes, box } = engine(on, { box: { text: 'Please review. ' } })
   await $.session.start(SESSION)
   const ui = await band($)
 
   await ui.input({ key: (await field(ui)).key ?? '', text: CHINESE })
 
-  expect(fillModes).toEqual([{ text: ` ${ENGLISH}`, mode: 'append' }])
-  expect(box.text).toBe(`Please review. ${ENGLISH}`)
+  expect(fillModes).toEqual([{ text: `\n${ENGLISH}`, mode: 'append' }])
+  expect(box.text).toBe(`Please review. \n${ENGLISH}`)
+})
+
+test('主输入框末尾已是换行时，译文直接接上', async ($, on) => {
+  const { fillModes, box } = engine(on, { box: { text: 'Please review.\n' } })
+  await $.session.start(SESSION)
+  const ui = await band($)
+
+  await ui.input({ key: (await field(ui)).key ?? '', text: CHINESE })
+
+  expect(fillModes).toEqual([{ text: ENGLISH, mode: 'append' }])
+  expect(box.text).toBe(`Please review.\n${ENGLISH}`)
 })
 
 // 焦点交给新的输入框（$.ui.focus）在 plugin test 里没有实现，只能在交互会话里验证
@@ -335,7 +346,7 @@ test('各种宽度下框占满 band、不超宽；状态放不进输入框右侧
     await ui.input({ key: (await field(ui)).key ?? '', text: CHINESE })
     const frame = await ui.find({ key: 'translate' })
     expect(frame?.props.width).toBe(columns)
-    expect(frame?.props.borderStyle).toBe('round')
+    expect((await ui.find({ key: 'box:translate' }))?.props.borderStyle).toBe('round')
     const status = await ui.find({ key: 'status:translate' })
     // 挪到下面时折成几行，原因不截断
     expect(status?.text.replace(/\s/g, '')).toContain('模型出错（500server_error），按Enter重试')
@@ -352,10 +363,11 @@ test('词数只数英文单词，不数标点', () => {
   expect(countWords('')).toBe(0)
 })
 
-test('追加的分隔：草稿为空或以空白结尾时不加空格', () => {
+test('追加的分隔：草稿为空或以换行结尾时不补，否则先补一个换行', () => {
   expect(appendText('', 'Hi.')).toBe('Hi.')
   expect(appendText('Done.\n', 'Hi.')).toBe('Hi.')
-  expect(appendText('Done.', 'Hi.')).toBe(' Hi.')
+  expect(appendText('Done.', 'Hi.')).toBe('\nHi.')
+  expect(appendText('Done. ', 'Hi.')).toBe('\nHi.')
 })
 
 test('接口地址填 base URL 或完整地址都行', () => {
