@@ -97,11 +97,17 @@ const meter = (percent: number, text: string, inner: number): Piece =>
 
 // ---------------------------------------------------------------- 预测的速度（spec D8）
 
-/** 一个读数：时刻（`$.clock.now()` 的毫秒）和当时的百分比 */
-export type Sample = { at: number; percent: number }
+/**
+ * 一个读数：时刻（`$.clock.now()` 的毫秒）和当时的百分比；7d 再记 total，跨重置连续的累计用量
+ * （窗口起点的 base + 百分比）
+ */
+export type Sample = { at: number; percent: number; total?: number }
 
-/** 一个窗口的读数存档（`$.store`，本机会话共用）：属于哪个窗口（重置时刻），读数按时刻排 */
-export type History = { resetsAt: number; samples: Sample[] }
+/**
+ * 读数存档（`$.store`，本机会话共用）：当前窗口（重置时刻），读数按时刻排。5h 只存当前窗口的；
+ * 7d 跨重置留着，base 是当前窗口起点的累计用量
+ */
+export type History = { resetsAt: number; base?: number; samples: Sample[] }
 
 /** 各窗口的存档 */
 export type Histories = Partial<Record<'five_hour' | 'seven_day', History>>
@@ -109,11 +115,17 @@ export type Histories = Partial<Record<'five_hour' | 'seven_day', History>>
 /** 存档按窗口分键 */
 export const HISTORY_KEYS = { five_hour: 'usageHistory.five_hour', seven_day: 'usageHistory.seven_day' } as const
 
-/** 速度看最近多久（lookbackMs）；存档分桶（bucketMs），一个桶只留最后一个读数 */
+/**
+ * 速度看最近多久（lookbackMs）；存档留多久（keepMs，再加那之前最近的一个）；分桶（bucketMs），一个桶只留最后一个读数。
+ * 7d 照上周同一时段重演要 7 天前的读数，存档留 8 天；lookbackMs 是存档不足 7 天时 24 小时重放用的
+ */
 export const TREND = {
-  five_hour: { lookbackMs: 3_600_000, bucketMs: 60_000 },
-  seven_day: { lookbackMs: DAY, bucketMs: 5 * 60_000 },
+  five_hour: { lookbackMs: 3_600_000, keepMs: 3_600_000, bucketMs: 60_000 },
+  seven_day: { lookbackMs: DAY, keepMs: 8 * DAY, bucketMs: 5 * 60_000 },
 } as const
+
+/** 7d 照上周同一时段重演的周期 */
+const WEEK = 7 * DAY
 
 /** 重置时刻晚了这么多才算新窗口：resetsAt 有小抖动时不反复清空存档 */
 export const NEW_WINDOW_MS = 10 * 60_000
@@ -123,34 +135,57 @@ export function sameWindow(history: History, resetsAt: number): boolean {
   return resetsAt - history.resetsAt < NEW_WINDOW_MS
 }
 
-/**
- * 记下一个读数：新窗口（sameWindow）就从空存档起，同一窗口沿用存档里记的重置时刻；同一桶只留最后一个；
- * 只留时刻晚于 at − lookback 的读数，加上 at − lookback 之前最近的一个，和本窗口第一个 ≥ 100% 的读数（用满的时刻）
- */
-export function recordSample(history: History | null, kind: keyof typeof TREND, resetsAt: number, sample: Sample): History {
-  const { lookbackMs, bucketMs } = TREND[kind]
-  const bucket = (at: number) => Math.floor(at / bucketMs)
-  const current = history !== null && sameWindow(history, resetsAt) ? history : { resetsAt, samples: [] }
-  const kept = current.samples
-  const samples = [...kept.filter(one => bucket(one.at) !== bucket(sample.at)), sample].sort((a, b) => a.at - b.at)
-  const since = sample.at - lookbackMs
-  const before = samples.filter(one => one.at <= since).at(-1)
-  const pruned = [...(before ? [before] : []), ...samples.filter(one => one.at > since)]
-  const full = firstFull([...kept, sample].sort((a, b) => a.at - b.at))
-  const rest = full === undefined || pruned.includes(full) ? pruned : [full, ...pruned].sort((a, b) => a.at - b.at)
-  return { resetsAt: current.resetsAt, samples: rest }
+/** 7d 的读数补上 total：旧存档没记的按它自己的 base 补 */
+const withTotals = (history: History): Sample[] =>
+  history.samples.map(one => (one.total === undefined ? { ...one, total: (history.base ?? 0) + one.percent } : one))
+
+/** 窗口 resetsAt 起点的累计用量：同一窗口沿用存档的 base；新窗口在 base 上加旧窗口最后一个读数的百分比 */
+function windowBase(history: History | null, resetsAt: number): number {
+  if (history === null) return 0
+  const base = history.base ?? 0
+  return sameWindow(history, resetsAt) ? base : base + (history.samples.at(-1)?.percent ?? 0)
 }
 
-/** 第一个 ≥ 100% 的读数 */
-const firstFull = (samples: readonly Sample[]) => samples.find(one => one.percent >= 100)
+/**
+ * 记下一个读数：同一窗口沿用存档里记的重置时刻；同一桶只留最后一个。5h 新窗口从空存档起；7d 不清空，
+ * 读数记上 total（base + 百分比），新窗口的 base 接上旧窗口。只留时刻晚于 at − keep 的读数，加上 at − keep 之前
+ * 最近的一个，和本窗口第一个 ≥ 100% 的读数（用满的时刻）
+ */
+export function recordSample(history: History | null, kind: keyof typeof TREND, resetsAt: number, sample: Sample): History {
+  const { keepMs, bucketMs } = TREND[kind]
+  const bucket = (at: number) => Math.floor(at / bucketMs)
+  const same = history !== null && sameWindow(history, resetsAt)
+  const seven = kind === 'seven_day'
+  const base = seven ? windowBase(history, resetsAt) : 0
+  const kept = history === null ? [] : seven ? withTotals(history) : same ? history.samples : []
+  const entry = seven ? { ...sample, total: base + sample.percent } : sample
+  const samples = [...kept.filter(one => bucket(one.at) !== bucket(entry.at)), entry].sort((a, b) => a.at - b.at)
+  const since = entry.at - keepMs
+  const before = samples.filter(one => one.at <= since).at(-1)
+  const pruned = [...(before ? [before] : []), ...samples.filter(one => one.at > since)]
+  const full = firstFull([...kept, entry].sort((a, b) => a.at - b.at), base)
+  const rest = full === undefined || pruned.includes(full) ? pruned : [full, ...pruned].sort((a, b) => a.at - b.at)
+  return { resetsAt: same && history !== null ? history.resetsAt : resetsAt, ...(seven ? { base } : {}), samples: rest }
+}
+
+/** 本窗口第一个 ≥ 100% 的读数：7d 按 total − base 算本窗口的百分比，上个窗口的读数不算 */
+const firstFull = (samples: readonly Sample[], base: number) => samples.find(one => (one.total ?? one.percent) - base >= 100)
+
+/** 面板现算预测用的读数：5h 只用本窗口的存档；7d 全部（补上 total），和本窗口起点的累计用量 */
+function forecastSamples(kind: keyof typeof TREND, history: History | undefined, resetsAt: number): { samples: Sample[]; base: number } {
+  if (history === undefined) return { samples: [], base: 0 }
+  if (kind === 'seven_day') return { samples: withTotals(history), base: windowBase(history, resetsAt) }
+  return { samples: sameWindow(history, resetsAt) ? history.samples : [], base: 0 }
+}
 
 /** `$.store` 里读回来的存档；不是存档的样子就当没有 */
 export function parseHistory(value: unknown): History | null {
   if (value === null || typeof value !== 'object') return null
-  const { resetsAt, samples } = value as { resetsAt?: unknown; samples?: unknown }
-  if (typeof resetsAt !== 'number' || !Array.isArray(samples)) return null
-  const valid = samples.every(one => typeof one?.at === 'number' && typeof one?.percent === 'number')
-  return valid ? { resetsAt, samples: samples as Sample[] } : null
+  const { resetsAt, base, samples } = value as { resetsAt?: unknown; base?: unknown; samples?: unknown }
+  if (typeof resetsAt !== 'number' || !Array.isArray(samples) || (base !== undefined && typeof base !== 'number')) return null
+  const valid = samples.every(one => typeof one?.at === 'number' && typeof one?.percent === 'number' && (one.total === undefined || typeof one.total === 'number'))
+  if (!valid) return null
+  return base === undefined ? { resetsAt, samples: samples as Sample[] } : { resetsAt, base, samples: samples as Sample[] }
 }
 
 /**
@@ -167,18 +202,52 @@ export function burnRate(percent: number, resetsAt: number, windowMs: number, no
 }
 
 /**
- * 用完时刻；最近一段没用（速度 ≤ 0）是 null。5h 按 burnRate 匀速外推。7d 重放：接下来每天照最近 24 小时
- * 逐时段的用法重演——base 是 now − L 时的用量（窗口开始前当作 0），一天用 U = 现在 − base；还差的 need 先按整天
- * 数 k = ⌊need ÷ U⌋ 走，余下 r 在最近 24 小时里找第一个用到 base + r 的时刻，平移到第 k + 1 天。
- * 7d 窗口已超过 L、存档里又没有 now − L 之前的读数时，退回 burnRate 的窗口平均匀速
+ * 用完时刻；最近一段没用是 null。5h 按 burnRate 匀速外推。
+ * 7d 照上周同一时段重演：C(x) 是 x 之前最近读数的 total，一周用 U = C(now) − C(now − 7 天)；还差的 need 先按整周数
+ * k = ⌊need ÷ U⌋ 走，余下 r 在最近 7 天里找第一个用到 C(now − 7 天) + r 的时刻，平移到第 k + 1 周。base 是本窗口起点
+ * 的累计用量，C(now) = base + 现在百分比；读数没有 total 的按 base + 百分比算。
+ * 存档没有 7 天前的读数时退回 24 小时重放（replayDay），只看本窗口的读数
  */
-export function emptyAt(kind: keyof typeof TREND, percent: number, resetsAt: number, now: number, samples: readonly Sample[]): number | null {
+export function emptyAt(kind: keyof typeof TREND, percent: number, resetsAt: number, now: number, samples: readonly Sample[], base: number = 0): number | null {
   const windowMs = WINDOWS[kind]?.ms ?? 0
-  const { lookbackMs } = TREND[kind]
+  if (kind === 'seven_day') {
+    const totals = samples.map(one => ({ at: one.at, total: one.total ?? base + one.percent }))
+    const weekAgo = now - WEEK
+    const start = totals.filter(one => one.at <= weekAgo).at(-1)
+    if (start !== undefined) {
+      const current = base + percent
+      const used = current - start.total
+      if (used <= 0) return null
+      const need = 100 - percent
+      const k = Math.floor(need / used)
+      const rest = need - k * used
+      if (rest <= 0) return now + k * WEEK
+      const recent = [...totals.filter(one => one.at > weekAgo && one.at < now), { at: now, total: current }]
+      const ts = recent.find(one => one.total - start.total >= rest)?.at ?? now
+      return now + k * WEEK + (ts - weekAgo)
+    }
+    const windowStart = resetsAt - windowMs
+    const inWindow = totals.filter(one => one.at >= windowStart).map(one => ({ at: one.at, percent: one.total - base }))
+    return replayDay(percent, resetsAt, now, inWindow)
+  }
+  const rate = burnRate(percent, resetsAt, windowMs, now, TREND[kind].lookbackMs, samples)
+  if (rate.used <= 0 || rate.span <= 0) return null
+  return now + ((100 - percent) * rate.span) / rate.used
+}
+
+/**
+ * 7d 存档不足 7 天时的 24 小时重放：接下来每天照最近 24 小时逐时段的用法重演——base 是 now − L 时的用量
+ * （窗口开始前当作 0），一天用 U = 现在 − base；还差的 need 先按整天数 k = ⌊need ÷ U⌋ 走，余下 r 在最近 24 小时里
+ * 找第一个用到 base + r 的时刻，平移到第 k + 1 天。窗口已超过 L、存档里又没有 now − L 之前的读数时，
+ * 退回 burnRate 的窗口平均匀速。samples 是本窗口的读数
+ */
+function replayDay(percent: number, resetsAt: number, now: number, samples: readonly Sample[]): number | null {
+  const windowMs = WINDOWS.seven_day?.ms ?? 0
+  const { lookbackMs } = TREND.seven_day
   const since = now - lookbackMs
   const before = samples.filter(one => one.at <= since).at(-1)
   const outsideWindow = since < resetsAt - windowMs
-  if (kind === 'seven_day' && (outsideWindow || before !== undefined)) {
+  if (outsideWindow || before !== undefined) {
     const base = outsideWindow || before === undefined ? 0 : before.percent
     const day = percent - base
     if (day <= 0) return null
@@ -219,12 +288,11 @@ function limitRow(kind: 'five_hour' | 'seven_day', limits: readonly RateLimit[],
     return { key: kind, label, value: [meter(0, '0%', inner)], detail: [piece([minor('发送消息后开始计时')])] }
   }
   const percent = limit.percentUsed
-  const history = histories[kind]
-  const samples = history !== undefined && sameWindow(history, resetsAt) ? history.samples : []
-  const empty = emptyAt(kind, percent, resetsAt, now, samples)
+  const { samples, base } = forecastSamples(kind, histories[kind], resetsAt)
+  const empty = emptyAt(kind, percent, resetsAt, now, samples, base)
   const detail: Piece[] = [
     piece([minor(padEnd(`${ICON.reset} ${formatWhen(resetsAt, now)}`, RESET_WIDTH))]),
-    piece([forecast(percent, resetsAt, empty, now, firstFull(samples)?.at)], minor(' '.repeat(GRID.gap))),
+    piece([forecast(percent, resetsAt, empty, now, firstFull(samples, base)?.at)], minor(' '.repeat(GRID.gap))),
   ]
   return { key: kind, label, value: [meter(percent, `${Math.round(percent)}%`, inner)], detail }
 }
