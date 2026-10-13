@@ -10,7 +10,7 @@ import type { ApiContentBlock, Elements, RenderElement, SessionAppendInput, Sess
 import type { MyMessage, MyMessages } from '../types'
 import type { ListBody, ListItem } from './panel'
 import { COLOR } from './style'
-import { fit, padStart } from './text'
+import { padStart, wrap } from './text'
 
 export const NO_MESSAGES: MyMessages = { items: [], dropped: 0, settled: 0 }
 
@@ -72,31 +72,39 @@ export function reconcile(list: MyMessages, texts: readonly string[]): MyMessage
 
 type Els = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
 
-/** 一行的列宽（设计稿 .ms）：序号 3 | 内容，列间空 1 格 */
-const COLUMN = { seq: 3, gap: 1 } as const
+/** 一条的列宽：序号 3 格右对齐 | 内容，列间空 1 格；内容最多 2 行 */
+const COLUMN = { seq: 3, gap: 1, lines: 2 } as const
 
 /** 右上角："31 条" */
 export const messageCount = (list: MyMessages) => [{ text: `${list.items.length} 条` }]
 
-/** 一条消息的那一行：整行是一个 Button，焦点移上去反白，Enter 让对话滚到这条消息 */
-function messageRow(els: Els, message: MyMessage, seq: number, inner: number, onPress: () => void): RenderElement {
+/** 一条消息折成的行：最多两行，放不下的截断、末尾 `…` */
+const messageLines = (text: string, inner: number) => wrap(text, Math.max(1, inner - COLUMN.seq - COLUMN.gap), COLUMN.lines)
+
+/**
+ * 一条消息：整条是一个 Button，焦点移上去反白，Enter 让对话滚到这条消息。序号暗色、右对齐成一列；
+ * 第二行和正文对齐（悬挂缩进）。Button 里的字是连着排的，换行后从行首起，缩进只能自己补空格。
+ */
+function messageRow(els: Els, message: MyMessage, seq: number, lines: string[], inner: number, onPress: () => void): RenderElement {
   const { Box, Button, Text } = els
-  const text = fit(message.text.replace(/\s+/g, ' ').trim(), Math.max(1, inner - COLUMN.seq - COLUMN.gap))
+  const indent = ' '.repeat(COLUMN.seq + COLUMN.gap)
   return (
-    <Box key={`row:message:${message.id}`} width={inner} flexShrink={0}>
+    <Box key={`row:message:${message.id}`} width={inner} height={lines.length} flexShrink={0}>
       <Button key={`message:${message.id}`} label={`第 ${seq} 条消息`} plain onPress={onPress}>
-        <Text bold>{`${padStart(String(seq), COLUMN.seq)} `}</Text>
-        <Text color={COLOR.text}>{text}</Text>
+        <Text color={COLOR.label}>{`${padStart(String(seq), COLUMN.seq)} `}</Text>
+        <Text color={COLOR.text}>{lines.join(`\n${indent}`)}</Text>
       </Button>
     </Box>
   )
 }
 
-/** 交给面板的我的消息列表：占满剩余高度，放不下时顶部写更早的条数 */
+/** 交给面板的我的消息列表：占满剩余高度，放不下时顶部写更早的条数；条与条之间不空行 */
 export function messageList(els: Els, list: MyMessages, view: { inner: number; onPress: (id: string) => void }): ListBody {
-  const items: ListItem[] = list.items.map((message, index) => ({
-    key: message.id,
-    rows: [messageRow(els, message, list.dropped + index + 1, view.inner, () => view.onPress(message.id))],
-  }))
+  const items: ListItem[] = list.items.map((message, index) => {
+    const lines = messageLines(message.text, view.inner)
+    const shown = lines.length > 0 ? lines : ['']
+    const row = messageRow(els, message, list.dropped + index + 1, shown, view.inner, () => view.onPress(message.id))
+    return { key: message.id, rows: [row], height: shown.length }
+  })
   return { status: messageCount(list), unit: '条', lead: COLUMN.seq, items, limit: 'fill', empty: '本会话还没有发过消息' }
 }

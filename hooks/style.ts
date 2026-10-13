@@ -13,6 +13,8 @@ export const COLOR = {
   faint: '#5b5f67',
   /** 提示文字、身份栏的图标；翻译框有内容时的边框 */
   dim: '#8c939f',
+  /** 用量框、缓存框的名称列和次要值（上一条、↻ 重置时刻），我的消息的序号；取自用户 statusline 的次要标签 */
+  label: '#6b7280',
   /** 进度条的底 */
   track: '#3a3f48',
   // 状态色：进度条四档，也用于命中率等
@@ -58,10 +60,10 @@ export const ICON = {
 } as const
 
 /**
- * 用量框和缓存框共用的两列：名称 8 格 | 值，列间空 1 格；一件事一行。
- * 进度条定宽 15 格：约 51 列停靠时（值那一列 38 格），7d 带星期的重置时刻也排得下。
+ * 用量框和缓存框共用的两列：名称 6 格 | 值，列间空 2 格；一件事一行。
+ * 进度条定宽 15 格：约 51 列停靠时（值那一列 39 格），7d 带星期的重置时刻也排得下。
  */
-export const GRID = { label: 8, gap: 1, bar: 15 } as const
+export const GRID = { label: 6, gap: 2, bar: 15 } as const
 
 /** 值那一列的宽度；折下去的行也从这一列起 */
 export function valueWidth(inner: number): number {
@@ -69,10 +71,11 @@ export function valueWidth(inner: number): number {
 }
 
 /**
- * 数值的定宽字段（右对齐）：数字变长变短时，同一行后面的字不挪位置。
- * 百分比到 100%，金额到 $12.34，tokens 到 152k、1.2M，上下文的 "(100%)"。
+ * 数值的定宽字段：数字变长变短时，同一行后面的字不挪位置。值那一列开头的数值左对齐、补空格到定宽，
+ * 进度条后的百分比右对齐；一行末尾的不补。
+ * 百分比到 100%，金额到 $12.34，tokens 到 152k、1.2M，次数到 "99 次"。
  */
-export const FIELD = { percent: 4, usd: 6, tokens: 4, ratio: 6 } as const
+export const FIELD = { percent: 4, usd: 6, tokens: 4, count: 5 } as const
 
 /** 进度条四档：低于 60% 绿，60–80% 黄，80–90% 橙，90% 以上红 */
 export function levelColor(percent: number): string {
@@ -93,6 +96,9 @@ export function bar(percent: number, width: number = GRID.bar): Segment[] {
 }
 
 export const SEPARATOR: Segment = { text: ' · ', color: COLOR.faint }
+
+/** 用量框、缓存框一行里两块之间空两格，不用分隔符 */
+export const GAP: Segment = { text: '  ' }
 
 /** 一行里不拆开的一块；join 是它和前一块排在同一行时夹在中间的字（如 " · "），折到下一行行首时不画 */
 export type Piece = { segments: Segment[]; join?: Segment }

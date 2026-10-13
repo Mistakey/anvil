@@ -1,8 +1,8 @@
-// 用量框的纯逻辑（spec D8）：5h、7d、上下文、花费四行。读数的收集在 register.ts。
+// 用量框的纯逻辑（spec D8、D10）：5h、7d、上下文、花费四行。读数的收集在 register.ts。
 
 import type { RateLimit, Usage } from '../types'
-import { padStart } from './text'
-import { COLOR, FIELD, SEPARATOR, bar, flow, levelColor, piece, valueWidth } from './style'
+import { cells, padEnd, padStart } from './text'
+import { COLOR, FIELD, GAP, bar, flow, levelColor, piece, valueWidth } from './style'
 import type { Piece, Segment } from './style'
 
 export const EMPTY_USAGE: Usage = {
@@ -111,9 +111,14 @@ const WINDOWS: Record<string, { label: string; ms: number }> = {
 }
 
 const muted = (text: string): Segment => ({ text, color: COLOR.muted })
+/** 次要的：上一条、↻ 重置时刻、压缩次数 */
+const minor = (text: string): Segment => ({ text, color: COLOR.label })
 
-/** 定宽的数值字段：右对齐补到 width 格 */
+/** 定宽的数值字段：右对齐补到 width 格（进度条后的百分比） */
 export const field = (text: string, width: number) => padStart(text, width)
+
+/** 值那一列开头的定宽字段：左对齐，右侧补空格到 width 格 */
+export const lead = (text: string, width: number) => padEnd(text, width)
 
 /** 进度条加定宽的百分比，同色 */
 const meter = (percent: number, text: string): Piece => piece([...bar(percent), { text: ` ${field(text, FIELD.percent)}`, color: levelColor(percent) }])
@@ -129,51 +134,50 @@ export function exhaustAt(percent: number, resetsAt: number, windowMs: number, n
   return at < resetsAt ? at : null
 }
 
-/** 5h、7d：进度条 百分比 · 重置时刻（· 预计用尽） */
+/** 5h、7d：进度条 百分比  ↻ 重置时刻（  预计用尽）；↻ 沿用用户 statusline 的写法 */
 function limitRow(kind: 'five_hour' | 'seven_day', limits: readonly RateLimit[], now: number): GridSpec {
   const { label, ms } = WINDOWS[kind] ?? { label: kind, ms: 0 }
   const limit = limits.find(one => one.kind === kind)
   const resetsAt = parseResetsAt(limit?.resetsAt)
   // 没有读数，或窗口已经过了重置时刻：下一条消息才开始新窗口
   if (limit === undefined || resetsAt === null || resetsAt <= now) {
-    return { key: kind, label, value: [meter(0, '0%'), piece([muted('发送消息后开始计时')], SEPARATOR)] }
+    return { key: kind, label, value: [meter(0, '0%'), piece([minor('发送消息后开始计时')], GAP)] }
   }
   const percent = limit.percentUsed
-  const value: Piece[] = [meter(percent, `${Math.round(percent)}%`), piece([muted(`${formatWhen(resetsAt, now)} 重置`)], SEPARATOR)]
+  const value: Piece[] = [meter(percent, `${Math.round(percent)}%`), piece([minor(`↻ ${formatWhen(resetsAt, now)}`)], GAP)]
   if (kind === 'five_hour') {
     const at = exhaustAt(percent, resetsAt, ms, now)
-    if (at !== null) value.push(piece([{ text: `预计 ${formatWhen(at, now)} 用尽`, color: COLOR.high }], SEPARATOR))
+    if (at !== null) value.push(piece([{ text: `预计 ${formatWhen(at, now)} 用尽`, color: COLOR.high }], GAP))
   }
   return { key: kind, label, value }
 }
 
-/** 上下文：已用 / 上限 (百分比) · 已压缩 N 次 */
+/** 上下文：已用 / 上限  百分比  压缩 N 次；已用补到定宽（同一个上限下），百分比右对齐 */
 function contextRow(usage: Usage): GridSpec {
   const context = usage.context
-  const compactions = piece([muted(`已压缩 ${usage.compactions} 次`)], SEPARATOR)
+  const compactions = piece([minor(`压缩 ${usage.compactions} 次`)], GAP)
   if (context === null || context.percent === undefined || context.tokens === undefined) {
     const window = context === null ? [] : [muted(` / ${formatTokens(context.window)}`)]
-    return { key: 'context', label: '上下文', value: [piece([{ text: field('—', FIELD.tokens) }, ...window]), compactions] }
+    return { key: 'context', label: '上下文', value: [piece([{ text: '—' }, ...window]), compactions] }
   }
   const percent = context.percent
+  const tokens = formatTokens(context.tokens)
+  const window = ` / ${formatTokens(context.window)}`
   const used = [
-    { text: field(formatTokens(context.tokens), FIELD.tokens) },
-    muted(` / ${formatTokens(context.window)}`),
-    { text: ` ${field(`(${Math.round(percent)}%)`, FIELD.ratio)}`, color: levelColor(percent) },
+    { text: tokens },
+    muted(lead(window, cells(window) + FIELD.tokens - cells(tokens))),
+    { text: ` ${field(`${Math.round(percent)}%`, FIELD.percent)}`, color: levelColor(percent) },
   ]
   return { key: 'context', label: '上下文', value: [piece(used), compactions] }
 }
 
-/** 花费：本会话 $ · 上一条 $ */
+/** 花费：本会话 $  上一条 $；本会话不写"本会话"，上一条暗色 */
 function costRow(usage: Usage): GridSpec {
   const usd = (value: number | null) => (value === null ? '—' : formatUsd(value))
   return {
     key: 'cost',
     label: '花费',
-    value: [
-      piece([muted('本会话'), { text: ` ${field(usd(usage.costUsd), FIELD.usd)}` }]),
-      piece([muted('上一条'), { text: ` ${usd(usage.lastMessageCostUsd)}` }], SEPARATOR),
-    ],
+    value: [piece([{ text: lead(usd(usage.costUsd), FIELD.usd) }]), piece([minor(`上一条 ${usd(usage.lastMessageCostUsd)}`)], GAP)],
   }
 }
 

@@ -209,7 +209,7 @@ async function addMessages($: Engine, count: number) {
   for (let n = 0; n < count; n += 1) await $.session.append(appended(`第 ${n + 1} 条`))
 }
 
-type Child = { props?: { key?: string } }
+type Child = { props?: { key?: string; height?: number } }
 const children = (node: FoundElement | undefined): Child[] =>
   (node?.children ?? []).filter((one): one is Child => typeof one === 'object' && one !== null)
 
@@ -219,10 +219,10 @@ async function order(ui: Mounted<'terminal', 'Pane'>) {
   return keys.filter(key => /^section:[a-z]+$/.test(key) || key.startsWith('identity:')).map(key => key.replace(/^section:/, ''))
 }
 
-/** 一个区块占的行数：框是框里的行加上下边框，收成一行的是 1，没画是 0 */
+/** 一个区块占的行数：框是框里的行（两行的消息占 2 行）加上下边框，收成一行的是 1，没画是 0 */
 async function heightOf(ui: Mounted<'terminal', 'Pane'>, id: string) {
   const box = await ui.find({ key: `box:${id}` })
-  if (box) return children(box).length + 2
+  if (box) return children(box).reduce((sum, one) => sum + (one.props?.height ?? 1), 0) + 2
   return (await ui.find({ key: `section:${id}` })) ? 1 : 0
 }
 
@@ -236,6 +236,31 @@ async function totalHeight(ui: Mounted<'terminal', 'Pane'>) {
 
 // 面板内宽：开着别的面板时约 50 列，请求的 70 列，拖宽后 90 列
 const PANEL_WIDTHS = [50, 70, 90]
+
+test('框宽按面板内宽：50、70、90 列下五个框和框里的每一行都不超出面板', async ($, on) => {
+  layoutEngine(on)
+  await $.session.start(SESSION)
+  await addAgents($, 2)
+  await addDenials($, 2)
+  await addMessages($, 3)
+  await $.session.append(appended('很长的一条消息，'.repeat(20)))
+  for (const columns of PANEL_WIDTHS) {
+    const ui = await $.ui.mount(sized(columns))
+    for (const one of await ui.findAll({ type: 'Box' })) {
+      const width = one.props.width
+      if (typeof width === 'number') expect(width <= columns, `${columns} 列 ${one.key}`).toBe(true)
+    }
+    for (const id of ['cache', 'usage', 'agents', 'denials', 'messages']) {
+      const box = await ui.find({ key: `box:${id}` })
+      expect(box?.props.width, `${columns} 列 ${id}`).toBe(columns)
+      for (const row of children(box)) {
+        const width = (row.props as { width?: unknown } | undefined)?.width
+        if (typeof width === 'number') expect(width <= columns - 4, `${columns} 列 ${row.props?.key}`).toBe(true)
+      }
+    }
+    await ui.unmount()
+  }
+})
 
 test('自上而下：缓存、用量、子 agent、自动模式拒绝、我的消息，身份栏在最底两行', async ($, on) => {
   layoutEngine(on)

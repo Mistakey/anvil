@@ -155,7 +155,7 @@ export function keepaliveStatus({ settings, override, context, loop }: StatusInp
   if (override === false) return { text: '已关闭（本会话）', color: COLOR.muted }
   if (loop.stopped) return { text: `已停止（${loop.stopped.reason}）`, color: loop.stopped.kind === 'limit' ? COLOR.muted : COLOR.danger }
   if (override === null && !settings.autoKeepalive) return { text: '未启用（自动开启已关闭）', color: COLOR.muted }
-  if (override === null && context < settings.threshold) return { text: `未启用（上下文低于 ${formatTokens(settings.threshold)}）`, color: COLOR.muted }
+  if (override === null && context < settings.threshold) return { text: `未启用（低于 ${formatTokens(settings.threshold)}）`, color: COLOR.muted }
   const mark = override ? '（本会话）' : ''
   return { text: `${loop.renewing ? '进行中' : '已启用'}${mark}`, color: COLOR.ok }
 }
