@@ -2,7 +2,7 @@
 
 import type { RateLimit, Usage } from '../types'
 import { cells, padEnd, padStart } from './text'
-import { COLOR, FIELD, GRID, bar, barWidth, flow, levelColor, piece, valueWidth } from './style'
+import { COLOR, FIELD, GRID, ICON, bar, barWidth, flow, levelColor, piece, valueWidth } from './style'
 import type { Piece, Segment } from './style'
 
 export const EMPTY_USAGE: Usage = { context: null, rateLimits: [], costUsd: null }
@@ -41,11 +41,11 @@ export function formatUsd(usd: number): string {
 const two = (n: number) => String(n).padStart(2, '0')
 const DAY = 86_400_000
 
-/** 本地时刻，一律绝对时刻：当天写 HH:MM，不是当天写 MM-DD HH:MM；不写星期、"明天" */
+/** 本地时刻，一律绝对时刻：当天写 HH:MM，不是当天写 HH:MM MM-DD（时间在前）；不写星期、"明天" */
 export function formatWhen(at: number, now: number): string {
   const date = new Date(at)
   const hhmm = `${two(date.getHours())}:${two(date.getMinutes())}`
-  return date.toDateString() === new Date(now).toDateString() ? hhmm : `${two(date.getMonth() + 1)}-${two(date.getDate())} ${hhmm}`
+  return date.toDateString() === new Date(now).toDateString() ? hhmm : `${hhmm} ${two(date.getMonth() + 1)}-${two(date.getDate())}`
 }
 
 /** 重置时刻：ISO 8601；也认 Unix 秒、毫秒（statusline 见过这几种） */
@@ -95,19 +95,25 @@ const minor = (text: string): Segment => ({ text, color: COLOR.label })
 const meter = (percent: number, text: string, inner: number): Piece =>
   piece([...bar(percent, barWidth(inner)), { text: ` ${padStart(text, FIELD.percent)}`, color: levelColor(percent) }])
 
-/** 按当前用量线性外推，到重置时用到百分之几（取整）；推不出速度时就是现在的用量。窗口刚开始也照常推算 */
+/** 按当前用量线性外推，到重置时用到百分之几；推不出速度时就是现在的用量。窗口刚开始也照常推算 */
 export function projectedPercent(percent: number, resetsAt: number, windowMs: number, now: number): number {
   const elapsed = now - (resetsAt - windowMs)
-  return Math.round(elapsed > 0 ? (percent * windowMs) / elapsed : percent)
+  return elapsed > 0 ? (percent * windowMs) / elapsed : percent
 }
 
-/** 第二行左列"↻ 重置时刻"的宽度：按最长的"↻ MM-DD HH:MM"留，5h、7d 的右列起点相同 */
-const RESET_WIDTH = cells('↻ 00-00 00:00')
+/** 第二行左列"󰑐 重置时刻"的宽度：按最长的"󰑐 00:00 00-00"留，5h、7d 的右列起点相同 */
+const RESET_WIDTH = cells(`${ICON.reset} 00:00 00-00`)
 
-/**
- * 5h、7d：进度条 百分比；第二行两列：暗色"↻ 重置时刻" | "预计 N%"（到重置时用到多少），
- * N ≥ 100 表示会提前用完，红字，否则暗色
- */
+/** 预测只用图标：到重置用不完绿色 󰁹；会用完红色"󰂃 用完时刻"（按当前速度到 100% 的时刻）；已用满红色 󰂎 */
+function forecast(percent: number, resetsAt: number, windowMs: number, now: number): Segment {
+  if (percent >= 100) return { text: ICON.batteryOut, color: COLOR.danger }
+  if (projectedPercent(percent, resetsAt, windowMs, now) < 100) return { text: ICON.battery, color: COLOR.ok }
+  const start = resetsAt - windowMs
+  const emptyAt = start + ((now - start) * 100) / percent
+  return { text: `${ICON.batteryAlert} ${formatWhen(emptyAt, now)}`, color: COLOR.danger }
+}
+
+/** 5h、7d：进度条 百分比；第二行两列：暗色"󰑐 重置时刻" | 预测图标 */
 function limitRow(kind: 'five_hour' | 'seven_day', limits: readonly RateLimit[], now: number, inner: number): GridSpec {
   const { label, ms } = WINDOWS[kind] ?? { label: kind, ms: 0 }
   const limit = limits.find(one => one.kind === kind)
@@ -117,10 +123,9 @@ function limitRow(kind: 'five_hour' | 'seven_day', limits: readonly RateLimit[],
     return { key: kind, label, value: [meter(0, '0%', inner)], detail: [piece([minor('发送消息后开始计时')])] }
   }
   const percent = limit.percentUsed
-  const projected = projectedPercent(percent, resetsAt, ms, now)
   const detail: Piece[] = [
-    piece([minor(padEnd(`↻ ${formatWhen(resetsAt, now)}`, RESET_WIDTH))]),
-    piece([{ text: `预计 ${projected}%`, color: projected >= 100 ? COLOR.danger : COLOR.label }], minor(' '.repeat(GRID.gap))),
+    piece([minor(padEnd(`${ICON.reset} ${formatWhen(resetsAt, now)}`, RESET_WIDTH))]),
+    piece([forecast(percent, resetsAt, ms, now)], minor(' '.repeat(GRID.gap))),
   ]
   return { key: kind, label, value: [meter(percent, `${Math.round(percent)}%`, inner)], detail }
 }

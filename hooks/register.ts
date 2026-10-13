@@ -49,7 +49,7 @@ import {
 import type { Loop } from './keepalive'
 import { CLOSED, isClosed, scrollList, toggleDetail, toggleList } from './list'
 import { NO_MESSAGES, addMessage, contentText, isMyMessage, messageList, reconcile, settleMessages, userTexts } from './messages'
-import { PANE, PANEL_SUBCOMMAND, drawPanel, gridRow, hidesPanel, innerWidth } from './panel'
+import { PANE, PANEL_SUBCOMMAND, drawPanel, gridRow, hidesPanel, innerWidth, spacedGridRows } from './panel'
 import { readSettings } from './settings'
 import {
   EMPTY_BOX,
@@ -564,7 +564,7 @@ async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderI
     columns: e.props.bodyColumns,
     rows: e.props.scroll.bodyRows,
     bodies: {
-      usage: { rows: grid(usageRows(current, now, inner)) },
+      usage: { rows: spacedGridRows(els, usageRows(current, now, inner), inner) },
       cache: { rows: grid(cacheRows(cached, keepalive, now, inner)) },
     },
     lists: {
