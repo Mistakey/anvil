@@ -1,7 +1,7 @@
 // 用量框的纯逻辑（spec D8、D10）：5h、7d、上下文、花费。读数的收集在 register.ts。
 
 import type { RateLimit, Usage } from '../types'
-import { padStart } from './text'
+import { cells, padEnd, padStart } from './text'
 import { COLOR, FIELD, GRID, bar, barWidth, flow, levelColor, piece, valueWidth } from './style'
 import type { Piece, Segment } from './style'
 
@@ -39,30 +39,13 @@ export function formatUsd(usd: number): string {
 }
 
 const two = (n: number) => String(n).padStart(2, '0')
-const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 const DAY = 86_400_000
 
-/** 本地时刻的时分，和它是今天、明天还是星期几（今天为 null） */
-function clockOf(at: number, now: number): { hhmm: string; day: string | null } {
+/** 本地时刻，一律绝对时刻：当天写 HH:MM，不是当天写 MM-DD HH:MM；不写星期、"明天" */
+export function formatWhen(at: number, now: number): string {
   const date = new Date(at)
   const hhmm = `${two(date.getHours())}:${two(date.getMinutes())}`
-  const today = new Date(now)
-  today.setHours(0, 0, 0, 0)
-  const days = Math.floor((at - today.getTime()) / DAY)
-  if (days <= 0) return { hhmm, day: null }
-  return { hhmm, day: days === 1 ? '明天' : (WEEKDAYS[date.getDay()] ?? '') }
-}
-
-/** 本地时刻：今天写 HH:MM，明天写"明天 HH:MM"，更远写"周四 HH:MM" */
-export function formatWhen(at: number, now: number): string {
-  const { hhmm, day } = clockOf(at, now)
-  return day === null ? hhmm : `${day} ${hhmm}`
-}
-
-/** 重置时刻：时间在前，"17:00 周一""01:30 明天"，今天只写 HH:MM（5h、7d 的 ↻ 上下对齐） */
-export function formatReset(at: number, now: number): string {
-  const { hhmm, day } = clockOf(at, now)
-  return day === null ? hhmm : `${hhmm} ${day}`
+  return date.toDateString() === new Date(now).toDateString() ? hhmm : `${two(date.getMonth() + 1)}-${two(date.getDate())} ${hhmm}`
 }
 
 /** 重置时刻：ISO 8601；也认 Unix 秒、毫秒（statusline 见过这几种） */
@@ -88,11 +71,15 @@ export type GridRow = { key: string; label: Segment[]; labelWidth: number; lines
 /** 排版前的一项：value 和名称同一行起，detail 另起一行；每块不拆开，放不下整块折到下一行 */
 export type GridSpec = { key: string; label: string | Segment[]; value: Piece[]; detail?: Piece[] }
 
-/** 按框内宽度 inner 排一项：值那一列放不下就整块折到下一行，不截断信息 */
-export function layoutRow(spec: GridSpec, inner: number, labelWidth: number = GRID.label): GridRow {
+/**
+ * 按框内宽度 inner 排一项：值那一列放不下就整块折到下一行，不截断信息。
+ * detailWidth：细节那几行的宽度，默认整个值那一列。
+ */
+export function layoutRow(spec: GridSpec, inner: number, labelWidth: number = GRID.label, detailWidth?: number): GridRow {
   const width = valueWidth(inner, labelWidth)
   const label = typeof spec.label === 'string' ? [{ text: spec.label, color: COLOR.label }] : spec.label
-  const detail = spec.detail ? flow(spec.detail, width, width) : []
+  const room = detailWidth ?? width
+  const detail = spec.detail ? flow(spec.detail, room, room) : []
   return { key: spec.key, label, labelWidth, lines: [...flow(spec.value, width, width), ...detail] }
 }
 
@@ -108,26 +95,18 @@ const minor = (text: string): Segment => ({ text, color: COLOR.label })
 const meter = (percent: number, text: string, inner: number): Piece =>
   piece([...bar(percent, barWidth(inner)), { text: ` ${padStart(text, FIELD.percent)}`, color: levelColor(percent) }])
 
-/**
- * 按当前用量线性外推，用尽时刻早于重置时就是"预计用尽"的时刻；否则 null。
- * 窗口开始 = 重置时刻 − 窗口长度；窗口刚开始也照常推算，不设等待期。
- */
-export function exhaustAt(percent: number, resetsAt: number, windowMs: number, now: number): number | null {
-  const elapsed = now - (resetsAt - windowMs)
-  if (percent <= 0 || elapsed <= 0 || percent >= 100) return null
-  const at = now + (elapsed * (100 - percent)) / percent
-  return at < resetsAt ? at : null
-}
-
-/** 按当前用量线性外推，到重置时用到百分之几（取整）；推不出速度时就是现在的用量 */
+/** 按当前用量线性外推，到重置时用到百分之几（取整）；推不出速度时就是现在的用量。窗口刚开始也照常推算 */
 export function projectedPercent(percent: number, resetsAt: number, windowMs: number, now: number): number {
   const elapsed = now - (resetsAt - windowMs)
   return Math.round(elapsed > 0 ? (percent * windowMs) / elapsed : percent)
 }
 
+/** 第二行左列"↻ 重置时刻"的宽度：按最长的"↻ MM-DD HH:MM"留，5h、7d 的右列起点相同 */
+const RESET_WIDTH = cells('↻ 00-00 00:00')
+
 /**
- * 5h、7d：进度条 百分比；第二行 ↻ 重置时刻，后接预计：会在重置前用尽是红字"· 预计 HH:MM 用尽"，否则暗色"· 预计用到 N%"；
- * 已用满是红字"· 已用尽"
+ * 5h、7d：进度条 百分比；第二行两列：暗色"↻ 重置时刻" | "预计 N%"（到重置时用到多少），
+ * N ≥ 100 表示会提前用完，红字，否则暗色
  */
 function limitRow(kind: 'five_hour' | 'seven_day', limits: readonly RateLimit[], now: number, inner: number): GridSpec {
   const { label, ms } = WINDOWS[kind] ?? { label: kind, ms: 0 }
@@ -138,16 +117,11 @@ function limitRow(kind: 'five_hour' | 'seven_day', limits: readonly RateLimit[],
     return { key: kind, label, value: [meter(0, '0%', inner)], detail: [piece([minor('发送消息后开始计时')])] }
   }
   const percent = limit.percentUsed
-  const detail: Piece[] = [piece([minor(`↻ ${formatReset(resetsAt, now)}`)])]
-  const at = exhaustAt(percent, resetsAt, ms, now)
-  const danger = (text: string) => piece([{ text, color: COLOR.danger }], { text: ' · ', color: COLOR.danger })
-  detail.push(
-    percent >= 100
-      ? danger('已用尽')
-      : at === null
-      ? piece([minor(`预计用到 ${projectedPercent(percent, resetsAt, ms, now)}%`)], minor(' · '))
-        : danger(`预计 ${formatWhen(at, now)} 用尽`),
-  )
+  const projected = projectedPercent(percent, resetsAt, ms, now)
+  const detail: Piece[] = [
+    piece([minor(padEnd(`↻ ${formatWhen(resetsAt, now)}`, RESET_WIDTH))]),
+    piece([{ text: `预计 ${projected}%`, color: projected >= 100 ? COLOR.danger : COLOR.label }], minor(' '.repeat(GRID.gap))),
+  ]
   return { key: kind, label, value: [meter(percent, `${Math.round(percent)}%`, inner)], detail }
 }
 
@@ -180,5 +154,6 @@ export function usageRows(usage: Usage, now: number, inner: number): GridRow[] {
     contextRow(usage, inner),
     costRow(usage),
   ]
-  return rows.map(row => layoutRow(row, inner))
+  // 第二行不超出百分比那一列的右边界
+  return rows.map(row => layoutRow(row, inner, GRID.label, barWidth(inner) + 1 + FIELD.percent))
 }
