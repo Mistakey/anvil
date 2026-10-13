@@ -113,6 +113,55 @@ export type PanelFold = {
   scrolled: number
 }
 
+/** git 停在一半的命令（spec D8）：rebase、am 带进度 */
+export type GitOperation = {
+  /** merge、rebase、am、cherry-pick、revert、bisect */
+  name: string
+  /** 停在第几步、共几步；只有 rebase、am 有 */
+  step?: number
+  total?: number
+}
+
+/** 身份栏第一行的 git 读数（spec D8），由 anvil 自己运行 git 取得 */
+export type GitView = {
+  /** 主仓库的目录名 */
+  repo: string
+  /** 在 linked worktree 中时，worktree 的目录名；否则 null */
+  worktree: string | null
+  /** 会话目录在仓库里的相对路径，如 `hooks`；在仓库根上为空串 */
+  sub: string
+  /** 分支名；分离 HEAD 时为 null，看 commit */
+  branch: string | null
+  /** 分离 HEAD 时的提交号（7 位）；还没有提交时为 null */
+  commit: string | null
+  /** 当前分支没有上游；分离 HEAD 和 rebase 中不判断，为 false */
+  noUpstream: boolean
+  ahead: number
+  behind: number
+  conflicts: number
+  staged: number
+  modified: number
+  untracked: number
+  stashes: number
+  /** 未提交改动的行数：工作区和暂存区相对 HEAD；取不到时为 null */
+  lines: { added: number; deleted: number } | null
+  operation: GitOperation | null
+}
+
+/** 身份栏（spec D8）：面板最底的两行 */
+export type Identity = {
+  /** 不在 git 里时取会话目录名 */
+  dir: string
+  /** 不在 git 里，或还没读到时为 null */
+  git: GitView | null
+  /** 主会话最近一次请求的模型 id；还没有请求时取会话的模型 */
+  model: string | null
+  /** 主会话最近一次请求的 effort；模型不支持或还没有请求时为 null */
+  effort: string | number | null
+  /** 主会话最近一次请求的输出速度：输出 token 数 ÷ 首字到结束的秒数 */
+  tokensPerSecond: number | null
+}
+
 /** 翻译框的四种显示状态（spec D5）：示例和按键提示、正在翻译、已追加 N 个词、失败原因 */
 export type TranslatePhase = 'idle' | 'working' | 'done' | 'failed'
 
@@ -156,6 +205,8 @@ declare module 'claude-code' {
       agents: SubAgent[]
       /** 面板的展开状态 */
       fold: PanelFold
+      /** 身份栏 */
+      identity: Identity
       /** 翻译框在本会话被隐藏：`/anvil translate hide` 后为 true，`show` 改回 false */
       translateHidden: boolean
       /** 翻译框的状态 */
