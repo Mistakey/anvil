@@ -12,8 +12,8 @@ import { COLOR } from './style'
 import { describeInput, redact } from './describe'
 import { cells, fit, padEnd, wrap } from './text'
 
-/** 收起时最多显示几条（设计稿：两行） */
-export const DENIAL_LIMIT = 2
+/** 收起时最多显示最近几条（spec D8：和子 agent 一样 3 条，框高固定） */
+export const DENIAL_LIMIT = 3
 
 /** 存多少条；更早的丢掉 */
 const KEEP = 200

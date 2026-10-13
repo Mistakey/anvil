@@ -5,8 +5,10 @@ import type { Engine, Mounted } from 'claude-code/testing'
 import { cacheRows, cacheStatus, hitColor } from '../hooks/cachebox'
 import { freshCache, view } from '../hooks/cache'
 import { IDLE_LIMIT_MS, PING_AFTER_MS, keepaliveStatus } from '../hooks/keepalive'
-import { COLOR } from '../hooks/style'
+import { COLOR, GRID, valueWidth } from '../hooks/style'
 import type { Segment } from '../hooks/style'
+import { cells } from '../hooks/text'
+import type { GridRow } from '../hooks/usage'
 import type { CacheView, Settings } from '../types'
 import { SESSION, WARM, anvil, drain, stepInput, turnInput, usage, world } from './world'
 import type { WorldOptions } from './world'
@@ -381,7 +383,7 @@ describe('恢复会话', () => {
       expect(b.rebuild).toEqual({ tokens: 200000, usd: 2 })
 
       const ui = await $.ui.mount(pane(70))
-      expect(flat(await ui.find({ key: 'row:cache-hit' }))).toBe('命中率上一条消息 —本会话 —')
+      expect(flat(await ui.find({ key: 'row:cache-hit' }))).toBe('命中率本会话    — · 上一条 —')
       expect(flat(await ui.find({ key: 'row:cache-rebuilt' }))).toBe('已重建本会话 0 次')
       await ui.unmount()
 
@@ -399,6 +401,8 @@ describe('恢复会话', () => {
 
 const SETTINGS: Settings = { threshold: 50000, autoKeepalive: true, guard: true, translateBackend: 'haiku', translateApiUrl: '', translateApiModel: '' }
 const text = (segments: readonly Segment[]) => segments.map(segment => segment.text).join('')
+/** 一行的值（不折行时就是整个值） */
+const lineOf = (row: GridRow | undefined) => text(row?.lines[0] ?? [])
 
 /** 一份缓存框读数：上下文 152k，命中率 99% · 94%，冷写 1 次 */
 function sample(over: Partial<CacheView> = {}): CacheView {
@@ -427,62 +431,75 @@ describe('缓存框', () => {
     expect(cacheStatus(sample({ compacted: true }), at(13, 22, 50))).toEqual([])
   })
 
-  test('命中率：低于 80% 变黄，低于 50% 变红；没有读数写 —', () => {
+  test('命中率：本会话在前、上一条在后；低于 80% 变黄，低于 50% 变红；没有读数写 —', () => {
     expect([1, 0.8, 0.79, 0.5, 0.49, 0].map(hitColor)).toEqual([undefined, undefined, COLOR.warn, COLOR.warn, COLOR.danger, COLOR.danger])
     const status: Segment = { text: '已启用', color: COLOR.ok }
     const [hit] = cacheRows(sample({ hitRate: { last: 0.31, session: 0.72 } }), status, at(13, 20), 66)
-    expect(text(hit?.middle ?? [])).toBe('上一条消息 31%')
-    expect(hit?.middle.at(-1)?.color).toBe(COLOR.danger)
-    expect(text(hit?.rest ?? [])).toBe('本会话 72%')
-    expect(hit?.rest.at(-1)?.color).toBe(COLOR.warn)
+    expect(hit?.label).toBe('命中率')
+    expect(lineOf(hit)).toBe('本会话  72% · 上一条 31%')
+    expect(hit?.lines[0]?.find(one => one.text.includes('72%'))?.color).toBe(COLOR.warn)
+    expect(hit?.lines[0]?.at(-1)?.color).toBe(COLOR.danger)
     const [fresh] = cacheRows(sample({ hitRate: { last: null, session: null } }), status, at(13, 20), 66)
-    expect(text(fresh?.middle ?? [])).toBe('上一条消息 —')
+    expect(lineOf(fresh)).toBe('本会话    — · 上一条 —')
   })
 
-  test('过期代价：重建 N tokens · 约 $；已过期时重建量变红', () => {
+  test('过期代价：重建 N tokens ≈ $；已过期时重建量变红', () => {
     const status: Segment = { text: '已启用', color: COLOR.ok }
     const valid = cacheRows(sample(), status, at(13, 20), 66).find(row => row.key === 'cache-cost')
-    expect(text(valid?.middle ?? [])).toBe('重建 152k tokens')
-    expect(valid?.middle.at(-1)?.color).toBe(undefined)
-    expect(text(valid?.rest ?? [])).toBe('约 $1.52')
+    expect(lineOf(valid)).toBe('重建 152k tokens ≈ $1.52')
+    expect(valid?.lines[0]?.find(one => one.text.includes('152k'))?.color).toBe(undefined)
     const expired = cacheRows(sample(), status, at(13, 23), 66).find(row => row.key === 'cache-cost')
-    expect(expired?.middle.at(-1)?.color).toBe(COLOR.danger)
+    expect(expired?.lines[0]?.find(one => one.text.includes('152k'))?.color).toBe(COLOR.danger)
   })
 
   test('已重建：本会话 N 次 · 共 $；0 次时不写金额', () => {
     const status: Segment = { text: '已启用', color: COLOR.ok }
     const once = cacheRows(sample(), status, at(13, 20), 66).find(row => row.key === 'cache-rebuilt')
-    expect(text(once?.middle ?? [])).toBe('本会话 1 次')
-    expect(text(once?.rest ?? [])).toBe('共 $1.55')
+    expect(lineOf(once)).toBe('本会话 1 次 · 共 $1.55')
     const none = cacheRows(sample({ coldWrites: { count: 0, usd: 0 } }), status, at(13, 20), 66).find(row => row.key === 'cache-rebuilt')
-    expect(text(none?.rest ?? [])).toBe('')
+    expect(lineOf(none)).toBe('本会话 0 次')
   })
 
-  test('还没有任何主会话请求时，过期代价、已重建写 —，不写像算出来的 0', () => {
+  test('数值定宽：命中率 9% 到 100%、重建量 9k 到 152k，同一行后面的字不挪位置', () => {
+    const status: Segment = { text: '已启用', color: COLOR.ok }
+    const after = (over: Partial<CacheView>, key: string, marker: string) =>
+      lineOf(cacheRows(sample(over), status, at(13, 20), 66).find(row => row.key === key)).indexOf(marker)
+    expect(after({ hitRate: { last: 1, session: 0.09 } }, 'cache-hit', '上一条')).toBe(after({ hitRate: { last: 1, session: 1 } }, 'cache-hit', '上一条'))
+    expect(after({ hitRate: { last: 1, session: null } }, 'cache-hit', '上一条')).toBe(after({ hitRate: { last: 1, session: 1 } }, 'cache-hit', '上一条'))
+    expect(after({ rebuild: { tokens: 9000, usd: 0.09 } }, 'cache-cost', '≈')).toBe(after({ rebuild: { tokens: 152000, usd: 1.52 } }, 'cache-cost', '≈'))
+    expect(after({ expiresAt: null }, 'cache-cost', '≈')).toBe(after({}, 'cache-cost', '≈'))
+  })
+
+  test('还没有任何主会话请求时，命中率、过期代价、已重建写 —，不写像算出来的 0', () => {
     const status: Segment = { text: '已启用', color: COLOR.ok }
     const none = view(freshCache())
     expect(none.expiresAt).toBe(null)
     const rows = cacheRows(none, status, at(13, 20), 66)
     const row = (key: string) => rows.find(one => one.key === key)
-    expect(text(row('cache-hit')?.middle ?? [])).toBe('上一条消息 —')
-    expect(text(row('cache-hit')?.rest ?? [])).toBe('本会话 —')
-    expect(text(row('cache-cost')?.middle ?? [])).toBe('重建 —')
-    expect(text(row('cache-cost')?.rest ?? [])).toBe('约 —')
-    expect(text(row('cache-rebuilt')?.middle ?? [])).toBe('本会话 —')
-    expect(text(row('cache-rebuilt')?.rest ?? [])).toBe('')
+    expect(lineOf(row('cache-hit'))).toBe('本会话    — · 上一条 —')
+    expect(lineOf(row('cache-cost'))).toBe('重建    — tokens ≈ —')
+    expect(lineOf(row('cache-rebuilt'))).toBe('本会话 —')
+  })
+
+  test('四行的名称：命中率、过期代价、已重建、保活', () => {
+    const rows = cacheRows(sample(), { text: '已启用', color: COLOR.ok }, at(13, 20), 66)
+    expect(rows.map(row => row.label)).toEqual(['命中率', '过期代价', '已重建', '保活'])
+    expect(rows.every(row => cells(row.label) <= GRID.label)).toBe(true)
   })
 
   test('窄到放不下时各行整块折到下一行，长的保活状态逐行折下去，都不出现 …', () => {
     const stopped: Segment = { text: '已停止（续期请求出错：connect ECONNREFUSED 127.0.0.1:443）', color: COLOR.danger }
     const view = sample({ hitRate: { last: 1, session: 1 }, coldWrites: { count: 12, usd: 123.4 } })
-    for (const columns of [40, 46, 52, 60, 70, 90]) {
-      const rows = cacheRows(view, stopped, at(13, 20), columns - 4)
-      const lines = rows.flatMap(row => [text(row.middle), text(row.rest), ...row.more.map(text)])
+    for (const columns of [40, 46, 50, 52, 60, 70, 90]) {
+      const inner = columns - 4
+      const rows = cacheRows(view, stopped, at(13, 20), inner)
+      const lines = rows.flatMap(row => row.lines.map(text))
       expect(lines.join(' / '), `${columns} 列`).not.toContain('…')
+      for (const line of lines) expect(cells(line) <= valueWidth(inner), `${columns} 列：${line}`).toBe(true)
       expect(lines.join(''), `${columns} 列`).toContain('本会话 100%')
       expect(lines.join('').replace(/ /g, ''), `${columns} 列`).toContain(stopped.text.replace(/ /g, ''))
       const keepalive = rows.find(row => row.key === 'keepalive')
-      for (const line of keepalive?.more ?? []) expect(line[0]?.color).toBe(COLOR.danger)
+      for (const line of keepalive?.lines ?? []) expect(line[0]?.color).toBe(COLOR.danger)
     }
   })
 
@@ -531,7 +548,7 @@ describe('缓存框', () => {
         expect(row, `${columns} 列 ${key}`).toBeDefined()
         expect(row?.props.width).toBe(columns - 4)
       }
-      if (columns >= 70) expect(flat(await ui.find({ key: 'row:cache-cost' }))).toBe('过期代价重建 152k tokens约 $1.52')
+      if (columns >= 70) expect(flat(await ui.find({ key: 'row:cache-cost' }))).toBe('过期代价重建 152k tokens ≈ $1.52')
       await ui.unmount()
     }
 
@@ -540,7 +557,7 @@ describe('缓存框', () => {
     const ui = await $.ui.mount(pane(70))
     expect(flat(await ui.find({ key: 'status:section:cache' })).trim()).toBe('○ 已过期 1h10m')
     expect(await colorOf(ui, '○ 已过期')).toBe(COLOR.danger)
-    expect(await colorOf(ui, ' 152k tokens')).toBe(COLOR.danger)
+    expect(await colorOf(ui, '152k tokens')).toBe(COLOR.danger)
     await ui.unmount()
   })
 })

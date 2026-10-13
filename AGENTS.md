@@ -36,7 +36,7 @@
 - 画面板的 `ui.render` 钩子里不能写 `$.state`（引擎拒绝）；要在画的时候顺手改状态，用 `$.clock.after(0, …)` 推到画完之后（anvil-k0t.18）。
 - render hook 要先排除 `e.surface === 'mobile'`，再解构 `Input`。
 - 标题嵌进上边框：`position="absolute"`、`top={-1}` 的 Box 放在带边框的 Box 里面，真实终端不画；放在带边框的 Box 之后、同一个外层 Box 里（`top={0}`）才画在边框行上（anvil-k0t.17，见 `panel.tsx` 的 `bordered`）。plugin test 只看元素树、不经过 Ink 的绘制，测不出画没画。
-- 不开交互会话也能看真实终端的画面：Windows 上用 pywinpty 起 `claude --plugin-dir <dir>`（180 列、`CLAUDE_CODE_NO_FLICKER=1`、在已信任的目录里），pyte 把输出还原成屏幕文字；Nerd Font 图标还原成空白（anvil-k0t.17）。开着别的面板（如 Flightdeck）时 anvil 在页签后面：往伪终端写 SGR 鼠标点击 `[<0;列;行M` 加 `…m` 点页签切过去；从 Git Bash 起脚本时传给 claude 的 `/命令` 会被 MSYS 改成 Windows 路径、当普通消息发出，先设 `MSYS_NO_PATHCONV=1`（anvil-k0t.31）。
+- 不开交互会话也能看真实终端的画面：Windows 上用 pywinpty 起 `claude --plugin-dir <dir>`（180 列、`CLAUDE_CODE_NO_FLICKER=1`、在已信任的目录里），pyte 把输出还原成屏幕文字；Nerd Font 图标还原成空白（anvil-k0t.17）。开着别的面板（如 Flightdeck）时 anvil 在页签后面：往伪终端写 SGR 鼠标点击 `[<0;列;行M` 加 `…m` 点页签切过去；从 Git Bash 起脚本时传给 claude 的 `/命令` 会被 MSYS 改成 Windows 路径、当普通消息发出，先设 `MSYS_NO_PATHCONV=1`（anvil-k0t.31）。停靠宽度沿用用户拖过的宽度（跨会话保留，关掉 Flightdeck 也不变）：要看别的宽度，往伪终端写 SGR 鼠标拖动面板左边界（`[<0;列;行M` 按下、`[<32;列;行M` 逐列移动、`[<0;列;行m` 松开），截完拖回原宽度；只在这次关掉 Flightdeck 用 `--settings <文件>`，文件里写 `{"enabledPlugins":{"flightdeck@claude-flightdeck":false}}`（anvil-k0t.32）。
 - 渲染点里没有 statusLine：`$.ui.status` 是插件自己的一行，mod 读不到、也改不了用户 statusLine 脚本的输出。
 
 ### 事件、状态与工具链

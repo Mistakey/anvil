@@ -120,7 +120,7 @@ test('选中一条按 Enter：显示完整内容和来源（主会话，或子 a
   await ui.unmount()
 })
 
-test('收起时只留最新的两条，顶部写更早的条数；同一次调用只记一条', async ($, on) => {
+test('收起时只留最新的三条，顶部写更早的条数；同一次调用只记一条', async ($, on) => {
   engine(on)
   await $.session.start(SESSION)
   for (let n = 1; n <= 5; n += 1) await $.classic.PermissionDenied(denied('Bash', { command: `rm -rf dir${n}` }, { tool_use_id: `d${n}` }))
@@ -128,19 +128,19 @@ test('收起时只留最新的两条，顶部写更早的条数；同一次调�
 
   const ui = await $.ui.mount(pane(false))
   expect(flat(await ui.find({ key: 'section:denials' }))).toContain('5 条')
-  expect(flat(await ui.find({ key: 'row:earlier:denials' }))).toBe('    ▴ 更早的 3 条 · 按 d 展开')
-  expect(await ui.find({ key: 'denial:d3' })).toBeUndefined()
+  expect(flat(await ui.find({ key: 'row:earlier:denials' }))).toBe('    ▴ 更早的 2 条 · 按 d 展开')
+  expect(await ui.find({ key: 'denial:d2' })).toBeUndefined()
+  expect(await ui.find({ key: 'denial:d3' })).toBeDefined()
   expect(await ui.find({ key: 'denial:d4' })).toBeDefined()
   expect(await ui.find({ key: 'denial:d5' })).toBeDefined()
   await ui.unmount()
 })
 
-test('没有拒绝时框里写一行说明', async ($, on) => {
+test('没有拒绝时整个框不画', async ($, on) => {
   engine(on)
   await $.session.start(SESSION)
   const ui = await $.ui.mount(pane(false))
-  const box = flat(await ui.find({ key: 'section:denials' }))
-  expect(box).toContain('本会话还没有自动模式拒绝')
-  expect(box).toContain('0 条')
+  expect(await ui.find({ key: 'section:denials' })).toBeUndefined()
+  expect(await ui.find({ key: 'list:denials' })).toBeUndefined()
   await ui.unmount()
 })

@@ -392,7 +392,7 @@ test('每条 git 命令都带 --no-optional-locks', async ($, on) => {
   for (const argv of gitRuns) expect(argv.slice(0, 2)).toEqual(['git', '--no-optional-locks'])
 })
 
-test('身份栏在缓存框下面；各种宽度下两行都不超出面板', async ($, on) => {
+test('身份栏在面板最底（我的消息下面）；各种宽度下两行都不超出面板', async ($, on) => {
   const long = sample({
     cwd: 'C:\\w\\anvil-worktrees\\agent-a9f9190b',
     revParse: ['C:/w/anvil-worktrees/agent-a9f9190b', 'C:/w/anvil/.git/worktrees/agent-a9f9190b', 'C:/w/anvil/.git', 'hooks/deep/'].join('\n'),
@@ -409,8 +409,8 @@ test('身份栏在缓存框下面；各种宽度下两行都不超出面板', as
       const shown = flat(await ui.find({ key }))
       expect(cells(shown) <= columns - 2, `${columns} 列 ${key}：${shown}`).toBe(true)
     }
-    const order = (await ui.findAll({ type: 'Box' })).map(one => one.key).filter(key => key === 'section:cache' || key?.startsWith('identity:'))
-    expect(order).toEqual(['section:cache', 'identity:git', 'identity:model'])
+    const order = (await ui.findAll({ type: 'Box' })).map(one => one.key).filter(key => key?.startsWith('section:') || key?.startsWith('identity:'))
+    expect(order.slice(-3)).toEqual(['section:messages', 'identity:git', 'identity:model'])
     await ui.unmount()
   }
 })

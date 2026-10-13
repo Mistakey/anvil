@@ -1,8 +1,9 @@
-import type { On, PromptSubmitInput } from 'claude-code'
+import type { ClassicEventOf, On, PromptSubmitInput, SessionAppendInput } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
+import type { Engine, FoundElement, Mounted } from 'claude-code/testing'
 
 import { hidesPanel } from '../hooks/panel'
-import { SESSION, anvil, drain, panes, stepInput, turnInput, typed, world } from './world'
+import { SESSION, anvil, drain, panes, spawnInput, stepInput, turnInput, typed, world } from './world'
 
 const OPEN = { id: 'anvil', title: 'anvil', columns: 70 }
 
@@ -126,6 +127,7 @@ const PANE_70 = {
 test('标题和右上角状态是带边框的框之后的兄弟节点，绝对定位压在上边框那一行', async ($, on) => {
   engine(on)
   await $.session.start(SESSION)
+  await $.agent.spawn(spawnInput('核对缓存读数'))
   const ui = await $.ui.mount(PANE_70)
   const keys = (await ui.findAll({ type: 'Box' })).map(one => one.key)
   for (const [id, title] of [['messages', '我的消息'], ['agents', '子 agent'], ['usage', '用量'], ['cache', '缓存']]) {
@@ -151,3 +153,245 @@ function flat(node: unknown): string {
   }
   return ''
 }
+
+// ---------------------------------------------------------------- 排版（spec D7、D8、D10）
+
+type DeniedInput = ClassicEventOf['classic.PermissionDenied']
+
+let denials = 0
+/** 自动模式的分类器拒绝了一次调用 */
+const denied = (command: string): DeniedInput => ({
+  session_id: 's1',
+  transcript_path: '/work/s1.jsonl',
+  cwd: '/work',
+  hook_event_name: 'PermissionDenied',
+  tool_name: 'Bash',
+  tool_input: { command },
+  tool_use_id: `deny${++denials}`,
+  reason: 'classifier',
+})
+
+let rows = 0
+/** 用户在主输入框发出的一条消息进了对话 */
+const appended = (text: string): SessionAppendInput =>
+  ({
+    message: { type: 'user', role: 'user', content: [{ type: 'text', text }] },
+    door: 'prompt',
+    origin: { kind: 'composer' },
+    uuid: `u${++rows}`,
+  }) as SessionAppendInput
+
+/** 一次绘制：宽 columns 列、高 bodyRows 行 */
+const sized = (columns: number, bodyRows = 48, isFocused = false) => ({
+  plugin: 'anvil',
+  surface: 'terminal' as const,
+  component: 'Pane' as const,
+  requestId: 'anvil',
+  props: { title: 'anvil', isFocused, bodyColumns: columns, placement: 'dock' as const, scroll: { offset: 0, bodyRows }, view: {} },
+})
+
+function layoutEngine(on: On) {
+  const clock = mock.clock(on, { now: 10 * 3_600_000 })
+  world(on)
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  return { clock }
+}
+
+async function addAgents($: Engine, count: number) {
+  for (let n = 0; n < count; n += 1) await $.agent.spawn(spawnInput(`任务 ${n + 1}`))
+}
+
+async function addDenials($: Engine, count: number) {
+  for (let n = 0; n < count; n += 1) await $.classic.PermissionDenied(denied(`rm -rf dir${n + 1}`))
+}
+
+async function addMessages($: Engine, count: number) {
+  for (let n = 0; n < count; n += 1) await $.session.append(appended(`第 ${n + 1} 条`))
+}
+
+type Child = { props?: { key?: string } }
+const children = (node: FoundElement | undefined): Child[] =>
+  (node?.children ?? []).filter((one): one is Child => typeof one === 'object' && one !== null)
+
+/** 面板自上而下的区块和身份栏，按画出来的顺序 */
+async function order(ui: Mounted<'terminal', 'Pane'>) {
+  const keys = (await ui.findAll({ type: 'Box' })).map(one => one.key ?? '')
+  return keys.filter(key => /^section:[a-z]+$/.test(key) || key.startsWith('identity:')).map(key => key.replace(/^section:/, ''))
+}
+
+/** 一个区块占的行数：框是框里的行加上下边框，收成一行的是 1，没画是 0 */
+async function heightOf(ui: Mounted<'terminal', 'Pane'>, id: string) {
+  const box = await ui.find({ key: `box:${id}` })
+  if (box) return children(box).length + 2
+  return (await ui.find({ key: `section:${id}` })) ? 1 : 0
+}
+
+/** 整个面板占的行数：各区块加上身份栏的两行 */
+async function totalHeight(ui: Mounted<'terminal', 'Pane'>) {
+  let total = 0
+  for (const id of ['cache', 'usage', 'agents', 'denials', 'messages']) total += await heightOf(ui, id)
+  const identity = (await ui.findAll({ type: 'Box' })).filter(one => one.key?.startsWith('identity:'))
+  return total + identity.length
+}
+
+// 面板内宽：开着别的面板时约 50 列，请求的 70 列，拖宽后 90 列
+const PANEL_WIDTHS = [50, 70, 90]
+
+test('自上而下：缓存、用量、子 agent、自动模式拒绝、我的消息，身份栏在最底两行', async ($, on) => {
+  layoutEngine(on)
+  await $.session.start(SESSION)
+  await addAgents($, 2)
+  await addDenials($, 2)
+  await addMessages($, 2)
+  for (const columns of PANEL_WIDTHS) {
+    const ui = await $.ui.mount(sized(columns))
+    expect(await order(ui), `${columns} 列`).toEqual(['cache', 'usage', 'agents', 'denials', 'messages', 'identity:git', 'identity:model'])
+    // 内容都短、放得下：哪个区块都没有截断
+    for (const id of ['cache', 'usage', 'agents', 'denials', 'messages']) {
+      expect(flat(await ui.find({ key: `section:${id}` })), `${columns} 列 ${id}`).not.toContain('…')
+    }
+    await ui.unmount()
+  }
+})
+
+test('子 agent、自动模式拒绝在本会话还没有内容时整个框不画；我的消息一直画，没有消息时一行提示', async ($, on) => {
+  layoutEngine(on)
+  await $.session.start(SESSION)
+  for (const columns of PANEL_WIDTHS) {
+    const ui = await $.ui.mount(sized(columns))
+    expect(await order(ui), `${columns} 列`).toEqual(['cache', 'usage', 'messages', 'identity:git', 'identity:model'])
+    expect(await ui.find({ key: 'section:agents' })).toBeUndefined()
+    expect(await ui.find({ key: 'section:denials' })).toBeUndefined()
+    expect(await ui.find({ key: 'list:agents' })).toBeUndefined()
+    const messages = await ui.find({ key: 'box:messages' })
+    expect(children(messages)).toHaveLength(1)
+    expect(flat(messages)).toContain('本会话还没有发过消息')
+    await ui.unmount()
+  }
+
+  // 有了第一个子 agent 才画子 agent 框；拒绝框照样不画
+  await addAgents($, 1)
+  const ui = await $.ui.mount(sized(70))
+  expect(await order(ui)).toEqual(['cache', 'usage', 'agents', 'messages', 'identity:git', 'identity:model'])
+  await ui.unmount()
+})
+
+test('子 agent、自动模式拒绝的框高固定：1 条和 10 条一样高，最多显示最近 3 条，更早的收进顶部一行', async ($, on) => {
+  layoutEngine(on)
+  await $.session.start(SESSION)
+  await addAgents($, 1)
+  await addDenials($, 1)
+  await addMessages($, 3)
+  const heights = async () => {
+    const found: Record<string, number> = {}
+    for (const columns of PANEL_WIDTHS) {
+      const ui = await $.ui.mount(sized(columns))
+      found[`agents ${columns}`] = await heightOf(ui, 'agents')
+      found[`denials ${columns}`] = await heightOf(ui, 'denials')
+      found[`total ${columns}`] = await totalHeight(ui)
+      await ui.unmount()
+    }
+    return found
+  }
+  const one = await heights()
+  await addAgents($, 9)
+  await addDenials($, 9)
+  const ten = await heights()
+  expect(ten).toEqual(one)
+  // 顶部一行加最近 3 条，再加上下边框
+  expect(one['agents 70']).toBe(6)
+  expect(one['denials 70']).toBe(6)
+
+  const ui = await $.ui.mount(sized(70))
+  expect(flat(await ui.find({ key: 'row:earlier:agents' }))).toBe(' ▴ 更早的 7 个 · 按 a 展开')
+  expect(flat(await ui.find({ key: 'row:earlier:denials' }))).toBe('    ▴ 更早的 7 条 · 按 d 展开')
+  expect(await ui.find({ key: 'agent:7' })).toBeUndefined()
+  for (const seq of [8, 9, 10]) expect(await ui.find({ key: `agent:${seq}` }), `第 ${seq} 个`).toBeDefined()
+  await ui.unmount()
+})
+
+test('只有 1 条时它画在框里第一行，下面留空到固定高度', async ($, on) => {
+  layoutEngine(on)
+  await $.session.start(SESSION)
+  await addAgents($, 1)
+  const ui = await $.ui.mount(sized(70))
+  const rows = children(await ui.find({ key: 'box:agents' }))
+  expect(rows).toHaveLength(4)
+  expect(rows[0]?.props?.key).toBe('row:agent:ag1')
+  expect(rows.slice(1).every(row => flat(row).trim() === '')).toBe(true)
+  await ui.unmount()
+})
+
+test('我的消息占满剩余高度，身份栏贴底：各区块加身份栏正好是面板的行数', async ($, on) => {
+  layoutEngine(on)
+  await $.session.start(SESSION)
+  await addAgents($, 5)
+  await addDenials($, 2)
+  await addMessages($, 60)
+  for (const columns of PANEL_WIDTHS) {
+    for (const bodyRows of [36, 48]) {
+      const ui = await $.ui.mount(sized(columns, bodyRows))
+      expect(await totalHeight(ui), `${columns} 列 ${bodyRows} 行`).toBe(bodyRows)
+      // 最新的一条在最下面
+      const last = children(await ui.find({ key: 'box:messages' })).at(-1)
+      expect(flat(last)).toContain('第 60 条')
+      await ui.unmount()
+    }
+  }
+})
+
+test('消息少时我的消息框也拉高到底：框可伸长、面板至少和可见高度一样高', async ($, on) => {
+  layoutEngine(on)
+  await $.session.start(SESSION)
+  const ui = await $.ui.mount(sized(70, 40))
+  expect((await ui.find({ key: 'section:messages' }))?.props.flexGrow).toBe(1)
+  expect((await ui.find({ key: 'box:messages' }))?.props.flexGrow).toBe(1)
+  const root = (await ui.findAll({ type: 'Box' }))[0]
+  expect(root?.props.minHeight).toBe(40)
+  await ui.unmount()
+})
+
+test('按 a 展开子 agent：用我的消息让出的空间，其余收成一行；Esc 收起后回到固定高度', async ($, on) => {
+  const { clock } = layoutEngine(on)
+  await $.session.start(SESSION)
+  await addAgents($, 10)
+  await addDenials($, 4)
+  await addMessages($, 3)
+  const before = await $.ui.mount(sized(70, 48, true))
+  const fixed = await heightOf(before, 'agents')
+  const total = await totalHeight(before)
+  await before.unmount()
+
+  const ui = await $.ui.mount(sized(70, 48, true))
+  await ui.press({ key: 'list:agents' })
+  expect(await order(ui)).toEqual(['cache', 'usage', 'agents', 'denials', 'messages', 'identity:git', 'identity:model'])
+  expect(await heightOf(ui, 'denials')).toBe(1)
+  expect(await heightOf(ui, 'messages')).toBe(1)
+  // 十个都放得下，全显示
+  expect(await ui.find({ key: 'agent:1' })).toBeDefined()
+  expect(await heightOf(ui, 'agents')).toBeGreaterThan(fixed)
+
+  // Esc 不经过 mod：面板以失去焦点重画，画完收起
+  await ui.redraw(sized(70, 48, false).props)
+  await clock.advance(0)
+  await ui.redraw(sized(70, 48, false).props)
+  expect(await heightOf(ui, 'agents')).toBe(fixed)
+  expect(await totalHeight(ui)).toBe(total)
+  await ui.unmount()
+})
+
+test('按序号键展开一个子 agent 的详情时框临时长高，再按收起后回到固定高度', async ($, on) => {
+  layoutEngine(on)
+  await $.session.start(SESSION)
+  await addAgents($, 5)
+  await addMessages($, 3)
+  const ui = await $.ui.mount(sized(70, 48, true))
+  const fixed = await heightOf(ui, 'agents')
+  await ui.press({ key: 'agent:5' })
+  expect(await heightOf(ui, 'agents')).toBeGreaterThan(fixed)
+  // 收起时的那几条不变，详情接在它下面
+  for (const seq of [3, 4, 5]) expect(await ui.find({ key: `agent:${seq}` }), `第 ${seq} 个`).toBeDefined()
+  await ui.press({ key: 'agent:5' })
+  expect(await heightOf(ui, 'agents')).toBe(fixed)
+  await ui.unmount()
+})

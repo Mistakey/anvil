@@ -1,8 +1,8 @@
 // 用量框的纯逻辑（spec D8）：5h、7d、上下文、花费四行。读数的收集在 register.ts。
 
 import type { RateLimit, Usage } from '../types'
-import { cells, fit, padStart } from './text'
-import { COLOR, GRID, SEPARATOR, bar, flow, levelColor, piece, restWidth, spanWidth } from './style'
+import { padStart } from './text'
+import { COLOR, FIELD, SEPARATOR, bar, flow, levelColor, piece, valueWidth } from './style'
 import type { Piece, Segment } from './style'
 
 export const EMPTY_USAGE: Usage = {
@@ -49,9 +49,9 @@ export function compacted(usage: Usage): Usage {
 
 // ---------------------------------------------------------------- 格式
 
-/** 152k、1.2M；不到一千原样 */
+/** 152k、1.2M；不到一千原样。快到一百万时写 1M，不写 1000k */
 export function formatTokens(tokens: number): string {
-  if (tokens >= 1_000_000) return `${Number((tokens / 1_000_000).toFixed(1))}M`
+  if (tokens >= 999_500) return `${Number((tokens / 1_000_000).toFixed(1))}M`
   if (tokens >= 1000) return `${Math.round(tokens / 1000)}k`
   return String(Math.round(tokens))
 }
@@ -91,41 +91,18 @@ export function parseResetsAt(resetsAt: string | undefined): number | null {
 // ---------------------------------------------------------------- 行
 
 /**
- * 三列网格的一行：标签 | 中间 18 格 | 其余；其余已排到第三列的宽度以内。
- * 第三列放不下的块折到 `more` 的几行，这几行从中间一列起占满后两列。
- * `span` 时中间一列占满后两列（rest 不画），如缓存框的保活状态；放不下的同样折进 `more`。
+ * 两列的一行：名称 | 值。值已排到值那一列的宽度以内，放不下的块整块折到下一行：
+ * lines 的第一行和名称同一行，其余各是一行，名称那一列空着，从值那一列起。
  */
-export type GridRow = { key: string; label: string; middle: Segment[]; rest: Segment[]; more: Segment[][]; span?: boolean }
+export type GridRow = { key: string; label: string; lines: Segment[][] }
 
-/** 排版前的一行：中间一列原样截到 18 格；其余（span 时是中间起的整段）按块排 */
-export type GridSpec = { key: string; label: string; middle: Segment[]; rest: Piece[]; span?: boolean }
+/** 排版前的一行：值由几块组成，每块不拆开 */
+export type GridSpec = { key: string; label: string; value: Piece[] }
 
-/** 按框内宽度 inner 排一行：第三列放不下就整块折到下一行，不截断信息 */
+/** 按框内宽度 inner 排一行：值那一列放不下就整块折到下一行，不截断信息 */
 export function layoutRow(spec: GridSpec, inner: number): GridRow {
-  const { key, label } = spec
-  if (spec.span) {
-    const [first = [], ...more] = flow(spec.rest, spanWidth(inner), spanWidth(inner))
-    return { key, label, middle: first, rest: [], more, span: true }
-  }
-  const [first = [], ...more] = flow(spec.rest, restWidth(inner), spanWidth(inner))
-  return { key, label, middle: fitSegments(spec.middle, GRID.middle), rest: first, more }
-}
-
-/** 把几段文字截到 width 格以内：放不下的那段截断加 `…`，后面的丢掉 */
-export function fitSegments(segments: readonly Segment[], width: number): Segment[] {
-  const kept: Segment[] = []
-  let left = width
-  for (const segment of segments) {
-    const size = cells(segment.text)
-    if (size <= left) {
-      kept.push(segment)
-      left -= size
-      continue
-    }
-    if (left > 0) kept.push({ ...segment, text: fit(segment.text, left) })
-    break
-  }
-  return kept
+  const width = valueWidth(inner)
+  return { key: spec.key, label: spec.label, lines: flow(spec.value, width, width) }
 }
 
 const WINDOWS: Record<string, { label: string; ms: number }> = {
@@ -133,8 +110,13 @@ const WINDOWS: Record<string, { label: string; ms: number }> = {
   seven_day: { label: '7d', ms: 7 * DAY },
 }
 
-const percentCell = (text: string, color: string): Segment => ({ text: `${padStart(text, 4)} `, color })
 const muted = (text: string): Segment => ({ text, color: COLOR.muted })
+
+/** 定宽的数值字段：右对齐补到 width 格 */
+export const field = (text: string, width: number) => padStart(text, width)
+
+/** 进度条加定宽的百分比，同色 */
+const meter = (percent: number, text: string): Piece => piece([...bar(percent), { text: ` ${field(text, FIELD.percent)}`, color: levelColor(percent) }])
 
 /**
  * 按当前用量线性外推，用尽时刻早于重置时就是"预计用尽"的时刻；否则 null。
@@ -147,51 +129,51 @@ export function exhaustAt(percent: number, resetsAt: number, windowMs: number, n
   return at < resetsAt ? at : null
 }
 
+/** 5h、7d：进度条 百分比 · 重置时刻（· 预计用尽） */
 function limitRow(kind: 'five_hour' | 'seven_day', limits: readonly RateLimit[], now: number): GridSpec {
   const { label, ms } = WINDOWS[kind] ?? { label: kind, ms: 0 }
   const limit = limits.find(one => one.kind === kind)
   const resetsAt = parseResetsAt(limit?.resetsAt)
   // 没有读数，或窗口已经过了重置时刻：下一条消息才开始新窗口
   if (limit === undefined || resetsAt === null || resetsAt <= now) {
-    return { key: kind, label, middle: bar(0), rest: [piece([percentCell('0%', levelColor(0))]), piece([muted('发送消息后开始计时')])] }
+    return { key: kind, label, value: [meter(0, '0%'), piece([muted('发送消息后开始计时')], SEPARATOR)] }
   }
   const percent = limit.percentUsed
-  const color = levelColor(percent)
-  const rest: Piece[] = [piece([percentCell(`${Math.round(percent)}%`, color)]), piece([muted(`${formatWhen(resetsAt, now)} 重置`)])]
+  const value: Piece[] = [meter(percent, `${Math.round(percent)}%`), piece([muted(`${formatWhen(resetsAt, now)} 重置`)], SEPARATOR)]
   if (kind === 'five_hour') {
     const at = exhaustAt(percent, resetsAt, ms, now)
-    if (at !== null) rest.push(piece([{ text: `预计 ${formatWhen(at, now)} 用尽`, color: COLOR.high }], SEPARATOR))
+    if (at !== null) value.push(piece([{ text: `预计 ${formatWhen(at, now)} 用尽`, color: COLOR.high }], SEPARATOR))
   }
-  return { key: kind, label, middle: bar(percent), rest }
+  return { key: kind, label, value }
 }
 
+/** 上下文：已用 / 上限 (百分比) · 已压缩 N 次 */
 function contextRow(usage: Usage): GridSpec {
   const context = usage.context
   const compactions = piece([muted(`已压缩 ${usage.compactions} 次`)], SEPARATOR)
   if (context === null || context.percent === undefined || context.tokens === undefined) {
-    const window = context === null ? '' : ` / ${formatTokens(context.window)}`
-    return { key: 'context', label: '上下文', middle: bar(0), rest: [piece([percentCell('—', COLOR.muted)]), piece([{ text: '—' }, muted(window)]), compactions] }
+    const window = context === null ? [] : [muted(` / ${formatTokens(context.window)}`)]
+    return { key: 'context', label: '上下文', value: [piece([{ text: field('—', FIELD.tokens) }, ...window]), compactions] }
   }
-  const color = levelColor(context.percent)
-  return {
-    key: 'context',
-    label: '上下文',
-    middle: bar(context.percent),
-    rest: [
-      piece([percentCell(`${Math.round(context.percent)}%`, color)]),
-      piece([{ text: formatTokens(context.tokens) }, muted(` / ${formatTokens(context.window)}`)]),
-      compactions,
-    ],
-  }
+  const percent = context.percent
+  const used = [
+    { text: field(formatTokens(context.tokens), FIELD.tokens) },
+    muted(` / ${formatTokens(context.window)}`),
+    { text: ` ${field(`(${Math.round(percent)}%)`, FIELD.ratio)}`, color: levelColor(percent) },
+  ]
+  return { key: 'context', label: '上下文', value: [piece(used), compactions] }
 }
 
+/** 花费：本会话 $ · 上一条 $ */
 function costRow(usage: Usage): GridSpec {
-  const usd = (value: number | null) => ({ text: ` ${value === null ? '—' : formatUsd(value)}` })
+  const usd = (value: number | null) => (value === null ? '—' : formatUsd(value))
   return {
     key: 'cost',
     label: '花费',
-    middle: [muted('上一条消息'), usd(usage.lastMessageCostUsd)],
-    rest: [piece([muted('本会话'), usd(usage.costUsd)])],
+    value: [
+      piece([muted('本会话'), { text: ` ${field(usd(usage.costUsd), FIELD.usd)}` }]),
+      piece([muted('上一条'), { text: ` ${usd(usage.lastMessageCostUsd)}` }], SEPARATOR),
+    ],
   }
 }
 

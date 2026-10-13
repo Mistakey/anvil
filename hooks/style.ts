@@ -1,4 +1,4 @@
-// 面板共用的样式（spec D10，取自设计稿 Version 32）：颜色、图标、三列网格、进度条。
+// 面板共用的样式（spec D10，取自设计稿 Version 32）：颜色、图标、名称 | 值两列、定宽字段、进度条。
 
 import { cells, fit } from './text'
 
@@ -57,18 +57,22 @@ export const ICON = {
   failed: '\u{F00D}',
 } as const
 
-/** 用量框和缓存框共用的三列网格：标签 8 格 | 18 格 | 其余，列间空 1 格 */
-export const GRID = { label: 8, middle: 18, gap: 1 } as const
+/**
+ * 用量框和缓存框共用的两列：名称 8 格 | 值，列间空 1 格；一件事一行。
+ * 进度条定宽 15 格：约 51 列停靠时（值那一列 38 格），7d 带星期的重置时刻也排得下。
+ */
+export const GRID = { label: 8, gap: 1, bar: 15 } as const
 
-/** 网格第三列的宽度 */
-export function restWidth(inner: number): number {
-  return Math.max(0, inner - GRID.label - GRID.middle - 2 * GRID.gap)
-}
-
-/** 中间一列占满后两列时的宽度 */
-export function spanWidth(inner: number): number {
+/** 值那一列的宽度；折下去的行也从这一列起 */
+export function valueWidth(inner: number): number {
   return Math.max(0, inner - GRID.label - GRID.gap)
 }
+
+/**
+ * 数值的定宽字段（右对齐）：数字变长变短时，同一行后面的字不挪位置。
+ * 百分比到 100%，金额到 $12.34，tokens 到 152k、1.2M，上下文的 "(100%)"。
+ */
+export const FIELD = { percent: 4, usd: 6, tokens: 4, ratio: 6 } as const
 
 /** 进度条四档：低于 60% 绿，60–80% 黄，80–90% 橙，90% 以上红 */
 export function levelColor(percent: number): string {
@@ -78,8 +82,8 @@ export function levelColor(percent: number): string {
   return COLOR.ok
 }
 
-/** 占满中间一列的进度条：已用部分按档着色，其余是暗色底 */
-export function bar(percent: number, width: number = GRID.middle): Segment[] {
+/** 定宽的进度条：已用部分按档着色，其余是暗色底 */
+export function bar(percent: number, width: number = GRID.bar): Segment[] {
   const clamped = Math.min(100, Math.max(0, percent))
   const filled = Math.round((clamped / 100) * width)
   return [
