@@ -73,8 +73,8 @@ import {
   typed,
 } from './translate'
 import type { Translation } from './translate'
-import { EMPTY_USAGE, applyReading, usageRows } from './usage'
-import type { Reading } from './usage'
+import { EMPTY_USAGE, HISTORY_KEYS, applyReading, parseHistory, parseResetsAt, recordSample, usageRows } from './usage'
+import type { Histories, Reading } from './usage'
 import type { Denial, GitView, Identity, KeepaliveStop, ListId, Scrolled, Settings, SubAgent } from '../types'
 
 // 模块结构（照 flightdeck 的 register.tsx / core.ts），引擎扫描源码的规则见 AGENTS.md Pitfalls「模块结构」：
@@ -283,7 +283,31 @@ const usage = atom({ plugin: 'anvil', key: 'usage' } as const, EMPTY_USAGE)
 
 /** 会话现在的花费；拿不到读数（无头、SDK 宿主）时为 null */
 async function noteReading($: EngineInterface, reading: Reading) {
+  // 先记进存档再更新读数：读数一变面板就重画，重画时存档已经是新的
+  await recordHistories($, reading).catch(() => undefined)
   await update($, usage, current => applyReading(current, reading))
+}
+
+/** 5h、7d 的读数记进 `$.store` 的存档（本机会话共用）；先 get 再 set 不是原子的，丢一两个读数无妨，不加锁 */
+async function recordHistories($: EngineInterface, reading: Reading) {
+  const at = await $.clock.now()
+  for (const kind of ['five_hour', 'seven_day'] as const) {
+    const limit = reading.rateLimits.find(one => one.kind === kind)
+    const resetsAt = parseResetsAt(limit?.resetsAt)
+    if (limit === undefined || resetsAt === null) continue
+    const history = parseHistory(await $.store.get(HISTORY_KEYS[kind]))
+    await $.store.set(HISTORY_KEYS[kind], recordSample(history, kind, resetsAt, { at, percent: limit.percentUsed }))
+  }
+}
+
+/** 面板重画时读存档，预测的速度现算；读不到（plugin test 没接 store）就当没有存档 */
+async function readHistories($: EngineInterface): Promise<Histories> {
+  const histories: Histories = {}
+  for (const kind of ['five_hour', 'seven_day'] as const) {
+    const history = parseHistory(await $.store.get(HISTORY_KEYS[kind]).catch(() => undefined))
+    if (history !== null) histories[kind] = history
+  }
+  return histories
 }
 
 async function readUsage($: EngineInterface) {
@@ -591,13 +615,14 @@ async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderI
     $.clock.now(),
     read($, identity),
   ])
-  const [cached, keepalive, loop, live, isReplying, focused] = await Promise.all([
+  const [cached, keepalive, loop, live, isReplying, focused, histories] = await Promise.all([
     read($, cacheView),
     keepaliveNow($, settings),
     read($, keepaliveLoop),
     liveFor($, els, e.surface, now),
     read($, replying),
     read($, focusKey),
+    readHistories($),
   ])
   // 用户进了面板要按 Enter 时，列表里不该有已撤回的消息：画完核对一遍，有变化会再画
   if (e.props.isFocused) $.clock.after(0, () => void syncMessages($).catch(() => undefined))
@@ -608,7 +633,7 @@ async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderI
     columns: e.props.bodyColumns,
     rows: e.props.scroll.bodyRows,
     bodies: {
-      usage: { rows: spacedGridRows(els, usageRows(current, now, inner), inner) },
+      usage: { rows: spacedGridRows(els, usageRows(current, now, inner, histories), inner) },
       cache: { rows: cacheRows(cached, keepalive, now, inner).flatMap(row => gridRow(els, row, inner, row.key === 'keepalive' ? renewing : undefined)) },
     },
     lists: {

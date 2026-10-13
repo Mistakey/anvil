@@ -55,6 +55,13 @@ export function world(on: On, options: WorldOptions = {}) {
   const fills: string[] = []
   const box = options.box ?? { text: '' }
   on('session.start', ($, e) => ({ cwd: e.cwd }))
+  // 插件的 `$.store`（用量预测的读数存档）；测试拿到的 `$` 没有 store，从返回的 store 看插件存了什么
+  const store = new Map<string, unknown>()
+  on('store.get', ($, e) => ({ value: store.get(e.key) }))
+  on('store.set', ($, e) => {
+    store.set(e.key, JSON.parse(JSON.stringify(e.value)))
+    return { value: undefined }
+  })
   on('session.model', () => ({ value: options.model ?? 'claude-opus-5-5' }))
   on('session.usage', () => ({
     value: options.reading?.current ?? { startedAt: 0, context: { window: 1000000, tokens: options.live?.tokens }, rateLimits: [] },
@@ -111,7 +118,7 @@ export function world(on: On, options: WorldOptions = {}) {
     }
     return { value }
   })
-  return { commands, state, entered, fills, fillModes, box, forks }
+  return { commands, state, entered, fills, fillModes, box, forks, store }
 }
 
 /**

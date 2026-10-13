@@ -4,7 +4,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import { COLOR, FIELD, GRID, barWidth, levelColor, valueWidth } from '../hooks/style'
 import type { Segment } from '../hooks/style'
 import { cells } from '../hooks/text'
-import { EMPTY_USAGE, formatTokens, formatUsd, formatWhen, projectedPercent, usageRows } from '../hooks/usage'
+import { EMPTY_USAGE, burnRate, formatTokens, formatUsd, formatWhen, usageRows } from '../hooks/usage'
 import type { GridRow } from '../hooks/usage'
 import type { Usage } from '../types'
 import { SESSION, world } from './world'
@@ -68,7 +68,7 @@ test('5h：第一行进度条、百分比；第二行两列：暗色"󰑐 重置
   expect(detail.slice(1).filter(one => one.text.trim() !== '')).toEqual([{ text: `${ALERT} 21:50`, color: COLOR.danger }])
 })
 
-test('预测按当前速度线性外推到重置时：用不完绿色 󰁹 不写字；会用完红色 󰂃 加用完时刻', () => {
+test('没有存档时预测按窗口平均的速度外推：用不完绿色 󰁹 不写字；会用完红色 󰂃 加用完时刻', () => {
   // 窗口 18:00 开始，2 小时用了 18.4%，到 23:00 重置时用到 46%
   const slow = usageRows(limitsOf({ kind: 'five_hour', percentUsed: 18.4, resetsAt: iso(at(13, 23)) }), NOW, INNER)
   expect(detailOf(slow, 'five_hour')).toBe(two('23:00', FINE))
@@ -89,7 +89,8 @@ test('窗口刚开始也照常推算，不设等待期；还没用时是 󰁹', 
   expect(detailOf(usageRows(early, NOW, INNER), 'five_hour')).toBe(two('00:50 10-14', FINE))
   const idle = limitsOf({ kind: 'five_hour', percentUsed: 0, resetsAt: iso(at(13, 22)) })
   expect(detailOf(usageRows(idle, NOW, INNER), 'five_hour')).toBe(two('22:00', FINE))
-  expect(projectedPercent(30, at(13, 22), 5 * 3_600_000, NOW)).toBe(50)
+  // 窗口 17:00 开始，3 小时用了 30%：没有存档，按窗口平均
+  expect(burnRate(30, at(13, 22), 5 * 3_600_000, NOW, 3_600_000, [])).toEqual({ used: 30, span: 3 * 3_600_000 })
 })
 
 test('已用满 100%：红色 󰂎，不写字', () => {

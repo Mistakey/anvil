@@ -95,26 +95,77 @@ const minor = (text: string): Segment => ({ text, color: COLOR.label })
 const meter = (percent: number, text: string, inner: number): Piece =>
   piece([...bar(percent, barWidth(inner)), { text: ` ${padStart(text, FIELD.percent)}`, color: levelColor(percent) }])
 
-/** 按当前用量线性外推，到重置时用到百分之几；推不出速度时就是现在的用量。窗口刚开始也照常推算 */
-export function projectedPercent(percent: number, resetsAt: number, windowMs: number, now: number): number {
+// ---------------------------------------------------------------- 预测的速度（spec D8）
+
+/** 一个读数：时刻（`$.clock.now()` 的毫秒）和当时的百分比 */
+export type Sample = { at: number; percent: number }
+
+/** 一个窗口的读数存档（`$.store`，本机会话共用）：属于哪个窗口（重置时刻），读数按时刻排 */
+export type History = { resetsAt: number; samples: Sample[] }
+
+/** 各窗口的存档 */
+export type Histories = Partial<Record<'five_hour' | 'seven_day', History>>
+
+/** 存档按窗口分键 */
+export const HISTORY_KEYS = { five_hour: 'usageHistory.five_hour', seven_day: 'usageHistory.seven_day' } as const
+
+/** 速度看最近多久（lookbackMs）；存档分桶（bucketMs），一个桶只留最后一个读数 */
+export const TREND = {
+  five_hour: { lookbackMs: 3_600_000, bucketMs: 60_000 },
+  seven_day: { lookbackMs: DAY, bucketMs: 5 * 60_000 },
+} as const
+
+/**
+ * 记下一个读数：重置时刻变了（新窗口）就从空存档起；同一桶只留最后一个；
+ * 只留时刻晚于 at − lookback 的读数，加上 at − lookback 之前最近的一个
+ */
+export function recordSample(history: History | null, kind: keyof typeof TREND, resetsAt: number, sample: Sample): History {
+  const { lookbackMs, bucketMs } = TREND[kind]
+  const bucket = (at: number) => Math.floor(at / bucketMs)
+  const kept = history !== null && history.resetsAt === resetsAt ? history.samples : []
+  const samples = [...kept.filter(one => bucket(one.at) !== bucket(sample.at)), sample].sort((a, b) => a.at - b.at)
+  const since = sample.at - lookbackMs
+  const before = samples.filter(one => one.at <= since).at(-1)
+  return { resetsAt, samples: [...(before ? [before] : []), ...samples.filter(one => one.at > since)] }
+}
+
+/** `$.store` 里读回来的存档；不是存档的样子就当没有 */
+export function parseHistory(value: unknown): History | null {
+  if (value === null || typeof value !== 'object') return null
+  const { resetsAt, samples } = value as { resetsAt?: unknown; samples?: unknown }
+  if (typeof resetsAt !== 'number' || !Array.isArray(samples)) return null
+  const valid = samples.every(one => typeof one?.at === 'number' && typeof one?.percent === 'number')
+  return valid ? { resetsAt, samples: samples as Sample[] } : null
+}
+
+/**
+ * 速度：span 毫秒用了 used 个百分点。看最近 lookback：取 now − lookback 之前最近的读数，当作那时的用量
+ * （没读数的空档里用量不变），分母固定是 lookback；窗口开始到现在不到 lookback、或存档里没有那之前的读数时，
+ * 退回窗口开始以来的平均
+ */
+export function burnRate(percent: number, resetsAt: number, windowMs: number, now: number, lookbackMs: number, samples: readonly Sample[]): { used: number; span: number } {
   const elapsed = now - (resetsAt - windowMs)
-  return elapsed > 0 ? (percent * windowMs) / elapsed : percent
+  const before = samples.filter(one => one.at <= now - lookbackMs).at(-1)
+  if (elapsed < lookbackMs || before === undefined) return { used: percent, span: elapsed }
+  return { used: percent - before.percent, span: lookbackMs }
 }
 
 /** 第二行左列"󰑐 重置时刻"的宽度：按最长的"󰑐 00:00 00-00"留，5h、7d 的右列起点相同 */
 const RESET_WIDTH = cells(`${ICON.reset} 00:00 00-00`)
 
-/** 预测只用图标：到重置用不完绿色 󰁹；会用完红色"󰂃 用完时刻"（按当前速度到 100% 的时刻）；已用满红色 󰂎 */
-function forecast(percent: number, resetsAt: number, windowMs: number, now: number): Segment {
+/**
+ * 预测只用图标：按速度到 100% 的时刻不晚于重置是红色"󰂃 用完时刻"，否则（速度 ≤ 0 也是）绿色 󰁹；已用满红色 󰂎
+ */
+function forecast(percent: number, resetsAt: number, rate: { used: number; span: number }, now: number): Segment {
   if (percent >= 100) return { text: ICON.batteryOut, color: COLOR.danger }
-  if (projectedPercent(percent, resetsAt, windowMs, now) < 100) return { text: ICON.battery, color: COLOR.ok }
-  const start = resetsAt - windowMs
-  const emptyAt = start + ((now - start) * 100) / percent
+  if (rate.used <= 0 || rate.span <= 0) return { text: ICON.battery, color: COLOR.ok }
+  const emptyAt = now + ((100 - percent) * rate.span) / rate.used
+  if (emptyAt > resetsAt) return { text: ICON.battery, color: COLOR.ok }
   return { text: `${ICON.batteryAlert} ${formatWhen(emptyAt, now)}`, color: COLOR.danger }
 }
 
 /** 5h、7d：进度条 百分比；第二行两列：暗色"󰑐 重置时刻" | 预测图标 */
-function limitRow(kind: 'five_hour' | 'seven_day', limits: readonly RateLimit[], now: number, inner: number): GridSpec {
+function limitRow(kind: 'five_hour' | 'seven_day', limits: readonly RateLimit[], now: number, inner: number, histories: Histories): GridSpec {
   const { label, ms } = WINDOWS[kind] ?? { label: kind, ms: 0 }
   const limit = limits.find(one => one.kind === kind)
   const resetsAt = parseResetsAt(limit?.resetsAt)
@@ -123,9 +174,12 @@ function limitRow(kind: 'five_hour' | 'seven_day', limits: readonly RateLimit[],
     return { key: kind, label, value: [meter(0, '0%', inner)], detail: [piece([minor('发送消息后开始计时')])] }
   }
   const percent = limit.percentUsed
+  const history = histories[kind]
+  const samples = history !== undefined && history.resetsAt === resetsAt ? history.samples : []
+  const rate = burnRate(percent, resetsAt, ms, now, TREND[kind].lookbackMs, samples)
   const detail: Piece[] = [
     piece([minor(padEnd(`${ICON.reset} ${formatWhen(resetsAt, now)}`, RESET_WIDTH))]),
-    piece([forecast(percent, resetsAt, ms, now)], minor(' '.repeat(GRID.gap))),
+    piece([forecast(percent, resetsAt, rate, now)], minor(' '.repeat(GRID.gap))),
   ]
   return { key: kind, label, value: [meter(percent, `${Math.round(percent)}%`, inner)], detail }
 }
@@ -151,11 +205,11 @@ function costRow(usage: Usage): GridSpec {
   return { key: 'cost', label: '花费', value: [piece([{ text: usage.costUsd === null ? '—' : formatUsd(usage.costUsd) }])] }
 }
 
-/** 用量框的四项，按框内宽度 inner 排好（layoutRow） */
-export function usageRows(usage: Usage, now: number, inner: number): GridRow[] {
+/** 用量框的四项，按框内宽度 inner 排好（layoutRow）；histories 是 5h、7d 的读数存档，预测的速度从它算 */
+export function usageRows(usage: Usage, now: number, inner: number, histories: Histories = {}): GridRow[] {
   const rows = [
-    limitRow('five_hour', usage.rateLimits, now, inner),
-    limitRow('seven_day', usage.rateLimits, now, inner),
+    limitRow('five_hour', usage.rateLimits, now, inner, histories),
+    limitRow('seven_day', usage.rateLimits, now, inner, histories),
     contextRow(usage, inner),
     costRow(usage),
   ]
