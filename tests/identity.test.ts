@@ -2,7 +2,7 @@ import type { FsEntry, On, ProcessRunResult, TurnStepChunk, TurnStepInput, TurnU
 import { expect, mock, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 
-import { effortSegment, gitLine, modelLabel, modelLine, operationOf, parseNumstat, parseRepo, parseStatus, repoNames, tokensPerSecond } from '../hooks/identity'
+import { effortSegment, gitLine, startEffort, modelLabel, modelLine, operationOf, parseNumstat, parseRepo, parseStatus, repoNames, tokensPerSecond } from '../hooks/identity'
 import { COLOR, ICON } from '../hooks/style'
 import type { Segment } from '../hooks/style'
 import { cells } from '../hooks/text'
@@ -350,6 +350,26 @@ test('第二行：会话开始时只有模型；每次主会话请求后写 effo
   timing.current = { firstMs: 1500, streamMs: 4000, output: 360 }
   await step($, clock, { turnId: 't3', index: 0, model: 'claude-sonnet-5-5', effort: 'max', messageCount: 5 })
   expect(await secondLine($)).toBe(`${M} Sonnet 5.5 · max · 90 tok/s`)
+})
+
+test('第二行：一启动就从会话设置写 effort（当前模型自己的设置优先），第一次请求后以请求的为准', async ($, on) => {
+  const { clock } = engine(on, { current: sample({ status: CLEAN, numstat: '' }) })
+  const settings = { current: { effortLevel: 'high', modelSettings: { 'claude-opus-5-5': { effortLevel: 'medium' } } } as Record<string, unknown> }
+  on('settings.read', () => ({ value: settings.current }))
+  await $.session.start(SESSION)
+  expect(await secondLine($)).toBe(`${M} Opus 5.5 · medium`)
+
+  await step($, clock, { turnId: 't1', index: 0, model: 'claude-opus-5-5', effort: 'xhigh', messageCount: 3 })
+  expect(await secondLine($)).toContain(`${M} Opus 5.5 · xhigh · `)
+})
+
+test('effort 的启动值：模型自己的设置、全局 effortLevel，都没有时不写', () => {
+  const both = { effortLevel: 'high', modelSettings: { 'claude-opus-5-5': { effortLevel: 'medium' } } }
+  expect(startEffort(both, 'claude-opus-5-5')).toBe('medium')
+  expect(startEffort(both, 'claude-sonnet-5-5')).toBe('high')
+  expect(startEffort({}, 'claude-opus-5-5')).toBe(null)
+  expect(startEffort({ effortLevel: 42 }, null)).toBe(42)
+  expect(startEffort({ effortLevel: { bad: true } }, null)).toBe(null)
 })
 
 // ---------------------------------------------------------------- 刷新与排版

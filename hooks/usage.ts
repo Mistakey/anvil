@@ -2,8 +2,8 @@
 
 import type { RateLimit, Usage } from '../types'
 import { cells, fit, padStart } from './text'
-import { COLOR, GRID, SEPARATOR, bar, levelColor, restWidth } from './style'
-import type { Segment } from './style'
+import { COLOR, GRID, SEPARATOR, bar, flow, levelColor, piece, restWidth, spanWidth } from './style'
+import type { Piece, Segment } from './style'
 
 export const EMPTY_USAGE: Usage = {
   context: null,
@@ -91,10 +91,25 @@ export function parseResetsAt(resetsAt: string | undefined): number | null {
 // ---------------------------------------------------------------- 行
 
 /**
- * 三列网格的一行：标签 | 中间 18 格 | 其余；其余已截到第三列的宽度。
- * `span` 时中间一列占满后两列（rest 不画），如缓存框的保活状态。
+ * 三列网格的一行：标签 | 中间 18 格 | 其余；其余已排到第三列的宽度以内。
+ * 第三列放不下的块折到 `more` 的几行，这几行从中间一列起占满后两列。
+ * `span` 时中间一列占满后两列（rest 不画），如缓存框的保活状态；放不下的同样折进 `more`。
  */
-export type GridRow = { key: string; label: string; middle: Segment[]; rest: Segment[]; span?: boolean }
+export type GridRow = { key: string; label: string; middle: Segment[]; rest: Segment[]; more: Segment[][]; span?: boolean }
+
+/** 排版前的一行：中间一列原样截到 18 格；其余（span 时是中间起的整段）按块排 */
+export type GridSpec = { key: string; label: string; middle: Segment[]; rest: Piece[]; span?: boolean }
+
+/** 按框内宽度 inner 排一行：第三列放不下就整块折到下一行，不截断信息 */
+export function layoutRow(spec: GridSpec, inner: number): GridRow {
+  const { key, label } = spec
+  if (spec.span) {
+    const [first = [], ...more] = flow(spec.rest, spanWidth(inner), spanWidth(inner))
+    return { key, label, middle: first, rest: [], more, span: true }
+  }
+  const [first = [], ...more] = flow(spec.rest, restWidth(inner), spanWidth(inner))
+  return { key, label, middle: fitSegments(spec.middle, GRID.middle), rest: first, more }
+}
 
 /** 把几段文字截到 width 格以内：放不下的那段截断加 `…`，后面的丢掉 */
 export function fitSegments(segments: readonly Segment[], width: number): Segment[] {
@@ -132,30 +147,30 @@ export function exhaustAt(percent: number, resetsAt: number, windowMs: number, n
   return at < resetsAt ? at : null
 }
 
-function limitRow(kind: 'five_hour' | 'seven_day', limits: readonly RateLimit[], now: number): GridRow {
+function limitRow(kind: 'five_hour' | 'seven_day', limits: readonly RateLimit[], now: number): GridSpec {
   const { label, ms } = WINDOWS[kind] ?? { label: kind, ms: 0 }
   const limit = limits.find(one => one.kind === kind)
   const resetsAt = parseResetsAt(limit?.resetsAt)
   // 没有读数，或窗口已经过了重置时刻：下一条消息才开始新窗口
   if (limit === undefined || resetsAt === null || resetsAt <= now) {
-    return { key: kind, label, middle: bar(0), rest: [percentCell('0%', levelColor(0)), muted('发送消息后开始计时')] }
+    return { key: kind, label, middle: bar(0), rest: [piece([percentCell('0%', levelColor(0))]), piece([muted('发送消息后开始计时')])] }
   }
   const percent = limit.percentUsed
   const color = levelColor(percent)
-  const rest: Segment[] = [percentCell(`${Math.round(percent)}%`, color), muted(`${formatWhen(resetsAt, now)} 重置`)]
+  const rest: Piece[] = [piece([percentCell(`${Math.round(percent)}%`, color)]), piece([muted(`${formatWhen(resetsAt, now)} 重置`)])]
   if (kind === 'five_hour') {
     const at = exhaustAt(percent, resetsAt, ms, now)
-    if (at !== null) rest.push(SEPARATOR, { text: `预计 ${formatWhen(at, now)} 用尽`, color: COLOR.high })
+    if (at !== null) rest.push(piece([{ text: `预计 ${formatWhen(at, now)} 用尽`, color: COLOR.high }], SEPARATOR))
   }
   return { key: kind, label, middle: bar(percent), rest }
 }
 
-function contextRow(usage: Usage): GridRow {
+function contextRow(usage: Usage): GridSpec {
   const context = usage.context
-  const compactions = muted(`已压缩 ${usage.compactions} 次`)
+  const compactions = piece([muted(`已压缩 ${usage.compactions} 次`)], SEPARATOR)
   if (context === null || context.percent === undefined || context.tokens === undefined) {
     const window = context === null ? '' : ` / ${formatTokens(context.window)}`
-    return { key: 'context', label: '上下文', middle: bar(0), rest: [percentCell('—', COLOR.muted), { text: '—' }, muted(window), SEPARATOR, compactions] }
+    return { key: 'context', label: '上下文', middle: bar(0), rest: [piece([percentCell('—', COLOR.muted)]), piece([{ text: '—' }, muted(window)]), compactions] }
   }
   const color = levelColor(context.percent)
   return {
@@ -163,27 +178,25 @@ function contextRow(usage: Usage): GridRow {
     label: '上下文',
     middle: bar(context.percent),
     rest: [
-      percentCell(`${Math.round(context.percent)}%`, color),
-      { text: formatTokens(context.tokens) },
-      muted(` / ${formatTokens(context.window)}`),
-      SEPARATOR,
+      piece([percentCell(`${Math.round(context.percent)}%`, color)]),
+      piece([{ text: formatTokens(context.tokens) }, muted(` / ${formatTokens(context.window)}`)]),
       compactions,
     ],
   }
 }
 
-function costRow(usage: Usage): GridRow {
+function costRow(usage: Usage): GridSpec {
   const usd = (value: number | null) => ({ text: ` ${value === null ? '—' : formatUsd(value)}` })
   return {
     key: 'cost',
     label: '花费',
     middle: [muted('上一条消息'), usd(usage.lastMessageCostUsd)],
-    rest: [muted('本会话'), usd(usage.costUsd)],
+    rest: [piece([muted('本会话'), usd(usage.costUsd)])],
   }
 }
 
-/** 用量框的四行，每行各列都已截到 inner 格（框内宽度）以内 */
+/** 用量框的四行，按框内宽度 inner 排好（layoutRow） */
 export function usageRows(usage: Usage, now: number, inner: number): GridRow[] {
   const rows = [limitRow('five_hour', usage.rateLimits, now), limitRow('seven_day', usage.rateLimits, now), contextRow(usage), costRow(usage)]
-  return rows.map(row => ({ ...row, middle: fitSegments(row.middle, GRID.middle), rest: fitSegments(row.rest, restWidth(inner)) }))
+  return rows.map(row => layoutRow(row, inner))
 }

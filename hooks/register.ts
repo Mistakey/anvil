@@ -25,7 +25,7 @@ import { cacheRows, cacheStatus } from './cachebox'
 
 import { COMMAND, answer } from './command'
 import { addDenial, denialContent, denialList, denialSource } from './denials'
-import { EMPTY_IDENTITY, GIT, NUMSTAT, REV_PARSE, STATUS, baseName, gitView, identityRows, operationOf, parseNumstat, parseRepo, parseStatus, tokensPerSecond } from './identity'
+import { EMPTY_IDENTITY, GIT, NUMSTAT, REV_PARSE, STATUS, baseName, gitView, identityRows, operationOf, parseNumstat, parseRepo, parseStatus, startEffort, tokensPerSecond } from './identity'
 import type { RebaseFiles } from './identity'
 import type { Listed, Subcommand } from './command'
 import { describeInput } from './describe'
@@ -453,10 +453,14 @@ async function refreshGit($: EngineInterface, refresh: GitRefresh) {
   }
 }
 
-/** 会话开始时还没有请求：模型先取会话的，effort 等第一次请求 */
+/** 会话开始时还没有请求：模型取会话的，effort 取会话设置里的（startEffort），第一次请求后以请求的为准 */
 async function startIdentity($: EngineInterface, refresh: GitRefresh) {
-  const model = await $.session.model().catch(() => null)
-  await update($, identity, current => ({ ...current, model: current.model ?? model }))
+  const [model, config] = await Promise.all([$.session.model().catch(() => null), $.settings.read().catch(() => ({}))])
+  await update($, identity, current => ({
+    ...current,
+    model: current.model ?? model,
+    effort: current.effort ?? startEffort(config, current.model ?? model),
+  }))
   await refreshGit($, refresh)
 }
 
@@ -569,7 +573,7 @@ async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderI
   // 用户进了面板要按 Enter 时，列表里不该有已撤回的消息：画完核对一遍，有变化会再画
   if (e.props.isFocused) $.clock.after(0, () => void syncMessages($).catch(() => undefined))
   const inner = innerWidth(e.props.bodyColumns)
-  const grid = (rows: GridRow[]) => rows.map(row => gridRow(els, row, inner))
+  const grid = (rows: GridRow[]) => rows.flatMap(row => gridRow(els, row, inner))
   return drawPanel(els, {
     columns: e.props.bodyColumns,
     rows: e.props.scroll.bodyRows,

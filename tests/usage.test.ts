@@ -1,7 +1,7 @@
 import type { On, SessionUsage } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
-import { COLOR, GRID, levelColor, restWidth } from '../hooks/style'
+import { COLOR, GRID, levelColor, restWidth, spanWidth } from '../hooks/style'
 import type { Segment } from '../hooks/style'
 import { cells } from '../hooks/text'
 import { EMPTY_USAGE, exhaustAt, formatTokens, formatUsd, formatWhen, usageRows } from '../hooks/usage'
@@ -99,17 +99,47 @@ test('进度条占满中间 18 格，已用部分按比例', () => {
   expect(five?.middle[0]?.text).toBe('━'.repeat(11))
 })
 
-test('各种宽度下每列都不超出自己的格数；请求宽度和更宽时不截断', () => {
+/** 一行连同折下去的几行，每行的字 */
+const linesOf = (row: GridRow | undefined) => (row ? [text(row.rest), ...row.more.map(text)] : [])
+
+// 面板可能停靠的宽度：请求的 70 列，开着别的面板（带页签）时更窄，拖宽后更宽
+const WIDTHS = [40, 44, 48, 52, 56, 60, 66, 70, 90, 120]
+
+test('各种宽度下每列都不超出自己的格数，放不下的整块折到下一行，不出现 …', () => {
   const busy: Usage = { ...WORKING, costUsd: 1234.5, lastMessageCostUsd: 123.4, compactions: 12 }
-  for (const columns of [30, 40, 50, 60, 70, 90, 120]) {
+  for (const columns of [30, ...WIDTHS]) {
     const inner = columns - 4
     for (const row of usageRows(busy, NOW, inner)) {
       expect(cells(row.label) <= GRID.label, `${columns} 列 ${row.key} 标签`).toBe(true)
       expect(cells(text(row.middle)) <= GRID.middle, `${columns} 列 ${row.key} 中间`).toBe(true)
       expect(cells(text(row.rest)) <= restWidth(inner), `${columns} 列 ${row.key} 其余`).toBe(true)
-      if (columns >= 70) expect(text(row.rest), `${columns} 列 ${row.key}`).not.toContain('…')
+      for (const line of row.more) expect(cells(text(line)) <= spanWidth(inner), `${columns} 列 ${row.key} 折行`).toBe(true)
+      if (columns >= 40) expect(linesOf(row).join(' / '), `${columns} 列 ${row.key}`).not.toContain('…')
     }
   }
+})
+
+test('窄到放不下时 7d 带星期的重置时刻、已压缩次数、预计用尽、本会话花费都完整折到下一行', () => {
+  // 用户实测（.22）：7d 写成"周一 17:00 重…"，上下文写成"5% 48k / 1M · 已…"
+  const narrow: Usage = {
+    ...WORKING,
+    context: { tokens: 48_000, window: 1_000_000, percent: 5 },
+    rateLimits: [...WORKING.rateLimits.filter(one => one.kind === 'five_hour'), { kind: 'seven_day', percentUsed: 18, resetsAt: iso(at(19, 17)) }],
+  }
+  for (const columns of WIDTHS) {
+    const rows = usageRows(narrow, NOW, columns - 4)
+    const joined = (key: string) => linesOf(rows.find(row => row.key === key)).join(' ')
+    expect(joined('seven_day'), `${columns} 列`).toContain('周一 17:00 重置')
+    expect(joined('five_hour'), `${columns} 列`).toContain('预计 21:50 用尽')
+    expect(joined('context'), `${columns} 列`).toContain('48k / 1M')
+    expect(joined('context'), `${columns} 列`).toContain('已压缩 1 次')
+    expect(joined('cost'), `${columns} 列`).toContain('本会话 $4.21')
+  }
+  // 放得下时一行排完，不折
+  expect(usageRows(narrow, NOW, 66).every(row => row.more.length === 0)).toBe(true)
+  // 52 列（框内 48 格，第三列 20 格）：上下文折一次，折下去的那行不带行首的 " · "
+  const context = usageRows(narrow, NOW, 48).find(row => row.key === 'context')
+  expect(linesOf(context)).toEqual(['  5% 48k / 1M', '已压缩 1 次'])
 })
 
 test('格式：token、金额、时刻', () => {
@@ -222,6 +252,44 @@ test('终端上，约 70 列和拖宽、拖窄后：六个区块按顺序、用�
     if (columns >= 70) expect(five).toContain('预计 21:50 用尽')
     await ui.unmount()
   }
+})
+
+test('终端上，比请求的 70 列窄时：用量框、缓存框不截断，折下去的行接在本行下面', async ($, on) => {
+  const reading = engine(on)
+  reading.current = {
+    ...READING,
+    context: { tokens: 48_000, window: 1_000_000, percent: 5 },
+    rateLimits: [READING.rateLimits[0]!, { kind: 'seven_day', percentUsed: 18, resetsAt: iso(at(19, 17)) }],
+  }
+  await $.session.start(SESSION)
+  await $.session.compact({ trigger: 'manual', messages: SUMMARY })
+  for (const columns of [40, 46, 52, 60, 70, 90]) {
+    const ui = await $.ui.mount(pane(columns))
+    for (const id of ['usage', 'cache']) {
+      const section = flat(await ui.find({ key: `section:${id}` }))
+      expect(section, `${columns} 列 ${id}`).not.toContain('…')
+    }
+    const usage = flat(await ui.find({ key: 'section:usage' }))
+    expect(usage, `${columns} 列`).toContain('周一 17:00 重置')
+    expect(usage, `${columns} 列`).toContain('已压缩 1 次')
+    expect(usage, `${columns} 列`).toContain('预计 21:50 用尽')
+    // 折下去的行各是一行，宽度和框内一样
+    const inner = columns - 4
+    const keys = ['five_hour', 'seven_day', 'context', 'cost'].flatMap(key => [2, 3, 4].map(line => `row:${key}:${line}`))
+    const wrapped = (await Promise.all(keys.map(key => ui.find({ key })))).filter(one => one !== undefined)
+    for (const one of wrapped) expect(one.props.width).toBe(inner)
+    if (columns <= 52) expect(wrapped.length > 0, `${columns} 列有折行`).toBe(true)
+    if (columns >= 70) expect(wrapped).toHaveLength(0)
+    await ui.unmount()
+  }
+})
+
+test('还没有请求时缓存框上边框右侧什么都不画（不留空格）', async ($, on) => {
+  engine(on)
+  await $.session.start(SESSION)
+  const ui = await $.ui.mount(pane(52))
+  expect(await ui.find({ key: 'status:section:cache' })).toBeUndefined()
+  await ui.unmount()
 })
 
 test('窗口还没开始时用量框写"发送消息后开始计时"', async ($, on) => {

@@ -458,6 +458,34 @@ describe('缓存框', () => {
     expect(text(none?.rest ?? [])).toBe('')
   })
 
+  test('还没有任何主会话请求时，过期代价、已重建写 —，不写像算出来的 0', () => {
+    const status: Segment = { text: '已启用', color: COLOR.ok }
+    const none = view(freshCache())
+    expect(none.expiresAt).toBe(null)
+    const rows = cacheRows(none, status, at(13, 20), 66)
+    const row = (key: string) => rows.find(one => one.key === key)
+    expect(text(row('cache-hit')?.middle ?? [])).toBe('上一条消息 —')
+    expect(text(row('cache-hit')?.rest ?? [])).toBe('本会话 —')
+    expect(text(row('cache-cost')?.middle ?? [])).toBe('重建 —')
+    expect(text(row('cache-cost')?.rest ?? [])).toBe('约 —')
+    expect(text(row('cache-rebuilt')?.middle ?? [])).toBe('本会话 —')
+    expect(text(row('cache-rebuilt')?.rest ?? [])).toBe('')
+  })
+
+  test('窄到放不下时各行整块折到下一行，长的保活状态逐行折下去，都不出现 …', () => {
+    const stopped: Segment = { text: '已停止（续期请求出错：connect ECONNREFUSED 127.0.0.1:443）', color: COLOR.danger }
+    const view = sample({ hitRate: { last: 1, session: 1 }, coldWrites: { count: 12, usd: 123.4 } })
+    for (const columns of [40, 46, 52, 60, 70, 90]) {
+      const rows = cacheRows(view, stopped, at(13, 20), columns - 4)
+      const lines = rows.flatMap(row => [text(row.middle), text(row.rest), ...row.more.map(text)])
+      expect(lines.join(' / '), `${columns} 列`).not.toContain('…')
+      expect(lines.join(''), `${columns} 列`).toContain('本会话 100%')
+      expect(lines.join('').replace(/ /g, ''), `${columns} 列`).toContain(stopped.text.replace(/ /g, ''))
+      const keepalive = rows.find(row => row.key === 'keepalive')
+      for (const line of keepalive?.more ?? []) expect(line[0]?.color).toBe(COLOR.danger)
+    }
+  })
+
   test('保活状态：自动开启的五种，加上本会话手动开、手动关', () => {
     const idle = { stopped: null, renewing: false }
     const base = { settings: SETTINGS, override: null, context: 151000, loop: idle }

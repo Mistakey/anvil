@@ -143,6 +143,21 @@ export function modelLabel(id: string): string {
   return version ? `${family} ${version}` : family
 }
 
+/**
+ * 会话开始、还没有请求时的 effort：从合并后的设置里取，当前模型自己的（modelSettings）优先，
+ * 其次全局的 effortLevel；都没有时为 null。第一次主会话请求之后以请求带的为准。
+ */
+export function startEffort(settings: Readonly<Record<string, unknown>>, model: string | null): string | number | null {
+  const level = (value: unknown) => (typeof value === 'string' || typeof value === 'number' ? value : null)
+  const perModel = settings.modelSettings
+  const own =
+    model !== null && perModel !== null && typeof perModel === 'object'
+      ? (perModel as Record<string, unknown>)[model]
+      : undefined
+  const ownLevel = own !== null && typeof own === 'object' ? level((own as Record<string, unknown>).effortLevel) : null
+  return ownLevel ?? level(settings.effortLevel)
+}
+
 /** effort 五档颜色（D10）：low 绿、medium 黄、high 橙、xhigh 红、max 红加粗；数字档不着色 */
 export function effortSegment(effort: string | number): Segment {
   switch (effort) {

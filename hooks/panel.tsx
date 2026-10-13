@@ -152,7 +152,7 @@ function frame(els: Els, section: Section, body: SectionBody | undefined, column
   const { Box, Text } = els
   // 列表标题前面引擎还画"a: "，占 3 格
   const taken = `${TITLE_IN_BORDER ? `  ${title}` : title}${section.hotkey && onPress ? 'a: ' : ''}`
-  const status = body?.status ? fitSegments([{ text: ' ' }, ...body.status, { text: ' ' }], statusRoom(columns, taken)) : []
+  const status = body?.status && body.status.length > 0 ? fitSegments([{ text: ' ' }, ...body.status, { text: ' ' }], statusRoom(columns, taken)) : []
   const head = heading(els, section, title, onPress)
   // 嵌在边框上时左右各空一格；空格放在 Button 外面，引擎画的"a: "才紧挨着标题："╭─ a: 标题 ─"
   const inBorder = (
@@ -252,10 +252,13 @@ function listHeight(body: ListBody, fitted: Fit): number {
 
 const itemHeights = (body: ListBody) => body.items.map(item => Math.max(1, item.rows.length))
 
-/** 用量框、缓存框共用的三列网格的一行 */
-export function gridRow(els: Els, row: GridRow, inner: number): RenderElement {
+/**
+ * 用量框、缓存框共用的三列网格的一行。第三列放不下而折下去的几行（row.more）各画成一行，
+ * 标签那一列空着、从中间一列起占满后两列；一行一个元素，框的高度按元素数算（fitLists）。
+ */
+export function gridRow(els: Els, row: GridRow, inner: number): RenderElement[] {
   const { Box, Text } = els
-  return (
+  const first = (
     <Box key={`row:${row.key}`} columnGap={GRID.gap} width={inner} flexShrink={0}>
       <Box width={GRID.label} flexShrink={0}>
         <Text color={COLOR.muted}>{fit(row.label, GRID.label)}</Text>
@@ -276,6 +279,15 @@ export function gridRow(els: Els, row: GridRow, inner: number): RenderElement {
       )}
     </Box>
   )
+  const more = row.more.map((line, index) => (
+    <Box key={`row:${row.key}:${index + 2}`} columnGap={GRID.gap} width={inner} flexShrink={0}>
+      <Box width={GRID.label} flexShrink={0} />
+      <Box width={spanWidth(inner)} flexShrink={0}>
+        <Text wrap="truncate">{segments(els, line)}</Text>
+      </Box>
+    </Box>
+  ))
+  return [first, ...more]
 }
 
 /**
