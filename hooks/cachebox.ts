@@ -24,13 +24,13 @@ export function hitColor(rate: number): string | undefined {
   return undefined
 }
 
-/** ● | "有效 · 21:40 过期"（绿）或"已过期 N 分钟"（红），● 同色；还没有请求、刚压缩完时暗色"● —"，框始终三行 */
+/** ● | "有效 · 过期 21:40"（绿）或"已过期 N 分钟"（红），● 同色；还没有请求、刚压缩完时暗色"● —"，框始终三行 */
 function stateRow(view: CacheView, now: number): GridSpec {
   if (view.expiresAt === null || view.compacted) return { key: 'state', label: [{ text: '●', color: COLOR.label }], value: [piece([{ text: '—', color: COLOR.label }])] }
   const [text, color] =
     now >= view.expiresAt
       ? [`已过期 ${formatExpired(now - view.expiresAt)}`, COLOR.danger]
-      : [`有效 · ${formatWhen(view.expiresAt, now)} 过期`, COLOR.ok]
+      : [`有效 · 过期 ${formatWhen(view.expiresAt, now)}`, COLOR.ok]
   return { key: 'state', label: [{ text: '●', color }], value: [piece([{ text, color }])] }
 }
 
