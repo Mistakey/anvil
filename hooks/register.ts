@@ -41,6 +41,7 @@ import {
   loopView,
   nextDelay,
   renew,
+  restart,
   startStretch,
   stopFor,
   thrownStop,
@@ -181,7 +182,7 @@ async function publishLoop($: EngineInterface, loop: Loop) {
 async function armKeepalive($: EngineInterface, cache: Cache, loop: Loop, settings: Settings) {
   disarm(loop)
   if (loop.stopped || !isEnabled(settings, await read($, keepaliveOverride), cache.context)) return publishLoop($, loop)
-  const delay = nextDelay(cache, await $.clock.now())
+  const delay = nextDelay(cache, loop, await $.clock.now())
   if (delay === 'limit') return stopKeepalive($, loop, LIMIT_STOP)
   if (delay !== null) loop.pending = $.clock.after(delay, () => void pingKeepalive($, cache, loop, settings).catch(() => undefined))
   await publishLoop($, loop)
@@ -199,7 +200,7 @@ async function pingKeepalive($: EngineInterface, cache: Cache, loop: Loop, setti
   if (loop.stopped || loop.inFlight) return
   if (!isEnabled(settings, await read($, keepaliveOverride), cache.context)) return publishLoop($, loop)
   const now = await $.clock.now()
-  const action = dueAction(cache, now)
+  const action = dueAction(cache, loop, now)
   if (action === 'limit') return stopKeepalive($, loop, LIMIT_STOP)
   if (action === 'rearm') return armKeepalive($, cache, loop, settings)
 
@@ -224,13 +225,13 @@ async function pingKeepalive($: EngineInterface, cache: Cache, loop: Loop, setti
 
 /**
  * `/anvil keepalive`：运行中（已启用、进行中）就关掉，没开或已停下就开启，之后不再看自动开启和阈值（D3）。
- * 开启时这一段空闲的停下也清掉，按缓存状态重新定时；关闭时 armKeepalive 只撤掉定时器。
+ * 开启时这一段空闲的停下也清掉、12 小时上限从现在重新算，按缓存状态重新定时；关闭时 armKeepalive 只撤掉定时器。
  */
 async function toggleKeepalive($: EngineInterface, cache: Cache, loop: Loop, settings: Settings) {
   const isRunning = isEnabled(settings, await read($, keepaliveOverride), cache.context) && loop.stopped === null
   const isOn = !isRunning
   await update($, keepaliveOverride, () => isOn)
-  if (isOn) loop.stopped = null
+  if (isOn) restart(loop, await $.clock.now())
   await armKeepalive($, cache, loop, settings)
   return isOn ? '缓存保活已开启（本会话）' : '缓存保活已关闭（本会话）'
 }

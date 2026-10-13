@@ -269,6 +269,32 @@ describe('停下', () => {
     expect(w.forks).toHaveLength(14)
   })
 
+  test('续满 12 小时停下后手动重新开启：照常续期，新的 12 小时从开启时算起', async ($, on) => {
+    const w = engine(on, { forks: Array.from({ length: 40 }, () => WARM) })
+    await $.session.start(SESSION)
+    await turn($)
+    await w.clock.advance(IDLE_LIMIT_MS)
+    expect((await keepaliveRow($)).text).toBe('已停止（空闲超过 12 小时）')
+    // 最后一次续期在 11h40m，缓存到 12h40m 过期；过期前 10 分钟敲一次
+    await w.clock.advance(10 * MIN)
+    expect((await $.command.run(anvil('keepalive'))).text).toBe('缓存保活已开启（本会话）')
+    expect(await keepaliveRow($)).toEqual({ text: '进行中（本会话）', color: COLOR.ok })
+
+    // 上一次续期之后 50 分钟（12h30m）照常发、续期
+    await w.clock.advance(20 * MIN)
+    expect(w.forks).toHaveLength(15)
+    expect(cacheOf(w.state).expiresAt).toBe(START + 12 * HOUR + 30 * MIN + HOUR)
+
+    // 新的上限在开启后 12 小时（24h10m）：之前每 50 分钟一次，最后一次在 23h20m
+    await w.clock.advance(IDLE_LIMIT_MS - 20 * MIN - 1 * SEC)
+    expect(w.forks).toHaveLength(28)
+    expect((await keepaliveRow($)).text).toBe('进行中（本会话）')
+    await w.clock.advance(1 * SEC)
+    expect(await keepaliveRow($)).toEqual({ text: '已停止（空闲超过 12 小时）', color: COLOR.muted })
+    await w.clock.advance(3 * HOUR)
+    expect(w.forks).toHaveLength(28)
+  })
+
   for (const [name, answer] of [
     ['没读到主会话缓存', { read: 0, write: 150000 }],
     ['写入过多', { read: 75000, write: 70000 }],

@@ -35,10 +35,12 @@ export type Loop = {
   /** 这一段空闲里续期成功的次数 */
   renewals: number
   stopped: KeepaliveStop | null
+  /** 这一段空闲里用 `/anvil keepalive` 重新开启的时刻，12 小时上限从它算起；0 表示没有 */
+  restartedAt: number
 }
 
 export function freshLoop(): Loop {
-  return { pending: null, inFlight: false, renewals: 0, stopped: null }
+  return { pending: null, inFlight: false, renewals: 0, stopped: null, restartedAt: 0 }
 }
 
 export function disarm(loop: Loop) {
@@ -51,6 +53,13 @@ export function startStretch(loop: Loop) {
   disarm(loop)
   loop.renewals = 0
   loop.stopped = null
+  loop.restartedAt = 0
+}
+
+/** 停下后手动重新开启（D3）：清掉停下，这一段空闲的 12 小时上限从现在重新算 */
+export function restart(loop: Loop, now: number) {
+  loop.stopped = null
+  loop.restartedAt = now
 }
 
 export const loopView = (loop: Loop): KeepaliveView => ({ stopped: loop.stopped, renewing: loop.inFlight || loop.renewals > 0 })
@@ -66,8 +75,11 @@ export function isEnabled(settings: Settings, override: boolean | null, context:
   return override ?? isAutomatic(settings, context)
 }
 
-/** 这一段空闲的截止时刻：最后一次主会话请求 + 12 小时（续期不算请求，不推后它） */
-const deadlineOf = (cache: Cache) => cache.lastRequestAt + IDLE_LIMIT_MS
+/**
+ * 这一段空闲的截止时刻：最后一次主会话请求 + 12 小时（续期不算请求，不推后它）；
+ * 停下后手动重新开启过，就从开启的时刻算起
+ */
+const deadlineOf = (cache: Cache, loop: Loop) => Math.max(cache.lastRequestAt, loop.restartedAt) + IDLE_LIMIT_MS
 
 /** 上一次读到缓存（主会话请求或续期）之后 50 分钟 */
 const pingAtOf = (cache: Cache) => cache.expiresAt - TTL_MS + PING_AFTER_MS
@@ -81,9 +93,9 @@ export const LIMIT_STOP: KeepaliveStop = { kind: 'limit', reason: '空闲超过 
  * 定时器该等多久（cache-tax 的 arm）：到发请求的时刻，但不晚于过期和这段空闲的截止。
  * 返回 null 表示不用定时；'limit' 表示这段空闲已到上限，该停下。
  */
-export function nextDelay(cache: Cache, now: number): number | 'limit' | null {
+export function nextDelay(cache: Cache, loop: Loop, now: number): number | 'limit' | null {
   if (isCold(cache, now)) return null
-  const deadline = deadlineOf(cache)
+  const deadline = deadlineOf(cache, loop)
   if (now >= deadline) return 'limit'
   return Math.min(deadline - now, cache.expiresAt - now, Math.max(1000, pingAtOf(cache) - now))
 }
@@ -92,8 +104,8 @@ export function nextDelay(cache: Cache, now: number): number | 'limit' | null {
  * 定时器到点时做什么（cache-tax 的 ping 开头）：到上限就停；冷了或还没到发请求的时刻
  * （定时器停在过期或截止上，或已被新的请求顶替）就重新定时；否则发请求。
  */
-export function dueAction(cache: Cache, now: number): 'limit' | 'rearm' | 'ping' {
-  if (cache.lastRequestAt > 0 && now >= deadlineOf(cache)) return 'limit'
+export function dueAction(cache: Cache, loop: Loop, now: number): 'limit' | 'rearm' | 'ping' {
+  if (cache.lastRequestAt > 0 && now >= deadlineOf(cache, loop)) return 'limit'
   if (isCold(cache, now)) return 'rearm'
   if (now < pingAtOf(cache) - 1000) return 'rearm'
   return 'ping'
