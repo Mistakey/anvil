@@ -125,34 +125,35 @@ export function fillRefusal(filled: Pick<PromptFilled, 'refusal'>): string {
 
 // ---------------------------------------------------------------- 框的状态
 
-export const startTranslating = (box: TranslateBox, text: string): TranslateBox => ({ ...box, phase: 'working', text, reason: '', empty: false })
+/**
+ * 按 Enter 送去翻译。引擎在提交后清空输入框、把焦点交回主输入框（2.1.296 实测，anvil-k0t.30），
+ * 所以框记为空；不再画起始文字，免得框重建时把这句又画回来。
+ */
+export const startTranslating = (box: TranslateBox, text: string): TranslateBox => ({ ...box, phase: 'working', text, reason: '', seed: '', empty: true })
 
+/** 追加成功：照引擎的做法，框空着、焦点在主输入框，不重画中文 */
 export const translated = (box: TranslateBox, words: number): TranslateBox => ({ ...box, phase: 'done', words, reason: '' })
 
-export const failed = (box: TranslateBox, reason: string): TranslateBox => ({ ...box, phase: 'failed', reason })
+/** 失败：换一代输入框，把送去翻译的中文画回去，焦点由 register.ts 交给它，按 Enter 重试 */
+export const failed = (box: TranslateBox, reason: string): TranslateBox => ({
+  ...box,
+  phase: 'failed',
+  reason,
+  field: box.field + 1,
+  seed: box.text,
+  empty: box.text === '',
+})
+
+/** 按 Enter 要不要翻译：框里没字、正在翻译时不翻 */
+export const shouldTranslate = (box: TranslateBox, value: string): boolean => value.trim() !== '' && box.phase !== 'working'
 
 /**
- * 按 Enter 要不要翻译：框里没字、正在翻译时不翻；已经追加过、中文没改时也不翻，
- * 同一句再追加一遍几乎一定是误按。
- */
-export function shouldTranslate(box: TranslateBox, value: string): boolean {
-  if (value.trim() === '' || box.phase === 'working') return false
-  return !(box.phase === 'done' && value === box.text)
-}
-
-/**
- * 用户在框里改字。译文追加后：接着中文往后写（不只是空白）就是开始写下一句，
- * 换一代输入框、只留下新敲的字；改的是原来那句，就去掉"已追加"，中文照旧。
+ * 用户在框里改字。追加之后敲下不只是空白的字，就是开始写下一句，"已追加"去掉；
  * 其余时候只记下框空没空。不需要变时返回 null。
  */
 export function typed(box: TranslateBox, value: string): TranslateBox | null {
   const empty = value === ''
-  if (box.phase === 'done' && value !== box.text) {
-    if (!value.startsWith(box.text)) return { ...box, phase: 'idle', empty }
-    const added = value.slice(box.text.length)
-    if (added.trim() === '') return null
-    return { ...EMPTY_BOX, field: box.field + 1, seed: added.trimStart(), empty: false }
-  }
+  if (box.phase === 'done' && value.trim() !== '') return { ...box, phase: 'idle', empty }
   return empty === box.empty ? null : { ...box, empty }
 }
 
@@ -180,12 +181,14 @@ const MIN_FIELD = cells(PLACEHOLDER) + cells(` ⏎ ${SUBMIT}`) + 1
 
 /**
  * 框下面（或空框时右侧）那行状态；框里有字、没有状态可说时为 null。
- * 按键提示只在空框时画：框里有字时引擎已经在输入框后面画了「⏎ 翻译」，两处提示会挤在一起（anvil-k0t.30）。
+ * 按键提示只在空框时画：框里有字时引擎已经在输入框后面画了「⏎ 翻译」，两处提示会挤在一起（anvil-k0t.30）；
+ * 失败时也只写原因，中文画回框里，按 Enter 重试就靠引擎那处「⏎ 翻译」（anvil-k0t.33）。
+ * 「⏎ 翻译」去不掉：submitLabel 给空串或空格，引擎仍画「⏎」（anvil-k0t.33 伪终端实测）。
  */
 function status(box: TranslateBox): { text: string; color: string } | null {
   if (box.phase === 'working') return { text: '◐ 正在翻译', color: COLOR.muted }
   if (box.phase === 'done') return { text: `${ICON.done} 已追加 ${box.words} 个词`, color: COLOR.ok }
-  if (box.phase === 'failed') return { text: `${ICON.failed} ${box.reason}，按 Enter 重试`, color: COLOR.danger }
+  if (box.phase === 'failed') return { text: `${ICON.failed} ${box.reason}`, color: COLOR.danger }
   return box.empty ? { text: 'Enter 翻译 · Shift+Enter 换行', color: COLOR.dim } : null
 }
 
