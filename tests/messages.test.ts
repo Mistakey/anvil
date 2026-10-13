@@ -77,7 +77,7 @@ test('用户提交的消息按顺序进入我的消息：序号 + 内容；斜�
   await ui.unmount()
 })
 
-test('序号暗色、右对齐成一列；长消息最多两行，第二行和正文对齐，超出截断；条与条之间不空行', async ($, on) => {
+test('序号次要色、右对齐成一列；长消息最多两行，第二行和正文对齐，超出截断；条与条之间不空行', async ($, on) => {
   const { transcript } = engine(on)
   await $.session.start(SESSION)
   const long = '把缓存框和用量框的排版改一下，'.repeat(10)
@@ -88,7 +88,7 @@ test('序号暗色、右对齐成一列；长消息最多两行，第二行和�
   const ui = await $.ui.mount(pane(false))
   const seqs = (await ui.findAll({ type: 'Text' })).filter(one => /^ *\d+ $/.test(one.text))
   expect(seqs.map(one => one.text)).toEqual(['  1 ', '  2 ', '  3 ', '  4 ', '  5 ', '  6 ', '  7 ', '  8 ', '  9 ', ' 10 '])
-  expect(seqs.every(one => one.props.color === COLOR.label)).toBe(true)
+  expect(seqs.every(one => one.props.color === COLOR.secondary)).toBe(true)
 
   expect(flat(await ui.find({ key: `message:${ids[0]}` }))).toBe('  1 继续')
   expect((await ui.find({ key: `row:message:${ids[0]}` }))?.props.height).toBe(1)

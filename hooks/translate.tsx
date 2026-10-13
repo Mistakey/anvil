@@ -194,15 +194,16 @@ const MIN_FIELD = cells(PLACEHOLDER) + cells(` ⏎ ${SUBMIT}`) + 1
  * 「⏎ 翻译」去不掉：submitLabel 给空串或空格，引擎仍画「⏎」（anvil-k0t.33 伪终端实测）。
  */
 function status(box: TranslateBox): { text: string; color: string } | null {
-  if (box.phase === 'working') return { text: `${WORKING} 正在翻译`, color: COLOR.muted }
+  if (box.phase === 'working') return { text: `${WORKING} 正在翻译`, color: COLOR.secondary }
   if (box.phase === 'done') return { text: `${ICON.done} 已追加 ${box.words} 个词`, color: COLOR.ok }
   if (box.phase === 'failed') return { text: `${ICON.failed} ${box.reason}`, color: COLOR.danger }
-  return box.empty ? { text: 'Enter 翻译 · Shift+Enter 换行', color: COLOR.dim } : null
+  return box.empty ? { text: 'Enter 翻译 · Shift+Enter 换行', color: COLOR.secondary } : null
 }
 
 function border(box: TranslateBox): string {
-  if (box.phase === 'failed') return COLOR.denialsBorder
-  return box.phase === 'idle' ? COLOR.faint : COLOR.dim
+  if (box.phase === 'failed') return COLOR.dangerLine
+  // 空着时和框间分隔线一样是线色；翻译中、追加后和我的消息的边框一样是次要色
+  return box.phase === 'idle' ? COLOR.line : COLOR.secondary
 }
 
 /** 上边框：标题嵌在里面，和面板各框的标题对齐（`╭─ 标题 ─…`） */
@@ -212,13 +213,10 @@ function topRule(els: Pick<Els, 'Box' | 'Text'>, columns: number, color: string)
   const rest = Math.max(0, columns - cells(lead) - cells(TITLE) - 1)
   return (
     <Box key="title:translate" width={columns} flexShrink={0}>
-      <Text color={color}>
-        {lead}
-        <Text bold color={COLOR.text}>
-          {TITLE}
-        </Text>
-        {` ${'─'.repeat(rest)}`}
-      </Text>
+      {/* 标题不放进带线色的 Text 里：嵌套的 Text 会沿用外层的颜色，标题就成了线色 */}
+      <Text color={color}>{lead}</Text>
+      <Text bold>{TITLE}</Text>
+      <Text color={color}>{` ${'─'.repeat(rest)}`}</Text>
     </Box>
   )
 }
@@ -243,7 +241,7 @@ export function drawTranslateBox(els: Els, view: BandView): RenderElement {
           view.box.phase === 'working' && index === 0 && text.startsWith(WORKING) ? (
             // 原地替换 ◐：转动的图标加后面的字，宽度不变
             <Box key={`status:${index}`} flexShrink={0}>
-              {spin(els, view.live ?? still(0), { key: 'spin:translate', color: shown.color })}
+              {spin(els, view.live ?? still(0), { key: 'spin:translate', color: COLOR.active })}
               <Text color={shown.color}>{text.slice(WORKING.length)}</Text>
             </Box>
           ) : (

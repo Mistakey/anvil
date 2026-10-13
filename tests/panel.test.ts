@@ -415,6 +415,27 @@ test('我的消息占满剩余高度，身份栏贴底：各区块加身份栏�
   }
 })
 
+test('面板矮、最新一条消息有两行时：先收成一行，还放不下就不画"更早的"，身份栏不被挤出面板', async ($, on) => {
+  layoutEngine(on)
+  await $.session.start(SESSION)
+  await addAgents($, 2)
+  await addDenials($, 3)
+  for (let n = 0; n < 4; n += 1) await $.session.append(appended(`第 ${n + 1} 条：${'这是一条很长的消息，用来把我的消息撑成两行。'.repeat(4)}`))
+  for (const columns of PANEL_WIDTHS) {
+    // 39 行：别的区块和身份栏占 36 行，我的消息只剩 1 行；40 行剩 2 行；41 行剩 3 行，放得下"更早的"加两行的最新一条
+    for (const [bodyRows, lines] of [[39, 1], [40, 2], [41, 3]] as const) {
+      const ui = await $.ui.mount(sized(columns, bodyRows))
+      expect(await totalHeight(ui), `${columns} 列 ${bodyRows} 行`).toBe(bodyRows)
+      expect(await order(ui), `${columns} 列 ${bodyRows} 行`).toEqual(['cache', 'usage', 'agents', 'denials', 'messages', 'identity:git', 'identity:model', 'identity:speed'])
+      const rows = children(await ui.find({ key: 'box:messages' }))
+      expect(rows.reduce((sum, one) => sum + (one.props?.height ?? 1), 0), `${columns} 列 ${bodyRows} 行`).toBe(lines)
+      expect(flat(rows.at(-1))).toContain('第 4 条')
+      expect(flat(rows[0]).includes('更早的'), `${columns} 列 ${bodyRows} 行`).toBe(bodyRows > 39)
+      await ui.unmount()
+    }
+  }
+})
+
 test('消息少时我的消息框也拉高到底：框可伸长、面板至少和可见高度一样高', async ($, on) => {
   layoutEngine(on)
   await $.session.start(SESSION)

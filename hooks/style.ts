@@ -1,39 +1,39 @@
-// 面板共用的样式（spec D10，取自设计稿 Version 32）：颜色、图标、名称 | 值两列、定宽字段、进度条。
+// 面板共用的样式（spec D10）：颜色、图标、名称 | 值两列、定宽字段、进度条。
 
 import { cells, fit } from './text'
 
-/** 一段同色文字；一行由几段拼成 */
+/** 一段同色文字；一行由几段拼成。color 不给时是终端的前景色（正文） */
 export type Segment = { text: string; color?: string; bold?: boolean }
 
+/**
+ * 色板（spec D10，anvil-k0t.44）。正文不设颜色，用终端的前景色，和对话里的字同一种白；
+ * 中性色只有三级：次要文字、图标与分隔符、线。对比度按面板的底色量：引擎给面板画的 #262626
+ * （伪终端实测），和翻译框所在的终端底色（用户的 Dracula #282a36）：次要 6.0 / 5.6:1，图标 3.9 / 3.7:1，线 2.2 / 2.1:1。
+ */
 export const COLOR = {
-  text: '#e6e9ee',
-  /** 标签、次要文字 */
-  muted: '#a7adb8',
-  /** 分隔符 `·`、框与框之间的分隔线、翻译框空着时的边框 */
-  faint: '#5b5f67',
-  /** 提示文字、身份栏的图标；翻译框有内容时的边框 */
-  dim: '#8c939f',
-  /** 用量框、缓存框的名称列，用量框第二行的细节（󰑐 重置时刻、已用 / 上限），我的消息的序号；取自用户 statusline 的次要标签 */
-  label: '#6b7280',
-  /** 进度条的底 */
-  track: '#3a3f48',
-  // 状态色：进度条四档，也用于命中率等
+  /** 次要文字：名称列、标签与单位、第二行的细节、计数、序号、提示、结束了的列表项 */
+  secondary: '#9da3b0',
+  /** 图标和分隔符 `·`：不是文字，比次要文字再暗一级 */
+  icon: '#7a8194',
+  /** 线：框与框之间的分隔线、进度条的底、翻译框空着时的边框 */
+  line: '#555a6b',
+  /** 正在发生：进行中图标、主会话回复时分隔线的呼吸；Claude 橙（引擎的主题色 claude 画成这个值） */
+  active: '#d77757',
+  // 状态色：进度条四档、命中率、缓存有效 / 过期、git 计数；一种颜色一个意思
   ok: '#8fbf7f',
   warn: '#d7bd6f',
   high: '#d79a6f',
   danger: '#e07a7a',
-  // 识别色：各框的标题和边框（spec D10）；避开状态色
+  /** 调暗的红：翻译失败时翻译框的边框 */
+  dangerLine: '#8a4f55',
+  // 识别色：各框的标题和边框（spec D10）
   cache: '#6cc5c0',
   usage: '#7aa7e0',
   agents: '#d78fc4',
+  /** 拒绝就是"被拦下"，和状态色的红是同一个意思，用同一个值 */
   denials: '#e07a7a',
-  /** 调暗的拒绝红：翻译失败时翻译框的边框 */
-  denialsBorder: '#895152',
-  // 身份栏的 git 配色，取自用户原来的 statusline
+  /** 身份栏的分支（git 的识别色） */
   branch: '#b18bd0',
-  ahead: '#d7a65f',
-  added: '#7fae6f',
-  deleted: '#c47878',
 } as const
 
 /** Nerd Font 图标；图标后一律留一个空格 */
@@ -91,17 +91,17 @@ export function levelColor(percent: number): string {
   return COLOR.ok
 }
 
-/** 定长的进度条：已用部分按档着色，其余是暗色底 */
+/** 定长的进度条：已用部分按档着色，其余是线色的底 */
 export function bar(percent: number, width: number): Segment[] {
   const clamped = Math.min(100, Math.max(0, percent))
   const filled = Math.round((clamped / 100) * width)
   return [
     { text: '━'.repeat(filled), color: levelColor(clamped) },
-    { text: '─'.repeat(width - filled), color: COLOR.track },
+    { text: '─'.repeat(width - filled), color: COLOR.line },
   ].filter(segment => segment.text !== '')
 }
 
-export const SEPARATOR: Segment = { text: ' · ', color: COLOR.faint }
+export const SEPARATOR: Segment = { text: ' · ', color: COLOR.icon }
 
 /** 一行里不拆开的一块；join 是它和前一块排在同一行时夹在中间的字（如 " · "），折到下一行行首时不画 */
 export type Piece = { segments: Segment[]; join?: Segment }

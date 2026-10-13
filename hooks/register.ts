@@ -54,6 +54,7 @@ import { faultedModule, liveOf, spinAfter } from './live'
 import { NO_MESSAGES, addMessage, contentText, isMyMessage, messageList, reconcile, settleMessages, userTexts } from './messages'
 import { PANE, PANEL_SUBCOMMAND, drawPanel, gridRow, hidesPanel, innerWidth, spacedGridRows } from './panel'
 import { readSettings } from './settings'
+import { COLOR } from './style'
 import {
   EMPTY_BOX,
   TRANSLATE_SUBCOMMAND,
@@ -89,7 +90,7 @@ import type { Denial, GitView, Identity, KeepaliveStop, ListId, Scrolled, Settin
 //   放进 bodies；三个列表（我的消息、自动模式拒绝、子 agent）交 ListBody 放进 lists，按上限截、
 //   "更早的"那行、展开和收成一行由 panel.tsx 按共同规则做（list.ts）。身份栏的三行交 identity，接在区块之后。
 // - 主输入框上方的 band（AbovePrompt）只画翻译框（translate.tsx），不放别的功能。
-// - 动效（分隔线的扫光、进行中图标、运行中的耗时）用 live.tsx 的 rule / spin / clock 画：有 Client 时交给
+// - 动效（分隔线的呼吸、进行中图标、运行中的耗时）用 live.tsx 的 rule / spin / clock 画：有 Client 时交给
 //   rail.tsx 等 Client 模块，没有或出过错时退回静止；画的时候用 liveFor 取这次怎么画。
 
 // ---------------------------------------------------------------- 设置
@@ -532,16 +533,29 @@ async function foldForDrawing($: EngineInterface, isFocused: boolean) {
   return CLOSED
 }
 
-// ---------------------------------------------------------------- 动效（spec D10）：分隔线的扫光、进行中图标、运行中的耗时
+// ---------------------------------------------------------------- 动效（spec D10）：分隔线的呼吸、进行中图标、运行中的耗时
 
-/** 主会话正在回复：从这一轮的第一次请求到这一轮结束，分隔线上有亮光扫过 */
-const replying = atom({ plugin: 'anvil', key: 'replying' } as const, false)
+/**
+ * 主会话正在回复（从这一轮的第一次请求到这一轮结束）时，这一段从哪一刻起；没在回复时为 null。
+ * 分隔线从这一刻起呼吸，从线色起步
+ */
+const replying = atom({ plugin: 'anvil', key: 'replying' } as const, null as number | null)
 
 /** 出过错的 Client 模块（文件名）：之后画面板、翻译框时不再用它，退回静止 */
 const faults = atom({ plugin: 'anvil', key: 'clientFaults' } as const, [] as string[])
 
+/** 回复从哪一刻起；热重载前存下的是布尔值（anvil-k0t.39 的写法），当作没在回复 */
+async function replyingSince($: EngineInterface): Promise<number | null> {
+  const since: unknown = await read($, replying)
+  return typeof since === 'number' ? since : null
+}
+
 async function setReplying($: EngineInterface, isReplying: boolean) {
-  if ((await read($, replying)) !== isReplying) await update($, replying, () => isReplying)
+  const since = await replyingSince($)
+  if (isReplying && since === null) {
+    const now = await $.clock.now()
+    await update($, replying, () => now)
+  } else if (!isReplying && since !== null) await update($, replying, () => null)
 }
 
 /** 引擎报某个 Client 出错：记下模块，引擎接着重画那一处，这次就不用它了 */
@@ -615,12 +629,12 @@ async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderI
     $.clock.now(),
     read($, identity),
   ])
-  const [cached, keepalive, loop, live, isReplying, focused, histories] = await Promise.all([
+  const [cached, keepalive, loop, live, since, focused, histories] = await Promise.all([
     read($, cacheView),
     keepaliveNow($, settings),
     read($, keepaliveLoop),
     liveFor($, els, e.surface, now),
-    read($, replying),
+    replyingSince($),
     read($, focusKey),
     readHistories($),
   ])
@@ -628,7 +642,7 @@ async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderI
   if (e.props.isFocused) $.clock.after(0, () => void syncMessages($).catch(() => undefined))
   const inner = innerWidth(e.props.bodyColumns)
   // 保活的续期请求在路上：接在"进行中"后面转动的图标
-  const renewing = loop.inFlight ? spinAfter(els, live, { key: 'spin:keepalive', color: keepalive.color }) : undefined
+  const renewing = loop.inFlight ? spinAfter(els, live, { key: 'spin:keepalive', color: COLOR.active }) : undefined
   return drawPanel(els, {
     columns: e.props.bodyColumns,
     rows: e.props.scroll.bodyRows,
@@ -644,7 +658,7 @@ async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderI
     fold: folding,
     identity: identityRows(els, who, e.props.bodyColumns),
     live,
-    isReplying,
+    replyingSince: since,
     onToggle: id => void pressList($, id),
   })
 }

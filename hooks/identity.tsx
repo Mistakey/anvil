@@ -13,7 +13,7 @@ import type { GitOperation, GitView, Identity } from '../types'
 import { formatDuration } from './cache'
 import { COLOR, ICON, SEPARATOR, fitSegments } from './style'
 import type { Segment } from './style'
-import { cells, fit } from './text'
+import { cells, fit, padStart } from './text'
 
 export const EMPTY_IDENTITY: Identity = { dir: '', git: null, model: null, effort: null, tokensPerSecond: null, firstTokenMs: null, requestMs: null }
 
@@ -175,7 +175,7 @@ export function effortSegment(effort: string | number): Segment {
     case 'max':
       return { text: effort, color: COLOR.danger, bold: true }
     default:
-      return { text: String(effort), color: COLOR.muted }
+      return { text: String(effort), color: COLOR.secondary }
   }
 }
 
@@ -217,28 +217,28 @@ function spaced(groups: readonly Segment[][]): Segment[] {
 /** 第一行：目录名、分支、停在一半的命令、各项计数和储藏、改动行数 */
 export function gitLine(identity: Identity, names: number = NAME_CELLS): Segment[] {
   const git = identity.git
-  const dirIcon: Segment = { text: `${ICON.dir} `, color: COLOR.usage }
+  const dirIcon: Segment = { text: `${ICON.dir} `, color: COLOR.icon }
   if (!git) return [dirIcon, { text: identity.dir || '—', bold: true }]
 
   const dir: Segment[] = [dirIcon, { text: git.repo, bold: true }]
-  if (git.worktree) dir.push({ text: ' ' }, { text: `${ICON.worktree} `, color: COLOR.dim }, { text: fit(git.worktree, names) })
-  if (git.sub) dir.push({ text: fit(`/${git.sub}`, names), color: COLOR.muted })
+  if (git.worktree) dir.push({ text: ' ' }, { text: `${ICON.worktree} `, color: COLOR.icon }, { text: fit(git.worktree, names) })
+  if (git.sub) dir.push({ text: fit(`/${git.sub}`, names), color: COLOR.secondary })
 
   const branch: Segment[] = []
   if (git.branch !== null) branch.push({ text: `${ICON.branch} ${fit(git.branch, names)}`, color: COLOR.branch })
   else if (git.commit !== null) branch.push({ text: `${ICON.detached} @${git.commit}`, color: COLOR.branch })
   if (branch.length > 0) {
-    if (git.ahead > 0) branch.push({ text: ` ↑${git.ahead}`, color: COLOR.ahead })
-    if (git.behind > 0) branch.push({ text: ` ↓${git.behind}`, color: COLOR.usage })
-    if (git.noUpstream) branch.push({ text: ' 无上游', color: COLOR.dim })
+    if (git.ahead > 0) branch.push({ text: ` ↑${git.ahead}`, color: COLOR.warn })
+    if (git.behind > 0) branch.push({ text: ` ↓${git.behind}`, color: COLOR.warn })
+    if (git.noUpstream) branch.push({ text: ' 无上游', color: COLOR.secondary })
   }
 
   const marks: (Segment | null)[] = [
     git.conflicts > 0 ? { text: `=${git.conflicts}`, color: COLOR.danger, bold: true } : null,
     git.staged > 0 ? { text: `+${git.staged}`, color: COLOR.ok } : null,
-    git.modified > 0 ? { text: `!${git.modified}`, color: COLOR.ahead } : null,
-    git.untracked > 0 ? { text: `?${git.untracked}`, color: COLOR.muted } : null,
-    git.stashes > 0 ? { text: `${ICON.stash} ${git.stashes}`, color: COLOR.dim } : null,
+    git.modified > 0 ? { text: `!${git.modified}`, color: COLOR.warn } : null,
+    git.untracked > 0 ? { text: `?${git.untracked}`, color: COLOR.secondary } : null,
+    git.stashes > 0 ? { text: `${ICON.stash} ${git.stashes}`, color: COLOR.secondary } : null,
   ]
   const counts: Segment[] = marks
     .filter((one): one is Segment => one !== null)
@@ -248,10 +248,10 @@ export function gitLine(identity: Identity, names: number = NAME_CELLS): Segment
   const changed: Segment[] =
     lines && lines.added + lines.deleted > 0
       ? [
-          { text: `${ICON.lines} `, color: COLOR.dim },
-          { text: `+${lines.added}`, color: COLOR.added },
+          { text: `${ICON.lines} `, color: COLOR.icon },
+          { text: `+${lines.added}`, color: COLOR.ok },
           { text: ' ' },
-          { text: `−${lines.deleted}`, color: COLOR.deleted },
+          { text: `−${lines.deleted}`, color: COLOR.danger },
         ]
       : []
 
@@ -263,18 +263,24 @@ const joined = (parts: readonly Segment[][]) => parts.flatMap((part, index) => (
 /** 第二行：模型 · effort；还没有的项不写 */
 export function modelLine(identity: Identity): Segment[] {
   const parts: Segment[][] = []
-  if (identity.model) parts.push([{ text: `${ICON.model} `, color: COLOR.dim }, { text: modelLabel(identity.model) }])
+  if (identity.model) parts.push([{ text: `${ICON.model} `, color: COLOR.icon }, { text: modelLabel(identity.model) }])
   if (identity.effort !== null) parts.push([effortSegment(identity.effort)])
   return joined(parts)
 }
 
+/**
+ * 后面还跟着字的数值右对齐到定宽，数字变长变短时后面的字不挪位置（spec §3）：
+ * token/s 3 格（到 999），首字 5 格（12.7s、1m35s）；用时在行尾，不用补
+ */
+const SPEED_FIELD = { tokens: 3, seconds: 5 } as const
+
 /** 第三行：N token/s · 首字 N s · 用时 N s；数值不着色，缺的项不写，还没有请求时写 — */
 export function speedLine(identity: Identity): Segment[] {
-  const icon: Segment = { text: `${ICON.speed} `, color: COLOR.dim }
+  const icon: Segment = { text: `${ICON.speed} `, color: COLOR.icon }
   const parts: Segment[][] = []
-  if (identity.tokensPerSecond !== null) parts.push([{ text: String(identity.tokensPerSecond) }, { text: ' token/s', color: COLOR.muted }])
-  if (identity.firstTokenMs !== null) parts.push([{ text: '首字 ', color: COLOR.muted }, { text: formatSeconds(identity.firstTokenMs) }])
-  if (identity.requestMs !== null) parts.push([{ text: '用时 ', color: COLOR.muted }, { text: formatSeconds(identity.requestMs) }])
+  if (identity.tokensPerSecond !== null) parts.push([{ text: padStart(String(identity.tokensPerSecond), SPEED_FIELD.tokens) }, { text: ' token/s', color: COLOR.secondary }])
+  if (identity.firstTokenMs !== null) parts.push([{ text: '首字 ', color: COLOR.secondary }, { text: padStart(formatSeconds(identity.firstTokenMs), SPEED_FIELD.seconds) }])
+  if (identity.requestMs !== null) parts.push([{ text: '用时 ', color: COLOR.secondary }, { text: formatSeconds(identity.requestMs) }])
   return parts.length === 0 ? [icon, { text: '—' }] : [icon, ...joined(parts)]
 }
 
@@ -282,12 +288,21 @@ export function speedLine(identity: Identity): Segment[] {
 
 type Els = Pick<Elements['terminal'], 'Box' | 'Text'>
 
+/**
+ * 左边空 2 格：图标和框里的字（名称列、序号）从同一列起；右边空 1 格，和框的右边线对齐。
+ * 三行都是"图标 内容"，图标都是图标色
+ */
+const PAD = { left: 2, right: 1 } as const
+
+/** 一行里放得下的格数 */
+const room = (columns: number) => Math.max(0, columns - PAD.left - PAD.right)
+
 function line(els: Els, key: string, segments: readonly Segment[], columns: number): RenderElement {
   const { Box, Text } = els
-  // 左右各空 1 格（设计稿 .ft 的 padding），放不下的从行尾截
-  const shown = fitSegments(segments, Math.max(0, columns - 2))
+  // 放不下的从行尾截
+  const shown = fitSegments(segments, room(columns))
   return (
-    <Box key={key} width={columns} flexShrink={0} paddingX={1}>
+    <Box key={key} width={columns} flexShrink={0} paddingLeft={PAD.left} paddingRight={PAD.right}>
       <Text wrap="truncate">
         {shown.map(segment => (
           <Text color={segment.color} bold={segment.bold}>
@@ -303,7 +318,7 @@ function line(els: Els, key: string, segments: readonly Segment[], columns: numb
 export function identityRows(els: Els, identity: Identity, columns: number): RenderElement[] {
   // 名字长时先把名字截短，让后面的计数和行数留在行里；还放不下再从行尾截
   const full = gitLine(identity)
-  const first = cells(full.map(segment => segment.text).join('')) <= columns - 2 ? full : gitLine(identity, NARROW_NAME_CELLS)
+  const first = cells(full.map(segment => segment.text).join('')) <= room(columns) ? full : gitLine(identity, NARROW_NAME_CELLS)
   return [
     line(els, 'identity:git', first, columns),
     line(els, 'identity:model', modelLine(identity), columns),

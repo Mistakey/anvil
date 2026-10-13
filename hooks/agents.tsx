@@ -119,7 +119,7 @@ export function agentCounts(list: readonly SubAgent[]): Segment[] {
 
 /** 状态符号和颜色：状态都配符号或文字，不只靠颜色（D10） */
 const MARK: Record<AgentStatus, Segment> = {
-  running: { text: '◐' },
+  running: { text: '◐', color: COLOR.active },
   done: { text: '\u{F00C}', color: COLOR.ok },
   truncated: { text: '\u{F00C}', color: COLOR.ok },
   failed: { text: '\u{F00D}', color: COLOR.danger },
@@ -173,12 +173,12 @@ function agentRow(els: Els, agent: SubAgent, now: number, inner: number, onPress
   const segments: Segment[] = [
     ...(agent.seq > 9 ? [{ text: `${padStart(String(agent.seq), COLUMN.seq)} `, color: COLOR.agents, bold: true }] : []),
     { ...MARK[agent.status], text: padEnd(MARK[agent.status].text, COLUMN.mark + COLUMN.gap) },
-    { text: task, color: isOver ? COLOR.muted : COLOR.text },
+    { text: task, ...(isOver ? { color: COLOR.secondary } : {}) },
     ...(note ? [{ text: note, color: COLOR.warn }] : []),
     { text: ' '.repeat(Math.max(0, width - cells(task) - cells(note)) + COLUMN.gap) },
-    { text: padStart(modelName(agent.model), COLUMN.model), color: COLOR.muted },
+    { text: padStart(modelName(agent.model), COLUMN.model), color: COLOR.secondary },
     { text: ' '.repeat(COLUMN.gap) },
-    { text: padStart(elapsed(agent, now), COLUMN.time), color: COLOR.muted },
+    { text: padStart(elapsed(agent, now), COLUMN.time), color: COLOR.secondary },
   ]
   const hotkey = agent.seq <= 9 ? String(agent.seq) : undefined
   const isRunning = agent.status === 'running'
@@ -194,7 +194,7 @@ function agentRow(els: Els, agent: SubAgent, now: number, inner: number, onPress
       ) : null}
       {isRunning && live.elapsed ? (
         <Box key={`over:time:${agent.id}`} position="absolute" top={0} left={inner - COLUMN.time}>
-          {clock(els, live, { key: `clock:agent:${agent.id}`, since: agent.spawnedAt, endAt: null, color: COLOR.muted, width: COLUMN.time, inverse: isFocused })}
+          {clock(els, live, { key: `clock:agent:${agent.id}`, since: agent.spawnedAt, endAt: null, color: COLOR.secondary, width: COLUMN.time, inverse: isFocused })}
         </Box>
       ) : null}
     </Box>
@@ -208,7 +208,7 @@ function detailRow(els: Els, key: string, label: string, content: readonly Segme
   return (
     <Box key={key} width={inner} flexShrink={0} paddingLeft={DETAIL.indent} columnGap={DETAIL.gap}>
       <Box width={DETAIL.label} flexShrink={0}>
-        <Text color={COLOR.muted}>{label}</Text>
+        <Text color={COLOR.secondary}>{label}</Text>
       </Box>
       <Box width={rest} flexShrink={0}>
         <Text wrap="truncate">{texts(els, content)}</Text>
@@ -227,10 +227,10 @@ export function agentDetail(els: Els, agent: SubAgent, inner: number): RenderEle
     detailRow(els, `detail:${id}:run`, '执行', [
       { text: `${agent.steps} 步` },
       SEPARATOR,
-      { text: '上下文 ', color: COLOR.muted },
+      { text: '上下文 ', color: COLOR.secondary },
       { text: formatTokens(agent.context) },
       SEPARATOR,
-      { text: '输出 ', color: COLOR.muted },
+      { text: '输出 ', color: COLOR.secondary },
       { text: formatTokens(agent.output) },
     ], inner),
   )
@@ -238,14 +238,14 @@ export function agentDetail(els: Els, agent: SubAgent, inner: number): RenderEle
   if (calls) {
     calls.forEach((call, index) => {
       const head = { text: call.tool, bold: true, color: call.isError ? COLOR.danger : undefined }
-      const what = call.text ? [{ text: ` ${fit(call.text, Math.max(1, rest - cells(call.tool) - 1))}`, color: COLOR.muted }] : []
+      const what = call.text ? [{ text: ` ${fit(call.text, Math.max(1, rest - cells(call.tool) - 1))}`, color: COLOR.secondary }] : []
       rows.push(detailRow(els, `detail:${id}:call:${index}`, index === 0 ? '最近调用' : '', [head, ...what], inner))
     })
   } else {
-    rows.push(detailRow(els, `detail:${id}:call:0`, '最近调用', [{ text: '—', color: COLOR.muted }], inner))
+    rows.push(detailRow(els, `detail:${id}:call:0`, '最近调用', [{ text: '—', color: COLOR.secondary }], inner))
   }
   const answer = agent.answer ? fit(agent.answer, rest) : '—'
-  rows.push(detailRow(els, `detail:${id}:answer`, '回答', [{ text: answer, color: agent.answer ? undefined : COLOR.muted }], inner))
+  rows.push(detailRow(els, `detail:${id}:answer`, '回答', [{ text: answer, color: agent.answer ? undefined : COLOR.secondary }], inner))
   return rows
 }
 

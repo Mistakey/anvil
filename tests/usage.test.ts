@@ -40,10 +40,10 @@ const barText = (percent: number, inner = INNER) => {
 
 // ---------------------------------------------------------------- 纯逻辑
 
-test('四项固定顺序：5h、7d、上下文、花费；名称一列暗色', () => {
+test('四项固定顺序：5h、7d、上下文、花费；名称一列次要色', () => {
   const rows = usageRows(WORKING, NOW, INNER)
   expect(rows.map(row => text(row.label))).toEqual(['5h', '7d', '上下文', '花费'])
-  expect(rows.every(row => row.label.every(one => one.color === COLOR.label))).toBe(true)
+  expect(rows.every(row => row.label.every(one => one.color === COLOR.secondary))).toBe(true)
   expect(rows.every(row => row.labelWidth === GRID.label)).toBe(true)
 })
 
@@ -58,14 +58,18 @@ const two = (reset: string, forecast: string) => `${RESET} ${reset}${' '.repeat(
 const lineAt = (rows: GridRow[], key: string) => rowOf(rows, key)?.lines[1] ?? []
 const limitsOf = (...rateLimits: Usage['rateLimits']): Usage => ({ ...WORKING, rateLimits })
 
-test('5h：第一行进度条、百分比；第二行两列：暗色"󰑐 重置时刻"，会用完时红"󰂃 用完时刻"', () => {
+test('5h：第一行进度条、百分比；第二行两列："󰑐 重置时刻"（图标图标色、时刻次要色），会用完时红"󰂃 用完时刻"', () => {
   const rows = usageRows(WORKING, NOW, INNER)
   expect(firstOf(rows, 'five_hour')).toBe(`${barText(62)}  62%`)
   // 窗口 17:00 开始，3 小时用了 62%，按这个速度 4 小时 50 分钟用完：21:50
   expect(detailOf(rows, 'five_hour')).toBe(two('22:00', `${ALERT} 21:50`))
   const detail = lineAt(rows, 'five_hour')
-  expect(detail[0]).toEqual({ text: `${RESET} 22:00      `, color: COLOR.label })
-  expect(detail.slice(1).filter(one => one.text.trim() !== '')).toEqual([{ text: `${ALERT} 21:50`, color: COLOR.danger }])
+  // 图标用图标色，时刻是次要文字
+  expect(detail.slice(0, 2)).toEqual([
+    { text: `${RESET} `, color: COLOR.icon },
+    { text: '22:00      ', color: COLOR.secondary },
+  ])
+  expect(detail.slice(2).filter(one => one.text.trim() !== '')).toEqual([{ text: `${ALERT} 21:50`, color: COLOR.danger }])
 })
 
 test('没有存档时预测按窗口平均的速度外推：用不完绿色"󰁹 用完时刻"；会用完红色"󰂃 用完时刻"', () => {
@@ -161,12 +165,13 @@ test('花费：只有本会话总额一行', () => {
   expect(rowOf(usageRows(EMPTY_USAGE, NOW, INNER), 'cost')?.lines.map(text)).toEqual(['—'])
 })
 
-test('第二行的细节都暗色（预测图标除外）；不写"预计"、↻、"本会话""上一条""压缩""≈"、星期、"明天""用尽"', () => {
-  // 7d 用不完：除了绿色 󰁹 都是暗色
+test('第二行的细节都是次要色（󰑐 图标色，预测图标除外）；不写"预计"、↻、"本会话""上一条""压缩""≈"、星期、"明天""用尽"', () => {
+  // 7d 用不完：除了开头的 󰑐 和绿色 󰁹 都是次要色
   const rows = usageRows(WORKING, NOW, INNER)
-  expect(lineAt(rows, 'seven_day').slice(0, -1).every(one => one.color === COLOR.label)).toBe(true)
+  expect(lineAt(rows, 'seven_day').slice(1, -1).every(one => one.color === COLOR.secondary)).toBe(true)
+  expect(lineAt(rows, 'seven_day')[0]).toEqual({ text: `${RESET} `, color: COLOR.icon })
   const context = lineAt(rows, 'context')
-  expect(context.length > 0 && context.every(one => one.color === COLOR.label)).toBe(true)
+  expect(context.length > 0 && context.every(one => one.color === COLOR.secondary)).toBe(true)
   const all = rows.flatMap(row => row.lines.map(text)).join('\n')
   for (const word of ['预计', '↻', '本会话', '上一条', '压缩', '≈', '周', '明天', '用尽']) expect(all).not.toContain(word)
 })
@@ -357,7 +362,7 @@ test('session.measure 的新读数进用量框', async ($, on) => {
   await ui.unmount()
 })
 
-test('终端上，约 70 列和拖宽、拖窄后：用量框每项两行（花费一行）、名称一列定宽且暗色、不超宽', async ($, on) => {
+test('终端上，约 70 列和拖宽、拖窄后：用量框每项两行（花费一行）、名称一列定宽且次要色、不超宽', async ($, on) => {
   engine(on)
   await $.session.start(SESSION)
   for (const columns of [70, 110, 90, 51, 40]) {
@@ -372,7 +377,7 @@ test('终端上，约 70 列和拖宽、拖窄后：用量框每项两行（花�
     }
     expect(await ui.find({ key: 'row:cost:2' })).toBeUndefined()
     const name = (await ui.findAll({ type: 'Text' })).filter(one => one.text === '上下文').at(-1)
-    expect(name?.props.color).toBe(COLOR.label)
+    expect(name?.props.color).toBe(COLOR.secondary)
     expect(flat(await ui.find({ key: 'row:five_hour:2' }))).toBe(two('22:00', `${ALERT} 21:50`))
     expect(flat(await ui.find({ key: 'section:usage' }))).not.toContain('…')
     await ui.unmount()
@@ -465,12 +470,9 @@ test('终端上（框内约 50、70 格）：三种预测图标和颜色、时�
       const five = flat(await ui.find({ key: 'row:five_hour:2' }))
       const seven = flat(await ui.find({ key: 'row:seven_day:2' }))
       expect([five, seven], `${columns} 列`).toEqual(expected[index])
-      // 左列暗色"󰑐 重置时刻"，补宽到 13 格；右列起点相同；不超出百分比那一列的右边界
-      const resets = (await ui.findAll({ type: 'Text' })).filter(one => one.text.startsWith(RESET) && one.props.color !== undefined)
-      expect(resets.map(one => [cells(one.text), one.props.color]), `${columns} 列`).toEqual([
-        [13, COLOR.label],
-        [13, COLOR.label],
-      ])
+      // 左列"󰑐 重置时刻"（图标色的图标、次要色的时刻），补宽到 13 格；右列起点相同；不超出百分比那一列的右边界
+      const resets = (await ui.findAll({ type: 'Text' })).filter(one => one.text === `${RESET} `)
+      expect(resets.map(one => one.props.color), `${columns} 列`).toEqual([COLOR.icon, COLOR.icon])
       const start = (line: string) => cells([...line].slice(0, [...line].findIndex(char => [FINE, ALERT, EMPTY].includes(char))).join(''))
       expect([start(five), start(seven)], `${columns} 列`).toEqual([15, 15])
       const percentEdge = barWidth(inner) + 1 + FIELD.percent
