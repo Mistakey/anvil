@@ -110,7 +110,7 @@ const meter = (percent: number, text: string, inner: number): Piece =>
 
 /**
  * 按当前用量线性外推，用尽时刻早于重置时就是"预计用尽"的时刻；否则 null。
- * 窗口开始 = 重置时刻 − 窗口长度。
+ * 窗口开始 = 重置时刻 − 窗口长度；窗口刚开始也照常推算，不设等待期。
  */
 export function exhaustAt(percent: number, resetsAt: number, windowMs: number, now: number): number | null {
   const elapsed = now - (resetsAt - windowMs)
@@ -119,7 +119,16 @@ export function exhaustAt(percent: number, resetsAt: number, windowMs: number, n
   return at < resetsAt ? at : null
 }
 
-/** 5h、7d：进度条 百分比；第二行 ↻ 重置时刻，会在重置前用尽时接红字"· 预计 HH:MM 用尽" */
+/** 按当前用量线性外推，到重置时用到百分之几（取整）；推不出速度时就是现在的用量 */
+export function projectedPercent(percent: number, resetsAt: number, windowMs: number, now: number): number {
+  const elapsed = now - (resetsAt - windowMs)
+  return Math.round(elapsed > 0 ? (percent * windowMs) / elapsed : percent)
+}
+
+/**
+ * 5h、7d：进度条 百分比；第二行 ↻ 重置时刻，后接预计：会在重置前用尽是红字"· 预计 HH:MM 用尽"，否则暗色"· 预计用到 N%"；
+ * 已用满是红字"· 已用尽"
+ */
 function limitRow(kind: 'five_hour' | 'seven_day', limits: readonly RateLimit[], now: number, inner: number): GridSpec {
   const { label, ms } = WINDOWS[kind] ?? { label: kind, ms: 0 }
   const limit = limits.find(one => one.kind === kind)
@@ -131,7 +140,14 @@ function limitRow(kind: 'five_hour' | 'seven_day', limits: readonly RateLimit[],
   const percent = limit.percentUsed
   const detail: Piece[] = [piece([minor(`↻ ${formatReset(resetsAt, now)}`)])]
   const at = exhaustAt(percent, resetsAt, ms, now)
-  if (at !== null) detail.push(piece([{ text: `预计 ${formatWhen(at, now)} 用尽`, color: COLOR.danger }], { text: ' · ', color: COLOR.danger }))
+  const danger = (text: string) => piece([{ text, color: COLOR.danger }], { text: ' · ', color: COLOR.danger })
+  detail.push(
+    percent >= 100
+      ? danger('已用尽')
+      : at === null
+      ? piece([minor(`预计用到 ${projectedPercent(percent, resetsAt, ms, now)}%`)], minor(' · '))
+        : danger(`预计 ${formatWhen(at, now)} 用尽`),
+  )
   return { key: kind, label, value: [meter(percent, `${Math.round(percent)}%`, inner)], detail }
 }
 
