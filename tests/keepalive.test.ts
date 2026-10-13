@@ -493,34 +493,34 @@ describe('缓存框', () => {
   })
 
   test('保活状态：自动开启的五种，加上本会话手动开、手动关', () => {
-    const idle = { stopped: null, renewing: false }
+    const idle = { stopped: null, renewing: false, inFlight: false }
     const base = { settings: SETTINGS, override: null, context: 151000, loop: idle }
     expect(keepaliveStatus(base)).toEqual({ text: '已启用', color: COLOR.ok })
-    expect(keepaliveStatus({ ...base, loop: { stopped: null, renewing: true } })).toEqual({ text: '进行中', color: COLOR.ok })
+    expect(keepaliveStatus({ ...base, loop: { stopped: null, renewing: true, inFlight: false } })).toEqual({ text: '进行中', color: COLOR.ok })
     expect(keepaliveStatus({ ...base, override: false })).toEqual({ text: '已关闭（本会话）', color: COLOR.muted })
     expect(keepaliveStatus({ ...base, context: 32000 })).toEqual({ text: '未启用（低于 50k）', color: COLOR.muted })
     expect(keepaliveStatus({ ...base, settings: { ...SETTINGS, autoKeepalive: false } })).toEqual({
       text: '未启用（自动开启已关闭）',
       color: COLOR.muted,
     })
-    expect(keepaliveStatus({ ...base, loop: { stopped: { kind: 'limit', reason: '空闲超过 12 小时' }, renewing: true } })).toEqual({
+    expect(keepaliveStatus({ ...base, loop: { stopped: { kind: 'limit', reason: '空闲超过 12 小时' }, renewing: true, inFlight: false } })).toEqual({
       text: '已停止（空闲超过 12 小时）',
       color: COLOR.muted,
     })
-    expect(keepaliveStatus({ ...base, loop: { stopped: { kind: 'reading', reason: '续期时缓存已过期' }, renewing: false } })).toEqual({
+    expect(keepaliveStatus({ ...base, loop: { stopped: { kind: 'reading', reason: '续期时缓存已过期' }, renewing: false, inFlight: false } })).toEqual({
       text: '已停止（续期时缓存已过期）',
       color: COLOR.danger,
     })
-    expect(keepaliveStatus({ ...base, loop: { stopped: { kind: 'error', reason: '续期请求被中断' }, renewing: false } }).color).toBe(COLOR.danger)
+    expect(keepaliveStatus({ ...base, loop: { stopped: { kind: 'error', reason: '续期请求被中断' }, renewing: false, inFlight: false } }).color).toBe(COLOR.danger)
 
     // 本会话手动开：不看自动开启和阈值；手动关：不看停下
     const manual = { ...base, override: true, context: 0, settings: { ...SETTINGS, autoKeepalive: false } }
     expect(keepaliveStatus(manual)).toEqual({ text: '已启用（本会话）', color: COLOR.ok })
-    expect(keepaliveStatus({ ...manual, loop: { stopped: null, renewing: true } })).toEqual({ text: '进行中（本会话）', color: COLOR.ok })
-    expect(keepaliveStatus({ ...manual, loop: { stopped: { kind: 'limit', reason: '空闲超过 12 小时' }, renewing: true } }).text).toBe(
+    expect(keepaliveStatus({ ...manual, loop: { stopped: null, renewing: true, inFlight: false } })).toEqual({ text: '进行中（本会话）', color: COLOR.ok })
+    expect(keepaliveStatus({ ...manual, loop: { stopped: { kind: 'limit', reason: '空闲超过 12 小时' }, renewing: true, inFlight: false } }).text).toBe(
       '已停止（空闲超过 12 小时）',
     )
-    expect(keepaliveStatus({ ...base, override: false, loop: { stopped: { kind: 'error', reason: '续期请求被中断' }, renewing: false } }).text).toBe(
+    expect(keepaliveStatus({ ...base, override: false, loop: { stopped: { kind: 'error', reason: '续期请求被中断' }, renewing: false, inFlight: false } }).text).toBe(
       '已关闭（本会话）',
     )
   })

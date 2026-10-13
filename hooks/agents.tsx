@@ -9,6 +9,8 @@ import type { Elements, RenderElement, TurnCompleteReason, TurnUsage } from 'cla
 
 import type { AgentCall, AgentStatus, SubAgent } from '../types'
 import { formatDuration } from './cache'
+import { clock, spin, still } from './live'
+import type { Live } from './live'
 import type { ListBody, ListItem } from './panel'
 import { COLOR, SEPARATOR } from './style'
 import type { Segment } from './style'
@@ -127,9 +129,9 @@ const TRUNCATED = '输出被截断'
 
 // ---------------------------------------------------------------- 绘制
 
-type Els = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
+type Els = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'> & Partial<Pick<Elements['terminal'], 'Client'>>
 
-/** 一行的列宽（设计稿 .ag）：序号 2 | 状态 2 | 任务 | 模型 6 | 耗时 6，列间空 1 格 */
+/** 一行的列宽（设计稿 .ag）：序号 2 | 状态 2 | 任务 | 模型 6 | 耗时 6，列间空 1 格；状态列从第 3 格起（序号加列间） */
 const COLUMN = { seq: 2, mark: 2, model: 6, time: 6, gap: 1 } as const
 
 /** 任务一列的宽度 */
@@ -141,6 +143,9 @@ const DETAIL = { indent: 6, label: 8, gap: 1 } as const
 
 /** 任务原文在详情里最多占几行 */
 const PROMPT_LINES = 3
+
+/** 一个子 agent 那一行的 Button 的 key：按键、焦点（ui.focus 的 element）都认它 */
+export const agentKey = (seq: number) => `agent:${seq}`
 
 /** 一行里的几段文字 */
 function texts(els: Els, segments: readonly Segment[]) {
@@ -155,8 +160,11 @@ function texts(els: Els, segments: readonly Segment[]) {
 /**
  * 一个子 agent 的那一行：整行是一个 Button，焦点移上去反白，Enter 或序号键展开详情。
  * 序号 1–9 交给 hotkey：引擎把它画成"1: "，正好占序号一列和列间的空格；10 以后没有按键，自己画序号。
+ * 运行中的那项，状态列的 ◐ 转动、耗时每秒走（spec D10）：Button 里只能放字（AGENTS.md Pitfalls），
+ * 转动的图标和走的耗时是 Client，绝对定位压在 Button 那两格上；Button 里照样写静止的 ◐ 和按 now 算的耗时，
+ * 没有 Client 时就是它们。焦点在这一行时引擎只反白 Button 自己的字，压在上面的两块跟着反白（isFocused）。
  */
-function agentRow(els: Els, agent: SubAgent, now: number, inner: number, onPress: () => void): RenderElement {
+function agentRow(els: Els, agent: SubAgent, now: number, inner: number, onPress: () => void, live: Live, isFocused: boolean): RenderElement {
   const { Box, Button } = els
   const isOver = agent.status !== 'running'
   const width = taskWidth(inner)
@@ -173,11 +181,22 @@ function agentRow(els: Els, agent: SubAgent, now: number, inner: number, onPress
     { text: padStart(elapsed(agent, now), COLUMN.time), color: COLOR.muted },
   ]
   const hotkey = agent.seq <= 9 ? String(agent.seq) : undefined
+  const isRunning = agent.status === 'running'
   return (
     <Box key={`row:agent:${agent.id}`} width={inner} flexShrink={0}>
-      <Button key={`agent:${agent.seq}`} label={agent.description || `子 agent ${agent.seq}`} plain hotkey={hotkey} onPress={onPress}>
+      <Button key={agentKey(agent.seq)} label={agent.description || `子 agent ${agent.seq}`} plain hotkey={hotkey} onPress={onPress}>
         {texts(els, segments)}
       </Button>
+      {isRunning && live.spinner ? (
+        <Box key={`over:mark:${agent.id}`} position="absolute" top={0} left={COLUMN.seq + COLUMN.gap}>
+          {spin(els, live, { key: `spin:agent:${agent.id}`, color: MARK.running.color, inverse: isFocused })}
+        </Box>
+      ) : null}
+      {isRunning && live.elapsed ? (
+        <Box key={`over:time:${agent.id}`} position="absolute" top={0} left={inner - COLUMN.time}>
+          {clock(els, live, { key: `clock:agent:${agent.id}`, since: agent.spawnedAt, endAt: null, color: COLOR.muted, width: COLUMN.time, inverse: isFocused })}
+        </Box>
+      ) : null}
     </Box>
   )
 }
@@ -234,12 +253,13 @@ export function agentDetail(els: Els, agent: SubAgent, inner: number): RenderEle
 export function agentList(
   els: Els,
   list: readonly SubAgent[],
-  view: { detail: string | null; now: number; inner: number; onPress: (agentId: string) => void },
+  view: { detail: string | null; now: number; inner: number; onPress: (agentId: string) => void; live?: Live; focused?: string | null },
 ): ListBody {
+  const live = view.live ?? still(view.now)
   const items: ListItem[] = list.map(agent => ({
     key: agent.id,
     rows: [
-      agentRow(els, agent, view.now, view.inner, () => view.onPress(agent.id)),
+      agentRow(els, agent, view.now, view.inner, () => view.onPress(agent.id), live, view.focused === agentKey(agent.seq)),
       ...(view.detail === agent.id ? agentDetail(els, agent, view.inner) : []),
     ],
   }))

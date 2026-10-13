@@ -9,7 +9,7 @@ export const COLOR = {
   text: '#e6e9ee',
   /** 标签、次要文字 */
   muted: '#a7adb8',
-  /** 分隔符 `·` 和中性边框 */
+  /** 分隔符 `·`、框与框之间的分隔线、翻译框空着时的边框 */
   faint: '#5b5f67',
   /** 提示文字、身份栏的图标；翻译框有内容时的边框 */
   dim: '#8c939f',
@@ -22,14 +22,12 @@ export const COLOR = {
   warn: '#d7bd6f',
   high: '#d79a6f',
   danger: '#e07a7a',
-  // 识别色（标题）和对应的边框色；识别色避开状态色
+  // 识别色：各框的标题和边框（spec D10）；避开状态色
   cache: '#6cc5c0',
-  cacheBorder: '#497a79',
   usage: '#7aa7e0',
-  usageBorder: '#516a8b',
   agents: '#d78fc4',
-  agentsBorder: '#845d7b',
   denials: '#e07a7a',
+  /** 调暗的拒绝红：翻译失败时翻译框的边框 */
   denialsBorder: '#895152',
   // 身份栏的 git 配色，取自用户原来的 statusline
   branch: '#b18bd0',

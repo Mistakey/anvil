@@ -62,7 +62,7 @@ export function restart(loop: Loop, now: number) {
   loop.restartedAt = now
 }
 
-export const loopView = (loop: Loop): KeepaliveView => ({ stopped: loop.stopped, renewing: loop.inFlight || loop.renewals > 0 })
+export const loopView = (loop: Loop): KeepaliveView => ({ stopped: loop.stopped, renewing: loop.inFlight || loop.renewals > 0, inFlight: loop.inFlight })
 
 /** 默认：`/config` 开着自动开启、上下文达到阈值（D3，阈值与守卫共用）。cache-tax 要用户 `/keepwarm` 手动开，这里按阈值自动开 */
 const isAutomatic = (settings: Settings, context: number) => settings.autoKeepalive && context >= settings.threshold
