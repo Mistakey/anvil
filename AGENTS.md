@@ -7,17 +7,38 @@
 - 仓库本身就是一个插件：`.claude-plugin/plugin.json` 是清单，`hooks/hooks.json` 指向入口 `hooks/register.ts`。
 - 加载调试：`claude --plugin-dir C:\work\5.code\personal\anvil`，保存即热重载。
 - 检查：`claude plugin validate .` 列出挂的事件、调用的 API 和引擎会拒绝的内容；测试：`claude plugin test .` 跑 `*.test.ts`。
-- 类型：加载一次后，引擎在 `.claude-plugin/types/` 生成当前构建的声明（已忽略提交）；查 API 就 grep 其中的 `claude-code/index.d.ts`。类型检查：`npx -p typescript tsc -p .`。
+- 类型：交互加载一次后，引擎在 `.claude-plugin/types/` 生成当前构建的声明（已忽略提交）；查 API 就 grep 其中的 `claude-code/index.d.ts`。类型检查：`npx -p typescript tsc -p .`。`plugin validate`、`plugin test` 和普通 `claude -p` 都不生成类型；不开交互会话时用 `CLAUDE_CODE_PLUGIN_DIR_WATCH=1 claude --plugin-dir <dir> -p "ok" --model haiku --max-turns 1`。新 worktree 里没有类型，先这样加载一次再跑 `tsc`。
 - 参考项目源码：`C:\work\5.code\external\cache-tax`、`C:\work\5.code\external\claude-flightdeck`。
 
 ## Pitfalls
 
 以下依据 Claude Code 2.1.296 的 mods 类型声明和官方文档；mods 接口仍是早期版本，动手前以当前构建生成的类型为准。
 
+### 缓存与模型调用
+
 - `$.model.fork` 只接受 `prompt`，不能设 `max_tokens` 或 effort：保活请求的输出长度只能靠提示词压。
-- 改 effort 或 thinking 参数会让消息缓存失效：保活请求必须沿用会话原设置，否则会把整段上下文重写一遍。
-- mod 拿不到 Claude Code 自己的 prompt 缓存统计（过期时刻、命中率、失效原因），这些只在 statusline 的 stdin JSON（`prompt_cache`）里；mod 侧只能按最后一次请求时间加 TTL 估算，cache-tax 就是这么做的。订阅用户主会话缓存 TTL 默认 1 小时。
-- 钩子自身执行上限 10 秒（`prompt.edit` 只有 50 毫秒）；等待 `$` 调用（模型、网络、`$.ui.ask`）的时间不计入。
+- 切换 thinking 会让消息缓存失效；改 effort 不会（Opus、Sonnet、Haiku 5.5 和 Fable 5.1，订阅或 API key 下）。保活请求沿用会话原设置。
+- 主会话缓存 TTL 1 小时只在订阅套餐内成立，超额后变 5 分钟；fork 和子 agent 默认 5 分钟。mod 拿到的 usage 不区分 5m 和 1h，推不出 TTL。
+- mod 拿不到 Claude Code 自己的缓存追踪（过期时刻、本次写入的 TTL、失效原因），这些只在 statusline 的 stdin JSON（`prompt_cache`）里；mod 侧按最后一次请求时间加 TTL 估算，cache-tax 就是这么做的。例外：`classic.SessionStart`（resume/fork）带 `prompt_cache_likely_expired`，`classic.Pre/PostModelSwitch` 带 `prompt_cache_warm` 和 `cache_ttl`。
+- 在 `-p` 下实测，第一次 `$.model.fork` 只命中系统提示层、消息部分重新写入；fork 保活能否续上主会话缓存，要在交互会话里实测（cache-tax 有交互会话的正例）。statusline 只要 fork 读到缓存就顺延过期时刻，哪怕只命中了系统提示层。
+- Claude Code 内置的 cache keepalive 由服务端开关控制，会和 anvil 的保活重叠；开没开用 `claude --debug` 开交互会话后 grep `[cache-keepalive]`（headless 下没有这些行）。
+- `$.model.complete` 不流式，`maxTokens` 默认 1024。
 - `$.http.fetch` 单次 30 秒，请求体和响应体各 4 MiB；接第三方大模型 API 就走它，key 放环境变量或插件配置的敏感项。
-- `Spinner`、`TurnDuration` 等渲染点只在终端绘制；面板停靠在对话旁需要终端至少 110 列。
-- `Input` 元素回车即提交，文档没写多行和中文输入法支持，翻译输入框需要实测。
+
+### 界面与元素
+
+- `Spinner` 在终端和桌面都会触发；只在终端绘制的是 `TurnDuration` 和 `InfoNotice`。
+- 面板停靠要求全屏渲染（`viewport.isFullscreen`，会话内固定）且终端至少 110 列；mod 自己打开（定时器、`turn.start`）的面板要至少 144 列，用户亲手开过同一个 id 后降到 110 列。不满足时面板内联在提示框上方。
+- `Input`：回车即 `submit`；类型写的是单行，但实测 Shift+Enter 能换行、中文输入法可用（anvil-k0t.4）。没有清空方法：`value` 只在 hook 画出不同值时覆盖，清空要换 `key` 重建，再 `$.ui.focus({ requestId, key })`。
+- `$.prompt.fill` 在有界面占着按键时以 `dialog` 拒绝；结果里的 `text`、`cursor` 只有模块调用过 `$.prompt.read` 才有内容；没有 `refusal` 时原因未知（多半是 hook 拦下）。
+- render hook 要先排除 `e.surface === 'mobile'`，再解构 `Input`。
+- 渲染点里没有 statusLine：`$.ui.status` 是插件自己的一行，mod 读不到、也改不了用户 statusLine 脚本的输出。
+
+### 事件、状态与工具链
+
+- 钩子自身执行上限 10 秒（`prompt.edit` 只有 50 毫秒）；等待 `$` 调用（模型、网络、`$.ui.ask`）的时间不计入。
+- `/clear`、`/resume`、`/branch` 会重置 `$.state`，而且不触发 `session.start`；要在 `classic.SessionStart`（source 为 clear/resume/fork）里从 `$.store` 重新载入。
+- `$.store` 由本机所有会话共享，先 get 再 set 不是原子操作，总量上限 4 MiB。
+- advisor 这类服务端工具不走 `tool.check`/`tool.call`，只出现在 `turn.step` 结果的 `serverToolUses` 里；`tool.check` 带 `agentId`。
+- `$.command.register` 的 `name` 和 `command.run` 的匹配器要写字面量，否则 validate 会当成没有 `.catch` 的 gating hook。
+- auto mode 会拦截读取 `~/.claude.json`。

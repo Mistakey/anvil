@@ -3,3 +3,4 @@
 node_modules/
 .forge/local/
 .forge/materials/
+.claude/worktrees/

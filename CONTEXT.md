@@ -1,6 +1,6 @@
 # anvil
 
-个人自用的 Claude Code mod，只在 Claude Code 里用，服务三项需求：**额度利用率**、**显示**、**英文沟通**。当前只有仓库骨架，整体规划进行中，见 `docs/roadmap.md`。
+个人自用的 Claude Code mod，只在 Claude Code 里用，服务三项需求：**额度利用率**、**显示**、**英文沟通**。当前只有仓库骨架，整体规划已完成，下一步写 v1 spec，见 `docs/roadmap.md`。
 
 ## Language
 
@@ -11,8 +11,8 @@
 _Avoid_: 省额度、防浪费
 
 **显示**：
-anvil 在 Claude Code 界面上呈现信息的部分，包括看见什么、放在哪、什么形态。
-_Avoid_: 仪表盘（专指**会话仪表盘**这一种形态）
+anvil 在 Claude Code 界面上呈现信息的部分，包括看见什么、放在哪、什么形态；由 **anvil 面板**和**翻译输入框**组成。
+_Avoid_: 仪表盘
 
 **英文沟通**：
 用英文和 AI 沟通的习惯；anvil 让用户先写中文、翻成英文再发，借此练习和养成。
@@ -32,9 +32,13 @@ _Avoid_: 预热（pre-warm 指首次写入缓存）、心跳
 缓存已过期且上下文较大时，拦下用户的下一条消息一次并提示重建代价，再发一次才放行；用来防止自己误发。
 _Avoid_: 冷启动保护
 
-**会话仪表盘**：
-展示 Claude Code 会话内部事件（权限检查、子 agent、每轮小结等）的面板，是**显示**的一种候选形态，内容和形态待定；思路取自 **flightdeck**，不与 **statusline** 重复。
-_Avoid_: flightdeck（专指参考项目）
+**anvil 面板**：
+全屏渲染下停靠在对话右侧、可拖动边界改宽的面板，自上而下是我的消息、自动模式拒绝、子 agent、用量、缓存，最下面是**身份栏**；**显示**的内容除**翻译输入框**外都在这里，取代 **statusline**。
+_Avoid_: 会话仪表盘、仪表盘、侧栏、flightdeck（专指参考项目）
+
+**身份栏**：
+**anvil 面板**最底的两行：第一行是目录名和 git 状态，第二行是模型、effort 和输出速度；占原 **statusline** 的位置。
+_Avoid_: 状态栏、statusline（专指用户的脚本）
 
 **翻译输入框**：
 独立于**主输入框**的中文输入框：写中文、翻译成英文，译文追加到主输入框末尾。
@@ -50,18 +54,18 @@ _Avoid_: 翻译服务（DeepL 一类专用翻译 API 不是本意）
 Claude Code 自带的提示词输入框；图片、粘贴内容、斜杠命令都由用户在这里自己处理。
 
 **statusline**：
-用户的自定义状态栏脚本 `~/.claude/statusline.mjs`，已显示真实的**缓存状态**和 5h/7d 用量；将重做或取消，与 anvil 的分工在设计时确定。
+用户的自定义状态栏脚本 `~/.claude/statusline.mjs`，已显示真实的**缓存状态**和 5h/7d 用量；已定取消，内容并入 **anvil 面板**（其中本会话改动行数改为 git 统计）。
 
 **cache-tax**：
 `karanb192/cache-tax`（MIT），**缓存保活**与**冷发送守卫**的参考实现；本地副本 `C:\work\5.code\external\cache-tax`。
 
 **flightdeck**：
-`scasella/claude-flightdeck`（MIT），**会话仪表盘**的参考实现；本地副本 `C:\work\5.code\external\claude-flightdeck`。
+`scasella/claude-flightdeck`（MIT），**anvil 面板**的参考实现（可拖宽的停靠面板、子 agent 等列表）；本地副本 `C:\work\5.code\external\claude-flightdeck`。
 
 ## Relationships
 
 - **缓存保活**、**冷发送守卫**服务于**额度利用率**，都依据**缓存状态**行动；**显示**也展示**缓存状态**。
-- **会话仪表盘**和 **statusline** 都属于**显示**。
+- **显示**由 **anvil 面板**和**翻译输入框**组成；**statusline** 取消后，它的内容都在 **anvil 面板**里。
 - **翻译输入框**和**翻译后端**服务于**英文沟通**。
 - **翻译输入框**只往**主输入框**写文本，不拦截主输入框的提交。
 - **cache-tax**、**flightdeck** 只作参考：可借用代码和思路（保留 MIT 许可声明），功能最终在 anvil 内实现。
