@@ -9,10 +9,10 @@ export const COLOR = {
   text: '#e6e9ee',
   /** 标签、次要文字 */
   muted: '#a7adb8',
-  /** 身份栏的图标等更淡的文字 */
-  dim: '#8c939f',
   /** 分隔符 `·` 和中性边框 */
   faint: '#5b5f67',
+  /** 提示文字、身份栏的图标；翻译框有内容时的边框 */
+  dim: '#8c939f',
   /** 进度条的底 */
   track: '#3a3f48',
   // 状态色：进度条四档，也用于命中率等
@@ -52,6 +52,9 @@ export const ICON = {
   lines: '\u{F440}',
   pause: '\u{F04C}',
   model: '\u{F4BC}',
+  translate: '\u{F05CA}',
+  done: '\u{F00C}',
+  failed: '\u{F00D}',
 } as const
 
 /** 用量框和缓存框共用的三列网格：标签 8 格 | 18 格 | 其余，列间空 1 格 */

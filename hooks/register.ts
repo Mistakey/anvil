@@ -28,6 +28,24 @@ import { describeInput } from './describe'
 import { CLOSED, isClosed, scrollList, toggleDetail, toggleList } from './list'
 import { PANE, PANEL_SUBCOMMAND, drawPanel, gridRow, hidesPanel, innerWidth } from './panel'
 import { readSettings } from './settings'
+import {
+  EMPTY_BOX,
+  TRANSLATE_SUBCOMMAND,
+  apiReply,
+  apiRequest,
+  appendText,
+  countWords,
+  drawTranslateBox,
+  failed,
+  fillRefusal,
+  inputKey,
+  modelReply,
+  modelRequest,
+  startTranslating,
+  translated,
+  typed,
+} from './translate'
+import type { Translation } from './translate'
 import { EMPTY_USAGE, applyReading, compacted as addCompaction, completeTurn, startTurn, usageRows } from './usage'
 import type { Reading } from './usage'
 import type { GitView, ListId, Settings, SubAgent } from '../types'
@@ -43,6 +61,7 @@ import type { GitView, ListId, Settings, SubAgent } from '../types'
 // - 面板的区块（panel.tsx 的 SECTIONS）由各功能填内容：在 drawAnvilPanel 里把该区块的 SectionBody
 //   放进 bodies；三个列表（我的消息、自动模式拒绝、子 agent）交 ListBody 放进 lists，按上限截、
 //   "更早的"那行、展开和收成一行由 panel.tsx 按共同规则做（list.ts）。身份栏的两行交 identity，接在区块之后。
+// - 主输入框上方的 band（AbovePrompt）只画翻译框（translate.tsx），不放别的功能。
 
 // ---------------------------------------------------------------- 设置
 
@@ -367,10 +386,85 @@ async function drawAnvilPanel($: EngineInterface, e: RenderInput<'Pane'>) {
   })
 }
 
+// ---------------------------------------------------------------- 翻译输入框（D5）与翻译后端（D6）
+
+const translateBox = atom({ plugin: 'anvil', key: 'translate' } as const, EMPTY_BOX)
+const translateHidden = atom({ plugin: 'anvil', key: 'translateHidden' } as const, false)
+
+/** 按设置选的后端翻译一段中文 */
+async function translateText($: EngineInterface, settings: Settings, text: string): Promise<Translation> {
+  try {
+    if (settings.translateBackend !== 'api') return modelReply(await $.model.complete(modelRequest(settings.translateBackend, text)))
+    const request = apiRequest(settings.translateApiUrl, settings.translateApiModel, await $.env.get('ANVIL_TRANSLATE_API_KEY'), text)
+    if ('error' in request) return request
+    const response = await $.http.fetch(request.url, request.init)
+    return apiReply(response.status, response.ok, response.text)
+  } catch (error) {
+    return { error: `请求失败：${error instanceof Error ? error.message : String(error)}` }
+  }
+}
+
+/** 译文追加到主输入框末尾；返回 null 表示写进去了，否则是原因 */
+async function appendToPrompt($: EngineInterface, translation: string): Promise<string | null> {
+  try {
+    const draft = await $.prompt.read().then(box => box.text, () => '')
+    const filled = await $.prompt.fill({ text: appendText(draft, translation), mode: 'append' })
+    return filled.isFilled ? null : fillRefusal(filled)
+  } catch (error) {
+    return `写入主输入框出错：${error instanceof Error ? error.message : String(error)}`
+  }
+}
+
+/** 翻译框里按 Enter：翻译、追加；中文留在框里，失败时显示原因，再按 Enter 重试 */
+async function submitChinese($: EngineInterface, settings: Settings, value: string) {
+  if (value.trim() === '') return
+  if ((await read($, translateBox)).phase === 'working') return
+  await update($, translateBox, box => startTranslating(box, value))
+  const translation = await translateText($, settings, value)
+  const refusal = 'error' in translation ? translation.error : await appendToPrompt($, translation.text)
+  await update($, translateBox, box =>
+    refusal === null && 'text' in translation ? translated(box, countWords(translation.text)) : failed(box, refusal ?? ''),
+  )
+}
+
+/** 翻译框里改字：开始写下一句时换一代输入框，焦点交给新的那个 */
+async function typeChinese($: EngineInterface, band: string, value: string) {
+  const box = await read($, translateBox)
+  const next = typed(box, value)
+  if (next === null) return
+  await update($, translateBox, () => next)
+  // plugin test 里没有 ui.focus 的实现，会拒绝；焦点只能在交互会话里验证
+  if (next.field !== box.field) await $.ui.focus({ requestId: band, key: inputKey(next) }).catch(() => undefined)
+}
+
+/** 画翻译框；隐藏了、有问卷占着那一栏时返回 null，让出来 */
+async function drawTranslate($: EngineInterface, settings: Settings, e: RenderInput<'AbovePrompt'>) {
+  // 先排除 mobile，resolve 出来的元素才有 Input
+  if (e.surface === 'mobile' || e.props.hasSurvey || (await read($, translateHidden))) return null
+  const els = $.ui.resolve(e)
+  const box = await read($, translateBox)
+  return drawTranslateBox(els, {
+    columns: e.props.bodyColumns,
+    box,
+    onSubmit: value => void submitChinese($, settings, value),
+    onInput: value => void typeChinese($, e.requestId, value),
+  })
+}
+
+async function hideTranslate($: EngineInterface) {
+  await update($, translateHidden, () => true)
+  return '已隐藏翻译框（本会话）。/anvil translate show 重新显示。'
+}
+
+async function showTranslate($: EngineInterface) {
+  await update($, translateHidden, () => false)
+  return '已显示翻译框。'
+}
+
 // ---------------------------------------------------------------- /anvil 命令
 
 // 各功能交出的 /anvil 子命令说明，按列出的顺序排
-const SUBCOMMANDS: readonly Subcommand[] = [PANEL_SUBCOMMAND]
+const SUBCOMMANDS: readonly Subcommand[] = [PANEL_SUBCOMMAND, TRANSLATE_SUBCOMMAND]
 
 async function registerAnvil($: EngineInterface) {
   await $.command.register({ name: 'anvil', description: COMMAND.description, argumentHint: COMMAND.argumentHint })
@@ -495,6 +589,9 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'Pane', requestId: 'anvil' }, async ($, e) => drawAnvilPanel($, e))
 
+  // 翻译框常驻在主输入框上方
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => (await drawTranslate($, settings, e)) ?? next(e))
+
   on('ui.scroll', { component: 'Pane', requestId: 'anvil' }, async ($, e, next) => {
     // 改了展开状态，引擎自己会重画
     if (await scrollPanel($, e).catch(() => false)) return {}
@@ -504,6 +601,8 @@ export const register: Register = (on, options) => {
   // 功能自己的子命令在这里接入（带 args 匹配器），兜底的放最后
   on('command.run', { command: 'anvil', args: /^\s*panel\s+hide\s*$/ }, async $ => ({ text: await hidePanel($) }))
   on('command.run', { command: 'anvil', args: /^\s*panel\s+show\s*$/ }, async $ => ({ text: await showPanel($) }))
+  on('command.run', { command: 'anvil', args: /^\s*translate\s+hide\s*$/ }, async $ => ({ text: await hideTranslate($) }))
+  on('command.run', { command: 'anvil', args: /^\s*translate\s+show\s*$/ }, async $ => ({ text: await showTranslate($) }))
 
   // 兜底回答功能没接走的 /anvil
   on('command.run', { command: 'anvil' }, async ($, e) => ({ text: answer(SUBCOMMANDS, e.args) }))

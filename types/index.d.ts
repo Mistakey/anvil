@@ -162,6 +162,27 @@ export type Identity = {
   tokensPerSecond: number | null
 }
 
+/** 翻译框的四种显示状态（spec D5）：示例和按键提示、正在翻译、已追加 N 个词、失败原因 */
+export type TranslatePhase = 'idle' | 'working' | 'done' | 'failed'
+
+/** 翻译框的状态 */
+export type TranslateBox = {
+  phase: TranslatePhase
+  /** 最近一次送去翻译的中文 */
+  text: string
+  /** 已追加的英文词数（done） */
+  words: number
+  /** 失败原因（failed） */
+  reason: string
+  /**
+   * 输入框的第几代：开始写下一句时换一代。Input 没有清空的办法，
+   * 只能换 key 重建（AGENTS.md Pitfalls）。
+   */
+  field: number
+  /** 新一代输入框起始的文字：开始写下一句时已经敲下的字 */
+  seed: string
+}
+
 declare module 'claude-code' {
   interface PluginState {
     anvil: {
@@ -186,6 +207,10 @@ declare module 'claude-code' {
       fold: PanelFold
       /** 身份栏 */
       identity: Identity
+      /** 翻译框在本会话被隐藏：`/anvil translate hide` 后为 true，`show` 改回 false */
+      translateHidden: boolean
+      /** 翻译框的状态 */
+      translate: TranslateBox
     }
   }
 }
