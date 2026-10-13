@@ -1,6 +1,6 @@
 # Roadmap
 
-方向级，不是承诺清单；术语见 `CONTEXT.md`。整体规划已在 forge 的 Epic「anvil v1 规划」（anvil-k0t）里完成，下一步在同一个 Epic 上写覆盖下面三项需求的 v1 spec。
+方向级，不是承诺清单；术语见 `CONTEXT.md`。整体规划已在 forge 的 Epic「anvil v1 规划」（anvil-k0t）里完成，覆盖下面三项需求的 v1 spec 也已写好，下一步在同一个 Epic 上切任务实现。
 
 - **额度利用率**：缓存保活 + 冷发送守卫。长会话中途离开时缓存不过期，回来误发冷消息前先拦一次。
 - **显示**：全屏下停靠在对话右侧的 anvil 面板（我的消息、自动模式拒绝、子 agent、用量、缓存、身份栏）加主输入框上方的翻译输入框；statusline 取消，内容并入 anvil 面板。设计已定稿（anvil-k0t.10）。

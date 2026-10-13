@@ -1,6 +1,6 @@
 # anvil
 
-个人自用的 Claude Code mod，只在 Claude Code 里用，服务三项需求：**额度利用率**、**显示**、**英文沟通**。当前只有仓库骨架，整体规划已完成，下一步写 v1 spec，见 `docs/roadmap.md`。
+个人自用的 Claude Code mod，只在 Claude Code 里用，服务三项需求：**额度利用率**、**显示**、**英文沟通**。当前只有仓库骨架，v1 的设计已定，正在 Epic anvil-k0t 上切任务实现，见 `docs/roadmap.md`。
 
 ## Language
 

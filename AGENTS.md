@@ -23,12 +23,12 @@
 - 在 `-p` 下实测，第一次 `$.model.fork` 只命中系统提示层、消息部分重新写入；fork 保活能否续上主会话缓存，要在交互会话里实测（cache-tax 有交互会话的正例）。statusline 只要 fork 读到缓存就顺延过期时刻，哪怕只命中了系统提示层。
 - Claude Code 内置的 cache keepalive 由服务端开关控制，会和 anvil 的保活重叠；开没开用 `claude --debug` 开交互会话后 grep `[cache-keepalive]`（headless 下没有这些行）。
 - `$.model.complete` 不流式，`maxTokens` 默认 1024。
-- `$.http.fetch` 单次 30 秒，请求体和响应体各 4 MiB；接第三方大模型 API 就走它，key 放环境变量或插件配置的敏感项。
+- `$.http.fetch` 单次 30 秒，请求体和响应体各 4 MiB；接第三方大模型 API 就走它，key 放环境变量（anvil 不用插件配置，见 `docs/adr/0003-settings-own-command.md`）。
 
 ### 界面与元素
 
 - `Spinner` 在终端和桌面都会触发；只在终端绘制的是 `TurnDuration` 和 `InfoNotice`。
-- 面板停靠要求全屏渲染（`viewport.isFullscreen`，会话内固定）且终端至少 110 列；mod 自己打开（定时器、`turn.start`）的面板要至少 144 列，用户亲手开过同一个 id 后降到 110 列。不满足时面板内联在提示框上方。
+- 面板停靠要求全屏渲染（`viewport.isFullscreen`，会话内固定）且终端至少 110 列；mod 自己打开（定时器、`turn.start`）的面板要至少 144 列，用户亲手开过同一个 id 后降到 110 列（跨会话保留，用户手动关掉后回到 144 列）。不满足时面板内联在提示框上方。
 - `Input`：回车即 `submit`；类型写的是单行，但实测 Shift+Enter 能换行、中文输入法可用（anvil-k0t.4）。没有清空方法：`value` 只在 hook 画出不同值时覆盖，清空要换 `key` 重建，再 `$.ui.focus({ requestId, key })`。
 - `$.prompt.fill` 在有界面占着按键时以 `dialog` 拒绝；结果里的 `text`、`cursor` 只有模块调用过 `$.prompt.read` 才有内容；没有 `refusal` 时原因未知（多半是 hook 拦下）。
 - render hook 要先排除 `e.surface === 'mobile'`，再解构 `Input`。
