@@ -13,7 +13,7 @@ export const COLOR = {
   faint: '#5b5f67',
   /** 提示文字、身份栏的图标；翻译框有内容时的边框 */
   dim: '#8c939f',
-  /** 用量框、缓存框的名称列和次要值（上一条、↻ 重置时刻），我的消息的序号；取自用户 statusline 的次要标签 */
+  /** 用量框、缓存框的名称列，用量框第二行的细节（↻ 重置时刻、已用 / 上限），我的消息的序号；取自用户 statusline 的次要标签 */
   label: '#6b7280',
   /** 进度条的底 */
   track: '#3a3f48',
@@ -54,28 +54,34 @@ export const ICON = {
   lines: '\u{F440}',
   pause: '\u{F04C}',
   model: '\u{F4BC}',
+  /** 速度行（nf-fa-bolt） */
+  speed: '\u{F0E7}',
   translate: '\u{F05CA}',
   done: '\u{F00C}',
   failed: '\u{F00D}',
 } as const
 
 /**
- * 用量框和缓存框共用的两列：名称 6 格 | 值，列间空 2 格；一件事一行。
- * 进度条定宽 15 格：约 51 列停靠时（值那一列 39 格），7d 带星期的重置时刻也排得下。
+ * 用量框和缓存框的两列：名称 | 值，列间空 2 格。用量框名称 6 格；缓存框第一行的名称位置放缓存图标和命中率，
+ * 名称 8 格（cachebox.ts 的 CACHE_LABEL）。
  */
-export const GRID = { label: 6, gap: 2, bar: 15 } as const
+export const GRID = { label: 6, gap: 2 } as const
 
 /** 值那一列的宽度；折下去的行也从这一列起 */
-export function valueWidth(inner: number): number {
-  return Math.max(0, inner - GRID.label - GRID.gap)
+export function valueWidth(inner: number, label: number = GRID.label): number {
+  return Math.max(0, inner - label - GRID.gap)
 }
 
+/** 进度条后的百分比：右对齐 4 格到 100%，数字变长变短时进度条和百分比上下对齐 */
+export const FIELD = { percent: 4 } as const
+
 /**
- * 数值的定宽字段：数字变长变短时，同一行后面的字不挪位置。值那一列开头的数值左对齐、补空格到定宽，
- * 进度条后的百分比右对齐；一行末尾的不补。
- * 百分比到 100%，金额到 $12.34，tokens 到 152k、1.2M，次数到 "99 次"。
+ * 进度条的长度：值那一列除了百分比（前面空 1 格）都给进度条，右边留 1 格。
+ * 三条进度条一样长；框 48 列（框内 44 格）时 30 格，和用户的终稿一致。
  */
-export const FIELD = { percent: 4, usd: 6, tokens: 4, count: 5 } as const
+export function barWidth(inner: number): number {
+  return Math.max(1, valueWidth(inner) - FIELD.percent - 2)
+}
 
 /** 进度条四档：低于 60% 绿，60–80% 黄，80–90% 橙，90% 以上红 */
 export function levelColor(percent: number): string {
@@ -85,8 +91,8 @@ export function levelColor(percent: number): string {
   return COLOR.ok
 }
 
-/** 定宽的进度条：已用部分按档着色，其余是暗色底 */
-export function bar(percent: number, width: number = GRID.bar): Segment[] {
+/** 定长的进度条：已用部分按档着色，其余是暗色底 */
+export function bar(percent: number, width: number): Segment[] {
   const clamped = Math.min(100, Math.max(0, percent))
   const filled = Math.round((clamped / 100) * width)
   return [
@@ -96,9 +102,6 @@ export function bar(percent: number, width: number = GRID.bar): Segment[] {
 }
 
 export const SEPARATOR: Segment = { text: ' · ', color: COLOR.faint }
-
-/** 用量框、缓存框一行里两块之间空两格，不用分隔符 */
-export const GAP: Segment = { text: '  ' }
 
 /** 一行里不拆开的一块；join 是它和前一块排在同一行时夹在中间的字（如 " · "），折到下一行行首时不画 */
 export type Piece = { segments: Segment[]; join?: Segment }

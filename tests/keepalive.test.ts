@@ -2,10 +2,10 @@ import type { ModelForkResult, On } from 'claude-code'
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { cacheRows, cacheStatus, hitColor } from '../hooks/cachebox'
+import { CACHE_LABEL, cacheRows, formatExpired, hitColor } from '../hooks/cachebox'
 import { freshCache, view } from '../hooks/cache'
 import { IDLE_LIMIT_MS, PING_AFTER_MS, keepaliveStatus } from '../hooks/keepalive'
-import { COLOR, GRID, valueWidth } from '../hooks/style'
+import { COLOR, ICON, valueWidth } from '../hooks/style'
 import type { Segment } from '../hooks/style'
 import { cells } from '../hooks/text'
 import type { GridRow } from '../hooks/usage'
@@ -383,8 +383,7 @@ describe('恢复会话', () => {
       expect(b.rebuild).toEqual({ tokens: 200000, usd: 2 })
 
       const ui = await $.ui.mount(pane(70))
-      expect(flat(await ui.find({ key: 'row:cache-hit' }))).toBe('命中率—     上一条 —')
-      expect(flat(await ui.find({ key: 'row:cache-rebuilt' }))).toBe('已重建0 次')
+      expect(flat(await ui.find({ key: 'row:cache' }))).toStartWith(`${ICON.cache} —`)
       await ui.unmount()
 
       // B 的最后一次响应之后满 50 分钟发 fork
@@ -403,8 +402,9 @@ const SETTINGS: Settings = { threshold: 50000, autoKeepalive: true, guard: true,
 const text = (segments: readonly Segment[]) => segments.map(segment => segment.text).join('')
 /** 一行的值（不折行时就是整个值） */
 const lineOf = (row: GridRow | undefined) => text(row?.lines[0] ?? [])
+const ENABLED: Segment = { text: '已启用', color: COLOR.ok }
 
-/** 一份缓存框读数：上下文 152k，命中率 99% · 94%，冷写 1 次 */
+/** 一份缓存框读数：上下文 152k，本会话命中率 94%，21:40 过期 */
 function sample(over: Partial<CacheView> = {}): CacheView {
   return {
     ...view(freshCache()),
@@ -418,88 +418,68 @@ function sample(over: Partial<CacheView> = {}): CacheView {
 }
 
 describe('缓存框', () => {
-  test('上边框：有效 · HH:MM 过期；已过期 时长；还没有请求时不写', () => {
-    const valid = cacheStatus(sample(), at(13, 20))
-    expect(text(valid)).toBe('● 有效 · 21:40 过期')
-    expect(valid[0]?.color).toBe(COLOR.ok)
-    expect(text(cacheStatus(sample({ expiresAt: at(14, 0, 30) }), at(13, 23)))).toBe('● 有效 · 明天 00:30 过期')
-
-    const expired = cacheStatus(sample(), at(13, 22, 50))
-    expect(text(expired)).toBe('○ 已过期 1h10m')
-    expect(expired[0]?.color).toBe(COLOR.danger)
-    expect(cacheStatus(sample({ expiresAt: null }), at(13, 22))).toEqual([])
-    expect(cacheStatus(sample({ compacted: true }), at(13, 22, 50))).toEqual([])
+  test('两行：缓存图标加本会话命中率、过期状态；保活', () => {
+    const rows = cacheRows(sample(), ENABLED, at(13, 20), 66)
+    expect(rows.map(row => row.key)).toEqual(['cache', 'keepalive'])
+    expect(rows.map(row => text(row.label))).toEqual([`${ICON.cache} 94%`, '保活'])
+    expect(rows.every(row => row.labelWidth === CACHE_LABEL)).toBe(true)
   })
 
-  test('命中率：本会话在前（不写"本会话"），上一条暗色在后；本会话低于 80% 变黄，低于 50% 变红；没有读数写 —', () => {
+  test('有效：● 有效 · HH:MM 过期，绿；明天的写"明天"', () => {
+    const [state] = cacheRows(sample(), ENABLED, at(13, 20), 66)
+    expect(lineOf(state)).toBe('● 有效 · 21:40 过期')
+    expect(state?.lines[0]?.every(one => one.color === COLOR.ok)).toBe(true)
+    expect(lineOf(cacheRows(sample({ expiresAt: at(14, 0, 30) }), ENABLED, at(13, 23), 66)[0])).toBe('● 有效 · 明天 00:30 过期')
+  })
+
+  test('已过期：● 已过期 N 分钟，1 小时起写 N 小时 M 分钟，红', () => {
+    const expired = (now: number) => cacheRows(sample(), ENABLED, now, 66)[0]
+    expect(lineOf(expired(at(13, 21, 40)))).toBe('● 已过期 0 分钟')
+    expect(lineOf(expired(at(13, 22, 32)))).toBe('● 已过期 52 分钟')
+    expect(lineOf(expired(at(13, 22, 50)))).toBe('● 已过期 1 小时 10 分钟')
+    expect(lineOf(expired(at(14, 6, 52)))).toBe('● 已过期 9 小时 12 分钟')
+    expect(expired(at(13, 22, 50))?.lines[0]?.every(one => one.color === COLOR.danger)).toBe(true)
+    expect([59, 60, 61, 552].map(minutes => formatExpired(minutes * MIN + 30 * SEC))).toEqual(['59 分钟', '1 小时 0 分钟', '1 小时 1 分钟', '9 小时 12 分钟'])
+  })
+
+  test('还没有请求、刚压缩完：命中率写 —，右边不写状态', () => {
+    const none = cacheRows(view(freshCache()), ENABLED, at(13, 20), 66)[0]
+    expect(text(none?.label ?? [])).toBe(`${ICON.cache} —`)
+    expect(lineOf(none)).toBe('')
+    expect(lineOf(cacheRows(sample({ compacted: true }), ENABLED, at(13, 22, 50), 66)[0])).toBe('')
+  })
+
+  test('命中率：低于 80% 变黄、低于 50% 变红，图标暗色；不写"命中率"和上一条', () => {
     expect([1, 0.8, 0.79, 0.5, 0.49, 0].map(hitColor)).toEqual([undefined, undefined, COLOR.warn, COLOR.warn, COLOR.danger, COLOR.danger])
-    const status: Segment = { text: '已启用', color: COLOR.ok }
-    const [hit] = cacheRows(sample({ hitRate: { last: 0.31, session: 0.72 } }), status, at(13, 20), 66)
-    expect(hit?.label).toBe('命中率')
-    expect(lineOf(hit)).toBe('72%   上一条 31%')
-    expect(hit?.lines[0]?.find(one => one.text.includes('72%'))?.color).toBe(COLOR.warn)
-    expect(hit?.lines[0]?.at(-1)).toEqual({ text: '上一条 31%', color: COLOR.label })
-    const [fresh] = cacheRows(sample({ hitRate: { last: null, session: null } }), status, at(13, 20), 66)
-    expect(lineOf(fresh)).toBe('—     上一条 —')
+    const [hit] = cacheRows(sample({ hitRate: { last: 0.31, session: 0.72 } }), ENABLED, at(13, 20), 66)
+    expect(hit?.label).toEqual([
+      { text: `${ICON.cache} `, color: COLOR.label },
+      { text: '72%', color: COLOR.warn },
+    ])
+    const all = cacheRows(sample(), ENABLED, at(13, 23), 66).flatMap(row => [text(row.label), ...row.lines.map(text)]).join('\n')
+    for (const word of ['命中率', '上一条', '重建', '≈', 'tokens']) expect(all).not.toContain(word)
   })
 
-  test('重建：N tokens ≈ $；已过期时重建量变红', () => {
-    const status: Segment = { text: '已启用', color: COLOR.ok }
-    const valid = cacheRows(sample(), status, at(13, 20), 66).find(row => row.key === 'cache-cost')
-    expect(lineOf(valid)).toBe('152k tokens ≈ $1.52')
-    expect(valid?.lines[0]?.find(one => one.text.includes('152k'))?.color).toBe(undefined)
-    const expired = cacheRows(sample(), status, at(13, 23), 66).find(row => row.key === 'cache-cost')
-    expect(expired?.lines[0]?.find(one => one.text.includes('152k'))?.color).toBe(COLOR.danger)
-  })
-
-  test('已重建：N 次、共 $；0 次时不写金额', () => {
-    const status: Segment = { text: '已启用', color: COLOR.ok }
-    const once = cacheRows(sample(), status, at(13, 20), 66).find(row => row.key === 'cache-rebuilt')
-    expect(lineOf(once)).toBe('1 次   共 $1.55')
-    const none = cacheRows(sample({ coldWrites: { count: 0, usd: 0 } }), status, at(13, 20), 66).find(row => row.key === 'cache-rebuilt')
-    expect(lineOf(none)).toBe('0 次')
-  })
-
-  test('数值定宽：命中率 9% 到 100%、重建量 9k 到 152k，同一行后面的字不挪位置', () => {
-    const status: Segment = { text: '已启用', color: COLOR.ok }
-    const after = (over: Partial<CacheView>, key: string, marker: string) =>
-      lineOf(cacheRows(sample(over), status, at(13, 20), 66).find(row => row.key === key)).indexOf(marker)
-    expect(after({ hitRate: { last: 1, session: 0.09 } }, 'cache-hit', '上一条')).toBe(after({ hitRate: { last: 1, session: 1 } }, 'cache-hit', '上一条'))
-    expect(after({ hitRate: { last: 1, session: null } }, 'cache-hit', '上一条')).toBe(after({ hitRate: { last: 1, session: 1 } }, 'cache-hit', '上一条'))
-    expect(after({ rebuild: { tokens: 9000, usd: 0.09 } }, 'cache-cost', '≈')).toBe(after({ rebuild: { tokens: 152000, usd: 1.52 } }, 'cache-cost', '≈'))
-    expect(after({ coldWrites: { count: 1, usd: 1 } }, 'cache-rebuilt', '共')).toBe(after({ coldWrites: { count: 10, usd: 1 } }, 'cache-rebuilt', '共'))
-  })
-
-  test('还没有任何主会话请求时，命中率、过期代价、已重建写 —，不写像算出来的 0', () => {
-    const status: Segment = { text: '已启用', color: COLOR.ok }
-    const none = view(freshCache())
-    expect(none.expiresAt).toBe(null)
-    const rows = cacheRows(none, status, at(13, 20), 66)
-    const row = (key: string) => rows.find(one => one.key === key)
-    expect(lineOf(row('cache-hit'))).toBe('—')
-    expect(lineOf(row('cache-cost'))).toBe('—')
-    expect(lineOf(row('cache-rebuilt'))).toBe('—')
-  })
-
-  test('四行的名称：命中率、重建、已重建、保活', () => {
-    const rows = cacheRows(sample(), { text: '已启用', color: COLOR.ok }, at(13, 20), 66)
-    expect(rows.map(row => row.label)).toEqual(['命中率', '重建', '已重建', '保活'])
-    expect(rows.every(row => cells(row.label) <= GRID.label)).toBe(true)
+  test('命中率 9% 到 100%：状态从同一列起', () => {
+    for (const session of [0.09, 0.94, 1, null]) {
+      const [hit] = cacheRows(sample({ hitRate: { last: 1, session } }), ENABLED, at(13, 20), 66)
+      expect(cells(text(hit?.label ?? [])) <= CACHE_LABEL, String(session)).toBe(true)
+    }
   })
 
   test('窄到放不下时各行整块折到下一行，长的保活状态逐行折下去，都不出现 …', () => {
     const stopped: Segment = { text: '已停止（续期请求出错：connect ECONNREFUSED 127.0.0.1:443）', color: COLOR.danger }
-    const view = sample({ hitRate: { last: 1, session: 1 }, coldWrites: { count: 12, usd: 123.4 } })
-    for (const columns of [40, 46, 50, 52, 60, 70, 90]) {
+    for (const columns of [40, 46, 50, 51, 52, 60, 70, 90]) {
       const inner = columns - 4
-      const rows = cacheRows(view, stopped, at(13, 20), inner)
-      const lines = rows.flatMap(row => row.lines.map(text))
-      expect(lines.join(' / '), `${columns} 列`).not.toContain('…')
-      for (const line of lines) expect(cells(line) <= valueWidth(inner), `${columns} 列：${line}`).toBe(true)
-      expect(lines.join(''), `${columns} 列`).toContain('上一条 100%')
-      expect(lines.join('').replace(/ /g, ''), `${columns} 列`).toContain(stopped.text.replace(/ /g, ''))
-      const keepalive = rows.find(row => row.key === 'keepalive')
-      for (const line of keepalive?.lines ?? []) expect(line[0]?.color).toBe(COLOR.danger)
+      for (const now of [at(13, 20), at(14, 6, 52)]) {
+        const rows = cacheRows(sample({ hitRate: { last: 1, session: 1 } }), stopped, now, inner)
+        const lines = rows.flatMap(row => row.lines.map(text))
+        expect(lines.join(' / '), `${columns} 列`).not.toContain('…')
+        for (const line of lines) expect(cells(line) <= valueWidth(inner, CACHE_LABEL), `${columns} 列：${line}`).toBe(true)
+        expect(lines.join('').replace(/ /g, ''), `${columns} 列`).toContain(stopped.text.replace(/ /g, ''))
+        const keepalive = rows.find(row => row.key === 'keepalive')
+        for (const line of keepalive?.lines ?? []) expect(line[0]?.color).toBe(COLOR.danger)
+      }
     }
   })
 
@@ -536,28 +516,30 @@ describe('缓存框', () => {
     )
   })
 
-  test('终端上画出缓存框：上边框状态、四行，各种宽度下不超宽', async ($, on) => {
+  test('终端上画出缓存框：两行，上边框右侧不放状态，各种宽度下不超宽', async ($, on) => {
     const w = engine(on, { forks: [] })
     await $.session.start(SESSION)
     await turn($)
-    for (const columns of [70, 110, 52, 40]) {
+    for (const columns of [70, 110, 51, 40]) {
       const ui = await $.ui.mount(pane(columns))
-      expect(flat(await ui.find({ key: 'status:section:cache' })).trim()).toBe('● 有效 · 21:00 过期')
-      for (const key of ['cache-hit', 'cache-cost', 'cache-rebuilt', 'keepalive']) {
+      expect(await ui.find({ key: 'status:section:cache' })).toBeUndefined()
+      const box = await ui.find({ key: 'box:cache' })
+      const keys = (box?.children ?? []).map(one => (one as { props?: { key?: string } }).props?.key)
+      expect(keys, `${columns} 列`).toEqual(['row:cache', 'row:keepalive'])
+      for (const key of ['cache', 'keepalive']) {
         const row = await ui.find({ key: `row:${key}` })
-        expect(row, `${columns} 列 ${key}`).toBeDefined()
         expect(row?.props.width).toBe(columns - 4)
+        expect((row?.children[0] as { props?: { width?: number } } | undefined)?.props?.width).toBe(CACHE_LABEL)
       }
-      if (columns >= 70) expect(flat(await ui.find({ key: 'row:cache-cost' }))).toBe('重建152k tokens ≈ $1.52')
+      expect(flat(await ui.find({ key: 'row:cache' }))).toBe(`${ICON.cache} 100%● 有效 · 21:00 过期`)
       await ui.unmount()
     }
 
-    // 过期后（保活在 50 分钟那次停下了）：上边框改写已过期时长，重建量变红
+    // 过期后（保活在 50 分钟那次停下了）：写已过期时长，红
     await w.clock.advance(2 * HOUR + 10 * MIN)
     const ui = await $.ui.mount(pane(70))
-    expect(flat(await ui.find({ key: 'status:section:cache' })).trim()).toBe('○ 已过期 1h10m')
-    expect(await colorOf(ui, '○ 已过期')).toBe(COLOR.danger)
-    expect(await colorOf(ui, '152k tokens')).toBe(COLOR.danger)
+    expect(flat(await ui.find({ key: 'row:cache' }))).toBe(`${ICON.cache} 100%● 已过期 1 小时 10 分钟`)
+    expect(await colorOf(ui, '● 已过期 1 小时 10 分钟')).toBe(COLOR.danger)
     await ui.unmount()
   })
 })

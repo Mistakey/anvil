@@ -226,16 +226,65 @@ async function heightOf(ui: Mounted<'terminal', 'Pane'>, id: string) {
   return (await ui.find({ key: `section:${id}` })) ? 1 : 0
 }
 
-/** 整个面板占的行数：各区块加上身份栏的两行 */
+/** 整个面板占的行数：各区块、区块之间的空行，加上身份栏的三行 */
 async function totalHeight(ui: Mounted<'terminal', 'Pane'>) {
   let total = 0
   for (const id of ['cache', 'usage', 'agents', 'denials', 'messages']) total += await heightOf(ui, id)
-  const identity = (await ui.findAll({ type: 'Box' })).filter(one => one.key?.startsWith('identity:'))
-  return total + identity.length
+  const boxes = await ui.findAll({ type: 'Box' })
+  const lines = boxes.filter(one => one.key?.startsWith('identity:') || one.key?.startsWith('gap:'))
+  return total + lines.length
 }
 
 // 面板内宽：开着别的面板时约 50 列，请求的 70 列，拖宽后 90 列
 const PANEL_WIDTHS = [50, 70, 90]
+
+test('框与框之间空一行，我的消息和身份栏之间不空', async ($, on) => {
+  layoutEngine(on)
+  await $.session.start(SESSION)
+  await addAgents($, 1)
+  await addDenials($, 1)
+  for (const expanded of [false, true]) {
+    const ui = await $.ui.mount(sized(70))
+    if (expanded) await ui.press({ key: 'list:agents' })
+    const keys = (await ui.findAll({ type: 'Box' }))
+      .map(one => one.key ?? '')
+      .filter(key => /^section:[a-z]+$/.test(key) || key.startsWith('gap:') || key.startsWith('identity:'))
+    expect(keys, String(expanded)).toEqual([
+      'section:cache',
+      'gap:usage',
+      'section:usage',
+      'gap:agents',
+      'section:agents',
+      'gap:denials',
+      'section:denials',
+      'gap:messages',
+      'section:messages',
+      'identity:git',
+      'identity:model',
+      'identity:speed',
+    ])
+    const gap = await ui.find({ key: 'gap:usage' })
+    expect(gap?.props.height).toBe(1)
+    await ui.unmount()
+  }
+})
+
+test('终端上 50、70、90 列：全文没有 tok/s、≈、已重建、压缩、上一条', async ($, on) => {
+  layoutEngine(on)
+  await $.session.start(SESSION)
+  await drain($.turn.step(stepInput()))
+  await $.turn.complete(turnInput())
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: '摘要', toolUses: [] }] })
+  await drain($.turn.step(stepInput()))
+  await $.turn.complete(turnInput())
+  await addMessages($, 2)
+  for (const columns of PANEL_WIDTHS) {
+    const ui = await $.ui.mount(sized(columns))
+    const all = flat(await ui.find({ type: 'Box' }))
+    for (const word of ['tok/s', '≈', '已重建', '压缩', '上一条', '…']) expect(all, `${columns} 列 ${word}`).not.toContain(word)
+    await ui.unmount()
+  }
+})
 
 test('框宽按面板内宽：50、70、90 列下五个框和框里的每一行都不超出面板', async ($, on) => {
   layoutEngine(on)
@@ -262,7 +311,7 @@ test('框宽按面板内宽：50、70、90 列下五个框和框里的每一行�
   }
 })
 
-test('自上而下：缓存、用量、子 agent、自动模式拒绝、我的消息，身份栏在最底两行', async ($, on) => {
+test('自上而下：缓存、用量、子 agent、自动模式拒绝、我的消息，身份栏在最底三行', async ($, on) => {
   layoutEngine(on)
   await $.session.start(SESSION)
   await addAgents($, 2)
@@ -270,7 +319,7 @@ test('自上而下：缓存、用量、子 agent、自动模式拒绝、我的�
   await addMessages($, 2)
   for (const columns of PANEL_WIDTHS) {
     const ui = await $.ui.mount(sized(columns))
-    expect(await order(ui), `${columns} 列`).toEqual(['cache', 'usage', 'agents', 'denials', 'messages', 'identity:git', 'identity:model'])
+    expect(await order(ui), `${columns} 列`).toEqual(['cache', 'usage', 'agents', 'denials', 'messages', 'identity:git', 'identity:model', 'identity:speed'])
     // 内容都短、放得下：哪个区块都没有截断
     for (const id of ['cache', 'usage', 'agents', 'denials', 'messages']) {
       expect(flat(await ui.find({ key: `section:${id}` })), `${columns} 列 ${id}`).not.toContain('…')
@@ -284,7 +333,7 @@ test('子 agent、自动模式拒绝在本会话还没有内容时整个框不�
   await $.session.start(SESSION)
   for (const columns of PANEL_WIDTHS) {
     const ui = await $.ui.mount(sized(columns))
-    expect(await order(ui), `${columns} 列`).toEqual(['cache', 'usage', 'messages', 'identity:git', 'identity:model'])
+    expect(await order(ui), `${columns} 列`).toEqual(['cache', 'usage', 'messages', 'identity:git', 'identity:model', 'identity:speed'])
     expect(await ui.find({ key: 'section:agents' })).toBeUndefined()
     expect(await ui.find({ key: 'section:denials' })).toBeUndefined()
     expect(await ui.find({ key: 'list:agents' })).toBeUndefined()
@@ -297,7 +346,7 @@ test('子 agent、自动模式拒绝在本会话还没有内容时整个框不�
   // 有了第一个子 agent 才画子 agent 框；拒绝框照样不画
   await addAgents($, 1)
   const ui = await $.ui.mount(sized(70))
-  expect(await order(ui)).toEqual(['cache', 'usage', 'agents', 'messages', 'identity:git', 'identity:model'])
+  expect(await order(ui)).toEqual(['cache', 'usage', 'agents', 'messages', 'identity:git', 'identity:model', 'identity:speed'])
   await ui.unmount()
 })
 
@@ -389,7 +438,7 @@ test('按 a 展开子 agent：用我的消息让出的空间，其余收成一�
 
   const ui = await $.ui.mount(sized(70, 48, true))
   await ui.press({ key: 'list:agents' })
-  expect(await order(ui)).toEqual(['cache', 'usage', 'agents', 'denials', 'messages', 'identity:git', 'identity:model'])
+  expect(await order(ui)).toEqual(['cache', 'usage', 'agents', 'denials', 'messages', 'identity:git', 'identity:model', 'identity:speed'])
   expect(await heightOf(ui, 'denials')).toBe(1)
   expect(await heightOf(ui, 'messages')).toBe(1)
   // 十个都放得下，全显示

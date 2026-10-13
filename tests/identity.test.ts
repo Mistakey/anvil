@@ -2,7 +2,7 @@ import type { FsEntry, On, ProcessRunResult, TurnStepChunk, TurnStepInput, TurnU
 import { expect, mock, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 
-import { effortSegment, gitLine, startEffort, modelLabel, modelLine, operationOf, parseNumstat, parseRepo, parseStatus, repoNames, tokensPerSecond } from '../hooks/identity'
+import { effortSegment, formatSeconds, gitLine, startEffort, modelLabel, modelLine, operationOf, parseNumstat, parseRepo, parseStatus, repoNames, speedLine, tokensPerSecond } from '../hooks/identity'
 import { COLOR, ICON } from '../hooks/style'
 import type { Segment } from '../hooks/style'
 import { cells } from '../hooks/text'
@@ -129,7 +129,7 @@ function flat(node: unknown): string {
 
 const text = (segments: readonly Segment[]) => segments.map(segment => segment.text).join('')
 
-const { dir: D, branch: B, detached: H, worktree: W, stash: S, lines: L, pause: P, model: M } = ICON
+const { dir: D, branch: B, detached: H, worktree: W, stash: S, lines: L, pause: P, model: M, speed: V } = ICON
 
 /** 按样例开一个会话，画出面板，读身份栏第一行 */
 async function firstLine($: Engine, on: On, repo: Sample, columns = 70): Promise<string> {
@@ -268,7 +268,7 @@ test('第一行配色：目录蓝、分支紫、领先琥珀、落后蓝、冲�
       repo: 'anvil', worktree: null, sub: '', branch: 'main', commit: null, noUpstream: false, ahead: 1, behind: 2,
       conflicts: 1, staged: 1, modified: 1, untracked: 1, stashes: 1, lines: { added: 3, deleted: 4 }, operation: { name: 'merge' },
     },
-    model: null, effort: null, tokensPerSecond: null,
+    model: null, effort: null, tokensPerSecond: null, firstTokenMs: null, requestMs: null,
   }
   const colorOf = (needle: string) => gitLine(identity).find(segment => segment.text.includes(needle))
   expect(colorOf(D)?.color).toBe(COLOR.usage)
@@ -284,7 +284,7 @@ test('第一行配色：目录蓝、分支紫、领先琥珀、落后蓝、冲�
   expect(colorOf('−4')?.color).toBe(COLOR.deleted)
 })
 
-// ---------------------------------------------------------------- 第二行：模型、effort、tok/s
+// ---------------------------------------------------------------- 第二行：模型、effort；第三行：速度
 
 test('模型写 Opus 5.5、Sonnet 4.5、Haiku', () => {
   expect(['claude-opus-5-5', 'claude-sonnet-4-5-20250929', 'claude-opus-4-20250514', 'claude-fable-5-1[1m]', 'haiku', 'gpt-x'].map(modelLabel)).toEqual([
@@ -302,22 +302,38 @@ test('effort 五档颜色：low 绿、medium 黄、high 橙、xhigh 红、max �
   ])
 })
 
-test('tok/s：输出 ÷ 首字到结束；缺时刻、跨度为零、没有输出时算不出', () => {
+const IDENTITY: Identity = { dir: '', git: null, model: 'claude-opus-5-5', effort: 'high', tokensPerSecond: 68, firstTokenMs: 1500, requestMs: 12_740 }
+
+test('token/s：输出 ÷ 首字到结束；缺时刻、跨度为零、没有输出时算不出', () => {
   expect(tokensPerSecond(400, 2000, 10000)).toBe(50)
   expect(tokensPerSecond(400, null, 10000)).toBe(null)
   expect(tokensPerSecond(400, 5000, 5000)).toBe(null)
   expect(tokensPerSecond(0, 0, 1000)).toBe(null)
-  const line = modelLine({ dir: '', git: null, model: 'claude-opus-5-5', effort: 'high', tokensPerSecond: 68 })
-  expect(text(line)).toBe(`${M} Opus 5.5 · high · 68 tok/s`)
-  // tok/s 不着色
-  expect(line.find(segment => segment.text === '68')?.color).toBeUndefined()
 })
 
-async function secondLine($: Engine): Promise<string> {
+test('第二行只有模型 · effort；第三行 token/s · 首字 · 用时，数值不着色', () => {
+  expect(text(modelLine(IDENTITY))).toBe(`${M} Opus 5.5 · high`)
+  const line = speedLine(IDENTITY)
+  expect(text(line)).toBe(`${V} 68 token/s · 首字 1.5s · 用时 12.7s`)
+  for (const value of ['68', '1.5s', '12.7s']) expect(line.find(segment => segment.text === value)?.color).toBeUndefined()
+})
+
+test('第三行：还没有请求时写 —；缺的项不写', () => {
+  const none: Identity = { ...IDENTITY, tokensPerSecond: null, firstTokenMs: null, requestMs: null }
+  expect(text(speedLine(none))).toBe(`${V} —`)
+  expect(text(speedLine({ ...IDENTITY, tokensPerSecond: null }))).toBe(`${V} 首字 1.5s · 用时 12.7s`)
+})
+
+test('秒数：不到 60 秒一位小数，60 秒起按 1m35s', () => {
+  expect([0, 1500, 12_740, 59_940, 60_000, 95_400, 3_725_000].map(formatSeconds)).toEqual(['0.0s', '1.5s', '12.7s', '59.9s', '1m00s', '1m35s', '1h02m'])
+})
+
+/** 身份栏第二、三行 */
+async function lowerLines($: Engine): Promise<string[]> {
   const ui = await $.ui.mount(pane(70))
-  const line = flat(await ui.find({ key: 'identity:model' }))
+  const lines = [flat(await ui.find({ key: 'identity:model' })), flat(await ui.find({ key: 'identity:speed' }))]
   await ui.unmount()
-  return line
+  return lines
 }
 
 /** 跑完一次请求：时钟走到它流完 */
@@ -331,25 +347,25 @@ async function step($: Engine, clock: { advance: (ms: number) => Promise<void> }
   return drained
 }
 
-test('第二行：会话开始时只有模型；每次主会话请求后写 effort 和从首字算起的 tok/s', async ($, on) => {
+test('会话开始时只有模型；每次主会话请求后写 effort、从首字算起的 token/s、首字等待和整次用时', async ($, on) => {
   const timing = { current: { firstMs: 2000, streamMs: 8000, output: 400 } }
   const { clock } = engine(on, { current: sample({ status: CLEAN, numstat: '' }) }, timing)
   await $.session.start(SESSION)
-  expect(await secondLine($)).toBe(`${M} Opus 5.5`)
+  expect(await lowerLines($)).toEqual([`${M} Opus 5.5`, `${V} —`])
 
-  // 首字前等了 2 秒不算：400 tokens ÷ 8 秒
+  // 首字前等了 2 秒不算进速度：400 tokens ÷ 8 秒；整次 10 秒
   await step($, clock, { turnId: 't1', index: 0, model: 'claude-opus-5-5', effort: 'high', messageCount: 3 })
-  expect(await secondLine($)).toBe(`${M} Opus 5.5 · high · 50 tok/s`)
+  expect(await lowerLines($)).toEqual([`${M} Opus 5.5 · high`, `${V} 50 token/s · 首字 2.0s · 用时 10.0s`])
 
   // 子 agent 的请求不计入：模型、effort、速度都不变
   timing.current = { firstMs: 500, streamMs: 1000, output: 900 }
   await step($, clock, { turnId: 't2', index: 0, model: 'claude-haiku-5-5', effort: 'low', messageCount: 3, agentId: 'ag1' })
-  expect(await secondLine($)).toBe(`${M} Opus 5.5 · high · 50 tok/s`)
+  expect(await lowerLines($)).toEqual([`${M} Opus 5.5 · high`, `${V} 50 token/s · 首字 2.0s · 用时 10.0s`])
 
   // 下一次主会话请求换了模型和 effort
   timing.current = { firstMs: 1500, streamMs: 4000, output: 360 }
   await step($, clock, { turnId: 't3', index: 0, model: 'claude-sonnet-5-5', effort: 'max', messageCount: 5 })
-  expect(await secondLine($)).toBe(`${M} Sonnet 5.5 · max · 90 tok/s`)
+  expect(await lowerLines($)).toEqual([`${M} Sonnet 5.5 · max`, `${V} 90 token/s · 首字 1.5s · 用时 5.5s`])
 })
 
 test('第二行：一启动就从会话设置写 effort（当前模型自己的设置优先），第一次请求后以请求的为准', async ($, on) => {
@@ -357,10 +373,10 @@ test('第二行：一启动就从会话设置写 effort（当前模型自己的�
   const settings = { current: { effortLevel: 'high', modelSettings: { 'claude-opus-5-5': { effortLevel: 'medium' } } } as Record<string, unknown> }
   on('settings.read', () => ({ value: settings.current }))
   await $.session.start(SESSION)
-  expect(await secondLine($)).toBe(`${M} Opus 5.5 · medium`)
+  expect((await lowerLines($))[0]).toBe(`${M} Opus 5.5 · medium`)
 
   await step($, clock, { turnId: 't1', index: 0, model: 'claude-opus-5-5', effort: 'xhigh', messageCount: 3 })
-  expect(await secondLine($)).toContain(`${M} Opus 5.5 · xhigh · `)
+  expect((await lowerLines($))[0]).toBe(`${M} Opus 5.5 · xhigh`)
 })
 
 test('effort 的启动值：模型自己的设置、全局 effortLevel，都没有时不写', () => {
@@ -392,7 +408,7 @@ test('每条 git 命令都带 --no-optional-locks', async ($, on) => {
   for (const argv of gitRuns) expect(argv.slice(0, 2)).toEqual(['git', '--no-optional-locks'])
 })
 
-test('身份栏在面板最底（我的消息下面）；各种宽度下两行都不超出面板', async ($, on) => {
+test('身份栏三行在面板最底（我的消息下面）；各种宽度下都不超出面板', async ($, on) => {
   const long = sample({
     cwd: 'C:\\w\\anvil-worktrees\\agent-a9f9190b',
     revParse: ['C:/w/anvil-worktrees/agent-a9f9190b', 'C:/w/anvil/.git/worktrees/agent-a9f9190b', 'C:/w/anvil/.git', 'hooks/deep/'].join('\n'),
@@ -405,12 +421,12 @@ test('身份栏在面板最底（我的消息下面）；各种宽度下两行�
     const ui = await $.ui.mount(pane(columns))
     const root = await ui.find({ key: 'identity:git' })
     expect(root?.props.width).toBe(columns)
-    for (const key of ['identity:git', 'identity:model']) {
+    for (const key of ['identity:git', 'identity:model', 'identity:speed']) {
       const shown = flat(await ui.find({ key }))
       expect(cells(shown) <= columns - 2, `${columns} 列 ${key}：${shown}`).toBe(true)
     }
     const order = (await ui.findAll({ type: 'Box' })).map(one => one.key).filter(key => key?.startsWith('section:') || key?.startsWith('identity:'))
-    expect(order.slice(-3)).toEqual(['section:messages', 'identity:git', 'identity:model'])
+    expect(order.slice(-4)).toEqual(['section:messages', 'identity:git', 'identity:model', 'identity:speed'])
     await ui.unmount()
   }
 })

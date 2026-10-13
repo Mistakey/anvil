@@ -21,7 +21,7 @@ import { agentList, callAgent, completeAgent, spawnAgent, stepAgent } from './ag
 
 import * as cacheState from './cache'
 import type { Cache, ResumeFields, Submission } from './cache'
-import { cacheRows, cacheStatus } from './cachebox'
+import { cacheRows } from './cachebox'
 
 import { COMMAND, answer } from './command'
 import { addDenial, denialContent, denialList, denialSource } from './denials'
@@ -70,9 +70,9 @@ import {
   typed,
 } from './translate'
 import type { Translation } from './translate'
-import { EMPTY_USAGE, applyReading, compacted as addCompaction, completeTurn, startTurn, usageRows } from './usage'
+import { EMPTY_USAGE, applyReading, usageRows } from './usage'
 import type { GridRow, Reading } from './usage'
-import type { Denial, GitView, KeepaliveStop, ListId, Scrolled, Settings, SubAgent } from '../types'
+import type { Denial, GitView, Identity, KeepaliveStop, ListId, Scrolled, Settings, SubAgent } from '../types'
 
 // 模块结构（照 flightdeck 的 register.tsx / core.ts），引擎扫描源码的规则见 AGENTS.md Pitfalls「模块结构」：
 // - 所有 on(...) 都写在下面的 register 里；用到 `$` 的辅助函数写在本文件顶层（`$` 不能跨文件传）。
@@ -84,7 +84,7 @@ import type { Denial, GitView, KeepaliveStop, ListId, Scrolled, Settings, SubAge
 //   执行写成带 args 匹配器的 command.run（只认子命令本身，敲一次切换一次），注册在兜底的 command.run 之前。
 // - 面板的区块（panel.tsx 的 SECTIONS）由各功能填内容：在 drawAnvilPanel 里把该区块的 SectionBody
 //   放进 bodies；三个列表（我的消息、自动模式拒绝、子 agent）交 ListBody 放进 lists，按上限截、
-//   "更早的"那行、展开和收成一行由 panel.tsx 按共同规则做（list.ts）。身份栏的两行交 identity，接在区块之后。
+//   "更早的"那行、展开和收成一行由 panel.tsx 按共同规则做（list.ts）。身份栏的三行交 identity，接在区块之后。
 // - 主输入框上方的 band（AbovePrompt）只画翻译框（translate.tsx），不放别的功能。
 
 // ---------------------------------------------------------------- 设置
@@ -277,32 +277,13 @@ async function cacheChanged($: EngineInterface, cache: Cache, loop: Loop, redraw
 const usage = atom({ plugin: 'anvil', key: 'usage' } as const, EMPTY_USAGE)
 
 /** 会话现在的花费；拿不到读数（无头、SDK 宿主）时为 null */
-async function costNow($: EngineInterface): Promise<number | null> {
-  const now = await $.session.usage().catch(() => null)
-  return now?.cost?.usd ?? null
-}
-
 async function noteReading($: EngineInterface, reading: Reading) {
   await update($, usage, current => applyReading(current, reading))
 }
 
-async function startUsage($: EngineInterface) {
+async function readUsage($: EngineInterface) {
   const reading = await $.session.usage().catch(() => null)
   if (reading) await noteReading($, reading)
-}
-
-async function startUsageTurn($: EngineInterface) {
-  const cost = await costNow($)
-  await update($, usage, current => startTurn(current, cost))
-}
-
-async function completeUsageTurn($: EngineInterface) {
-  const cost = await costNow($)
-  await update($, usage, current => completeTurn(current, cost))
-}
-
-async function noteCompaction($: EngineInterface) {
-  await update($, usage, current => addCompaction(current))
 }
 
 // ---------------------------------------------------------------- 子 agent 列表（数据来源照 flightdeck）
@@ -467,13 +448,18 @@ async function startIdentity($: EngineInterface, refresh: GitRefresh) {
 /** 会改文件或运行命令的工具：调用完 git 状态可能变了 */
 const CHANGES_FILES = new Set(['Bash', 'PowerShell', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit'])
 
-/** 主会话一次请求的模型、effort 和输出速度；算不出速度时留着上一次的 */
-async function noteSpeed($: EngineInterface, e: TurnStepInput, speed: number | null) {
+/** 一次请求的速度：输出速度、首字等待、整次用时；算不出的项为 null */
+type Speed = Pick<Identity, 'tokensPerSecond' | 'firstTokenMs' | 'requestMs'>
+
+/** 主会话一次请求的模型、effort 和速度；算不出的项留着上一次的 */
+async function noteSpeed($: EngineInterface, e: TurnStepInput, speed: Speed) {
   await update($, identity, current => ({
     ...current,
     model: e.model,
     effort: e.effort ?? null,
-    tokensPerSecond: speed ?? current.tokensPerSecond,
+    tokensPerSecond: speed.tokensPerSecond ?? current.tokensPerSecond,
+    firstTokenMs: speed.firstTokenMs ?? current.firstTokenMs,
+    requestMs: speed.requestMs ?? current.requestMs,
   }))
 }
 
@@ -579,7 +565,7 @@ async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderI
     rows: e.props.scroll.bodyRows,
     bodies: {
       usage: { rows: grid(usageRows(current, now, inner)) },
-      cache: { status: cacheStatus(cached, now), rows: grid(cacheRows(cached, keepalive, now, inner)) },
+      cache: { rows: grid(cacheRows(cached, keepalive, now, inner)) },
     },
     lists: {
       messages: messageList(els, mine, { inner, onPress: id => void scrollToMessage($, id) }),
@@ -697,7 +683,7 @@ export const register: Register = (on, options) => {
     await startCache($, cache)
     // 重新加载模块时循环是新的：换掉上一次加载留下的读数
     await publishLoop($, loop)
-    await startUsage($)
+    await readUsage($)
     await startIdentity($, gitRefresh).catch(() => undefined)
     await startPanel($)
     await registerAnvil($)
@@ -716,11 +702,6 @@ export const register: Register = (on, options) => {
     return result
   })
 
-  on('turn.start', async ($, e, next) => {
-    await startUsageTurn($)
-    return next(e)
-  })
-
   on('turn.step', async function* ($, e, next) {
     if (e.agentId) {
       const agentId = e.agentId
@@ -733,7 +714,9 @@ export const register: Register = (on, options) => {
     startStretch(loop)
     await publishLoop($, loop)
     await scheduleRedraw($, cache, redraw)
-    // tok/s 从首字算起（D11 实测）：首字是第一块不是 engine 的，结束是 stop 那块
+    // token/s 从首字算起（D11 实测）：首字是第一块不是 engine 的，结束是 stop 那块；
+    // 首字等待和整次用时从请求开始算
+    const startAt = await $.clock.now()
     let firstAt: number | null = null
     let stopAt: number | null = null
     let output: number | undefined
@@ -749,7 +732,11 @@ export const register: Register = (on, options) => {
     }
     const result = await stream.result
     if (result.usage) await stepAnswered($, cache, result.usage)
-    await noteSpeed($, e, tokensPerSecond(output ?? result.usage?.output_tokens, firstAt, stopAt)).catch(() => undefined)
+    await noteSpeed($, e, {
+      tokensPerSecond: tokensPerSecond(output ?? result.usage?.output_tokens, firstAt, stopAt),
+      firstTokenMs: firstAt === null ? null : firstAt - startAt,
+      requestMs: stopAt === null ? null : stopAt - startAt,
+    }).catch(() => undefined)
     return result
   })
 
@@ -758,7 +745,8 @@ export const register: Register = (on, options) => {
     if (!e.agentId) {
       await turnCompleted($, cache, e)
       await cacheChanged($, cache, loop, redraw, settings)
-      await completeUsageTurn($)
+      // 本会话花费在一轮结束时重新读
+      await readUsage($)
       await refreshGit($, gitRefresh).catch(() => undefined)
       // 按 Esc 打断时引擎可能把刚发的消息撤回到主输入框
       await syncMessages($).catch(() => undefined)
@@ -806,7 +794,6 @@ export const register: Register = (on, options) => {
     if (!e.agentId && e.trigger !== 'precompute' && result.skip === undefined) {
       await compacted($, cache)
       await cacheChanged($, cache, loop, redraw, settings)
-      await noteCompaction($).catch(() => undefined)
       await settleOnCompact($).catch(() => undefined)
     }
     return result

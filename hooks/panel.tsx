@@ -65,7 +65,7 @@ export type SectionId = ListId | 'usage' | 'cache'
 /** hotkey：列表的展开键（spec D9 的 a / d / m），只有三个列表有 */
 type Section = { id: SectionId; icon: string; title: string; color: string; border: string; hotkey?: string }
 
-/** 自上而下的固定顺序；我的消息占满剩余高度，最下面还有两行身份栏（不带框），占原 statusline 的位置 */
+/** 自上而下的固定顺序，框与框之间空一行；我的消息占满剩余高度，最下面还有三行身份栏（不带框），占原 statusline 的位置 */
 export const SECTIONS: readonly Section[] = [
   { id: 'cache', icon: ICON.cache, title: '缓存', color: COLOR.cache, border: COLOR.cacheBorder },
   { id: 'usage', icon: ICON.usage, title: '用量', color: COLOR.usage, border: COLOR.usageBorder },
@@ -117,7 +117,7 @@ export type PanelView = {
   /** 三个列表的内容；没给的子 agent、自动模式拒绝按没有内容处理（不画） */
   lists: Partial<Record<ListId, ListBody>>
   fold: PanelFold
-  /** 身份栏的两行，接在最后一个区块下面（不带框），贴着面板底边 */
+  /** 身份栏的三行，接在最后一个区块下面（不带框、不空行），贴着面板底边 */
   identity?: RenderElement[]
   /** 按了列表的展开键，或焦点在标题、"更早的"那行上按了 Enter */
   onToggle: (id: ListId) => void
@@ -283,16 +283,16 @@ const itemHeights = (body: ListBody) => body.items.map(heightOf)
 const fitFixed = (body: ListBody, limit: number): Fit => fitCount(body.items.length, limit)
 
 /**
- * 用量框、缓存框共用的两列的一行：名称定宽，值从同一列起。值放不下而折下去的几行（row.lines 第二行起）
+ * 用量框、缓存框的两列的一项：名称定宽，值从同一列起。第二行起（细节、放不下折下去的块）
  * 各画成一行，名称那一列空着；一行一个元素，框的高度按元素数算（fitLists）。
  */
 export function gridRow(els: Els, row: GridRow, inner: number): RenderElement[] {
   const { Box, Text } = els
-  const width = valueWidth(inner)
+  const width = valueWidth(inner, row.labelWidth)
   return row.lines.map((line, index) => (
     <Box key={index === 0 ? `row:${row.key}` : `row:${row.key}:${index + 1}`} columnGap={GRID.gap} width={inner} flexShrink={0}>
-      <Box width={GRID.label} flexShrink={0}>
-        {index === 0 ? <Text color={COLOR.label}>{fit(row.label, GRID.label)}</Text> : null}
+      <Box width={row.labelWidth} flexShrink={0}>
+        {index === 0 ? <Text wrap="truncate">{segments(els, fitSegments(row.label, row.labelWidth))}</Text> : null}
       </Box>
       <Box width={width} flexShrink={0}>
         <Text wrap="truncate">{segments(els, line)}</Text>
@@ -303,15 +303,16 @@ export function gridRow(els: Els, row: GridRow, inner: number): RenderElement[] 
 
 /**
  * 每个列表这次画出哪几项。占满剩余高度的只有一个：展开的列表；没有展开时是我的消息。
- * 其余区块的高度先算出来（没画的占 0 行，收成一行的占 1 行，框占内容加 2 行边框），剩下的给它。
+ * 其余区块的高度先算出来（没画的占 0 行，收成一行的占 1 行，框占内容加 2 行边框，区块之间各空 1 行），剩下的给它。
  */
 function fitLists(view: PanelView, expanded: ListId | null, fillId: SectionId): Map<ListId, Fit> {
   const fits = new Map<ListId, Fit>()
-  let used = view.identity?.length ?? 0
-  for (const section of SECTIONS) {
+  const shown = SECTIONS.filter(section => !isHidden(section.id, isList(section.id) ? view.lists[section.id as ListId] : undefined))
+  let used = (view.identity?.length ?? 0) + Math.max(0, shown.length - 1)
+  for (const section of shown) {
     const id = section.id
     const list = isList(id) ? view.lists[id] : undefined
-    if (id === fillId || isHidden(id, list)) continue
+    if (id === fillId) continue
     if (isList(id) && expanded !== null) {
       used += 1
       continue
@@ -363,9 +364,15 @@ export function drawPanel(els: Els, view: PanelView): RenderElement {
     return frame(els, section, body, columns, isFill, title, toggle)
   })
 
+  // 框与框之间空一行；没画的区块不留空行
+  const spaced = drawn.flatMap((element, index) => {
+    if (element === null) return []
+    const gap = <Box key={`gap:${SECTIONS[index]?.id}`} width={columns} height={1} flexShrink={0} />
+    return [gap, element]
+  })
   return (
     <Box flexDirection="column" width={columns} minHeight={view.rows}>
-      {drawn}
+      {spaced.slice(1)}
       {view.identity ?? []}
     </Box>
   )
