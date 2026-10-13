@@ -90,8 +90,11 @@ export function parseResetsAt(resetsAt: string | undefined): number | null {
 
 // ---------------------------------------------------------------- 行
 
-/** 三列网格的一行：标签 | 中间 18 格 | 其余；其余已截到第三列的宽度 */
-export type GridRow = { key: string; label: string; middle: Segment[]; rest: Segment[] }
+/**
+ * 三列网格的一行：标签 | 中间 18 格 | 其余；其余已截到第三列的宽度。
+ * `span` 时中间一列占满后两列（rest 不画），如缓存框的保活状态。
+ */
+export type GridRow = { key: string; label: string; middle: Segment[]; rest: Segment[]; span?: boolean }
 
 /** 把几段文字截到 width 格以内：放不下的那段截断加 `…`，后面的丢掉 */
 export function fitSegments(segments: readonly Segment[], width: number): Segment[] {

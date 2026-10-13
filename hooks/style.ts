@@ -49,6 +49,11 @@ export function restWidth(inner: number): number {
   return Math.max(0, inner - GRID.label - GRID.middle - 2 * GRID.gap)
 }
 
+/** 中间一列占满后两列时的宽度 */
+export function spanWidth(inner: number): number {
+  return Math.max(0, inner - GRID.label - GRID.gap)
+}
+
 /** 进度条四档：低于 60% 绿，60–80% 黄，80–90% 橙，90% 以上红 */
 export function levelColor(percent: number): string {
   if (percent >= 90) return COLOR.danger
