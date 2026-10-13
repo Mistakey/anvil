@@ -112,9 +112,9 @@ export function countWords(text: string): number {
   return text.split(/\s+/).filter(word => /[\p{L}\p{N}]/u.test(word)).length
 }
 
-/** 追加到主输入框末尾的文字：草稿不空、末尾又没有空白时，先隔一个空格 */
+/** 追加到主输入框末尾的文字：草稿不空、末尾又不是换行时，先补一个换行，让译文自己起一行 */
 export function appendText(draft: string, translation: string): string {
-  return draft === '' || /\s$/.test(draft) ? translation : ` ${translation}`
+  return draft === '' || draft.endsWith('\n') ? translation : `\n${translation}`
 }
 
 /** 写入被拒的原因 */
