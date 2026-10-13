@@ -360,6 +360,41 @@ describe('停下', () => {
   })
 })
 
+describe('恢复会话', () => {
+  for (const source of ['resume', 'fork'] as const) {
+    test(`会话内 ${source} 到别的会话：不沿用上一个会话的停下和本会话计数，按新会话起步`, async ($, on) => {
+      const w = engine(on, { forks: [{ read: 0, write: 150000 }, WARM] })
+      await $.session.start(SESSION)
+      await turn($)
+      await turn($, { usage: usage({ cache_read_input_tokens: 0, cache_creation_input_tokens: 150500 }) })
+      await w.clock.advance(50 * MIN)
+      expect((await keepaliveRow($)).text).toBe('已停止（续期时缓存已过期）')
+      expect(cacheOf(w.state).coldWrites.count).toBe(1)
+
+      // 会话 B：10 分钟前还有响应，缓存没过期
+      await $.classic.SessionStart({ source, seconds_since_last_response: 600, context_tokens: 200000, prompt_cache_likely_expired: false })
+      expect(await keepaliveRow($)).toEqual({ text: '已启用', color: COLOR.ok })
+      const b = cacheOf(w.state)
+      expect(b.hitRate).toEqual({ last: null, session: null })
+      expect(b.coldWrites).toEqual({ count: 0, usd: 0 })
+      // 计价用的模型（Opus 5.5，1 小时写入 $10/MTok）保留
+      expect(b.rebuild).toEqual({ tokens: 200000, usd: 2 })
+
+      const ui = await $.ui.mount(pane(70))
+      expect(flat(await ui.find({ key: 'row:cache-hit' }))).toBe('命中率上一条消息 —本会话 —')
+      expect(flat(await ui.find({ key: 'row:cache-rebuilt' }))).toBe('已重建本会话 0 次')
+      await ui.unmount()
+
+      // B 的最后一次响应之后满 50 分钟发 fork
+      await w.clock.advance(40 * MIN - 2 * SEC)
+      expect(w.forks).toHaveLength(1)
+      await w.clock.advance(2 * SEC)
+      expect(w.forks).toHaveLength(2)
+      expect((await keepaliveRow($)).text).toBe('进行中')
+    })
+  }
+})
+
 // ---------------------------------------------------------------- 缓存框
 
 const SETTINGS: Settings = { threshold: 50000, autoKeepalive: true, guard: true, translateBackend: 'haiku', translateApiUrl: '', translateApiModel: '' }
