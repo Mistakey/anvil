@@ -226,19 +226,19 @@ async function heightOf(ui: Mounted<'terminal', 'Pane'>, id: string) {
   return (await ui.find({ key: `section:${id}` })) ? 1 : 0
 }
 
-/** 整个面板占的行数：各区块、区块之间的空行，加上身份栏的三行 */
+/** 整个面板占的行数：各区块、区块之间的分隔线，加上身份栏的三行 */
 async function totalHeight(ui: Mounted<'terminal', 'Pane'>) {
   let total = 0
   for (const id of ['cache', 'usage', 'agents', 'denials', 'messages']) total += await heightOf(ui, id)
   const boxes = await ui.findAll({ type: 'Box' })
-  const lines = boxes.filter(one => one.key?.startsWith('identity:') || one.key?.startsWith('gap:'))
+  const lines = boxes.filter(one => one.key?.startsWith('identity:') || one.key?.startsWith('rule:'))
   return total + lines.length
 }
 
 // 面板内宽：开着别的面板时约 50 列，请求的 70 列，拖宽后 90 列
 const PANEL_WIDTHS = [50, 70, 90]
 
-test('框与框之间空一行，我的消息和身份栏之间不空', async ($, on) => {
+test('框与框之间一条分隔线（占原来空的那一行），我的消息和身份栏之间不加', async ($, on) => {
   layoutEngine(on)
   await $.session.start(SESSION)
   await addAgents($, 1)
@@ -248,23 +248,23 @@ test('框与框之间空一行，我的消息和身份栏之间不空', async ($
     if (expanded) await ui.press({ key: 'list:agents' })
     const keys = (await ui.findAll({ type: 'Box' }))
       .map(one => one.key ?? '')
-      .filter(key => /^section:[a-z]+$/.test(key) || key.startsWith('gap:') || key.startsWith('identity:'))
+      .filter(key => /^section:[a-z]+$/.test(key) || key.startsWith('rule:') || key.startsWith('identity:'))
     expect(keys, String(expanded)).toEqual([
       'section:cache',
-      'gap:usage',
+      'rule:usage',
       'section:usage',
-      'gap:agents',
+      'rule:agents',
       'section:agents',
-      'gap:denials',
+      'rule:denials',
       'section:denials',
-      'gap:messages',
+      'rule:messages',
       'section:messages',
       'identity:git',
       'identity:model',
       'identity:speed',
     ])
-    const gap = await ui.find({ key: 'gap:usage' })
-    expect(gap?.props.height).toBe(1)
+    const line = await ui.find({ key: 'rule:usage' })
+    expect(line?.props.height).toBe(1)
     await ui.unmount()
   }
 })

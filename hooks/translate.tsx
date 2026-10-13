@@ -5,6 +5,9 @@ import type { Elements, ModelCompleteRequest, ModelCompleteResult, PromptFilled,
 
 import type { TranslateBox } from '../types'
 import type { Subcommand } from './command'
+import { spin, still } from './live'
+import type { Live } from './live'
+import { SPIN } from './motion'
 import { COLOR, ICON } from './style'
 import { cells, wrap } from './text'
 
@@ -161,7 +164,7 @@ export const inputKey = (box: TranslateBox) => `translate:${box.field}`
 
 // ---------------------------------------------------------------- 绘制（设计稿「状态对照」的翻译框）
 
-type Els = Pick<Elements['terminal'], 'Box' | 'Text' | 'Input'>
+type Els = Pick<Elements['terminal'], 'Box' | 'Text' | 'Input'> & Partial<Pick<Elements['terminal'], 'Client'>>
 
 export type BandView = {
   /** AbovePrompt 的 bodyColumns */
@@ -169,11 +172,16 @@ export type BandView = {
   box: TranslateBox
   onSubmit: (value: string) => void
   onInput: (value: string) => void
+  /** 动效怎么画（live.tsx）；不给时静止 */
+  live?: Live
 }
 
 const TITLE = `${ICON.translate} 中→英`
 
 const PLACEHOLDER = '例如：把函数改成异步的'
+
+/** 正在翻译时状态行开头的图标：画的时候换成转动的（live.tsx） */
+const WORKING = SPIN.frames[0]
 const SUBMIT = '翻译'
 
 /** 空框时提示放在输入框右侧，输入框至少要放得下示例和引擎在它后面画的「⏎ 翻译」 */
@@ -186,7 +194,7 @@ const MIN_FIELD = cells(PLACEHOLDER) + cells(` ⏎ ${SUBMIT}`) + 1
  * 「⏎ 翻译」去不掉：submitLabel 给空串或空格，引擎仍画「⏎」（anvil-k0t.33 伪终端实测）。
  */
 function status(box: TranslateBox): { text: string; color: string } | null {
-  if (box.phase === 'working') return { text: '◐ 正在翻译', color: COLOR.muted }
+  if (box.phase === 'working') return { text: `${WORKING} 正在翻译`, color: COLOR.muted }
   if (box.phase === 'done') return { text: `${ICON.done} 已追加 ${box.words} 个词`, color: COLOR.ok }
   if (box.phase === 'failed') return { text: `${ICON.failed} ${box.reason}`, color: COLOR.danger }
   return box.empty ? { text: 'Enter 翻译 · Shift+Enter 换行', color: COLOR.dim } : null
@@ -231,11 +239,19 @@ export function drawTranslateBox(els: Els, view: BandView): RenderElement {
   const line =
     shown === null ? null : (
       <Box key="status:translate" flexDirection="column" flexShrink={0} width={Math.max(0, ...lines.map(cells))}>
-        {lines.map((text, index) => (
-          <Text key={`status:${index}`} color={shown.color}>
-            {text}
-          </Text>
-        ))}
+        {lines.map((text, index) =>
+          view.box.phase === 'working' && index === 0 && text.startsWith(WORKING) ? (
+            // 原地替换 ◐：转动的图标加后面的字，宽度不变
+            <Box key={`status:${index}`} flexShrink={0}>
+              {spin(els, view.live ?? still(0), { key: 'spin:translate', color: shown.color })}
+              <Text color={shown.color}>{text.slice(WORKING.length)}</Text>
+            </Box>
+          ) : (
+            <Text key={`status:${index}`} color={shown.color}>
+              {text}
+            </Text>
+          ),
+        )}
       </Box>
     )
   const fieldWidth = beside ? columns - 2 - cells(shown.text) : columns
