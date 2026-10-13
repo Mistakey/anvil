@@ -108,3 +108,41 @@ test('守卫拦下这条消息时，面板照样补开（先补开面板，再�
   expect(first.drop).toMatch(/^anvil：缓存已过期/)
   expect(opens).toEqual([OPEN, OPEN])
 })
+const PANE_70 = {
+  plugin: 'anvil',
+  surface: 'terminal' as const,
+  component: 'Pane' as const,
+  requestId: 'anvil',
+  props: { title: 'anvil', isFocused: false, bodyColumns: 70, placement: 'dock' as const, scroll: { offset: 0, bodyRows: 48 }, view: {} },
+}
+
+// 真实终端只画带边框 Box 之后的兄弟节点压在边框上的字，画不出它里面绝对定位到边框行的字（.13 第 6 项、.17 实测）；
+// plugin test 不经过 Ink 的绘制，这里只核对结构
+test('标题和右上角状态是带边框的框之后的兄弟节点，绝对定位压在上边框那一行', async ($, on) => {
+  engine(on)
+  await $.session.start(SESSION)
+  const ui = await $.ui.mount(PANE_70)
+  const keys = (await ui.findAll({ type: 'Box' })).map(one => one.key)
+  for (const [id, title] of [['messages', '我的消息'], ['agents', '子 agent'], ['usage', '用量'], ['cache', '缓存']]) {
+    expect((await ui.find({ key: `box:${id}` }))?.props.borderStyle).toBe('round')
+    // 标题不在带边框的框里面，在它后面
+    expect(flat(await ui.find({ key: `box:${id}` }))).not.toContain(` ${title} `)
+    expect(keys.indexOf(`title:section:${id}`), id).toBeGreaterThan(keys.indexOf(`box:${id}`))
+    const head = await ui.find({ key: `title:section:${id}` })
+    expect(head?.props).toMatchObject({ position: 'absolute', top: 0, left: 2 })
+    expect(flat(head)).toContain(title)
+  }
+  // 子 agent 的右上角计数也压在边框上
+  expect((await ui.find({ key: 'status:section:agents' }))?.props).toMatchObject({ position: 'absolute', top: 0, right: 2 })
+  await ui.unmount()
+})
+
+function flat(node: unknown): string {
+  if (typeof node === 'string') return node
+  if (Array.isArray(node)) return node.map(flat).join('')
+  if (node !== null && typeof node === 'object') {
+    const { children, props } = node as { children?: unknown; props?: { children?: unknown } }
+    return flat(children ?? props?.children ?? [])
+  }
+  return ''
+}

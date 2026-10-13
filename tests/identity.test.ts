@@ -394,3 +394,13 @@ test('身份栏在缓存框下面；各种宽度下两行都不超出面板', as
     await ui.unmount()
   }
 })
+
+test('面板窄、名字长时先把名字截到 10 格，计数和改动行数留在行里', async ($, on) => {
+  const linked = sample({
+    cwd: 'C:\w\anvil-worktrees\anvil-k0t.17',
+    revParse: ['C:/w/anvil-worktrees/anvil-k0t.17', 'C:/w/anvil/.git/worktrees/anvil-k0t.17', 'C:/w/anvil/.git', ''].join('\n'),
+    status: ['# branch.oid 1', '# branch.head task/anvil-k0t.17', '1 .M N... 1 1 1 a b x.ts', '? y.ts'].join('\n'),
+    numstat: '120\t4\tx.ts',
+  })
+  expect(await firstLine($, on, linked, 64)).toBe(`${D} anvil ${W} anvil-k0t…  ${B} task/anvi… 无上游  !1 ?1  ${L} +120 −4`)
+})

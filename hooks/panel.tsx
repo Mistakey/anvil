@@ -23,12 +23,41 @@ export const PANEL_SUBCOMMAND: Subcommand = { name: 'panel', args: ['hide', 'sho
 export const hidesPanel = (origin: PaneCloseOrigin) => origin.kind === 'person'
 
 /**
- * 标题嵌进上边框（绝对定位压在边框那一行上）；D11 实测引擎画不出来时改成 false，
- * 标题退成框内第一行（spec D10 已定的退路）。翻译框用同一套边框样式，也照它画。
+ * 标题嵌进上边框（spec D10）。翻译框用同一套边框样式，也照它画（bordered）。
+ * 改成 false 时标题退成框内第一行（D10 已定的退路）。
  */
 export const TITLE_IN_BORDER = true
 
 type Els = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
+
+/**
+ * 带边框的框，标题和右上角状态压在上边框那一行上。压的是带边框 Box 之后的兄弟节点：
+ * 绝对定位放在带边框 Box 里面时真实终端不画（.13 第 6 项），放在它后面、同一个外层 Box 里画得出来
+ * （.17 在 Windows 伪终端里实测；plugin test 不经过 Ink 的绘制，测不出这一点）。
+ * key 给外层；带边框的 Box 的 key 由调用方给（`box:…`）。
+ */
+export function bordered(
+  els: Pick<Els, 'Box'>,
+  frame: { key: string; columns: number; grow?: boolean; box: RenderElement; head?: RenderElement | null; status?: RenderElement | null },
+): RenderElement {
+  const { Box } = els
+  const id = frame.key
+  return (
+    <Box key={id} flexDirection="column" width={frame.columns} flexShrink={0} flexGrow={frame.grow ? 1 : 0}>
+      {frame.box}
+      {frame.head ? (
+        <Box key={`title:${id}`} position="absolute" top={0} left={2}>
+          {frame.head}
+        </Box>
+      ) : null}
+      {frame.status ? (
+        <Box key={`status:${id}`} position="absolute" top={0} right={2}>
+          {frame.status}
+        </Box>
+      ) : null}
+    </Box>
+  )
+}
 
 export type SectionId = ListId | 'usage' | 'cache'
 
@@ -122,13 +151,20 @@ function heading(els: Els, section: Section, text: string, onPress: (() => void)
 function frame(els: Els, section: Section, body: SectionBody | undefined, columns: number, isFill: boolean, title: string, onPress: (() => void) | null) {
   const { Box, Text } = els
   // 列表标题前面引擎还画"a: "，占 3 格
-  const shown = TITLE_IN_BORDER ? ` ${title} ` : title
-  const taken = section.hotkey && onPress ? `${shown}a: ` : shown
+  const taken = `${TITLE_IN_BORDER ? `  ${title}` : title}${section.hotkey && onPress ? 'a: ' : ''}`
   const status = body?.status ? fitSegments([{ text: ' ' }, ...body.status, { text: ' ' }], statusRoom(columns, taken)) : []
-  const head = heading(els, section, shown, onPress)
-  return (
+  const head = heading(els, section, title, onPress)
+  // 嵌在边框上时左右各空一格；空格放在 Button 外面，引擎画的"a: "才紧挨着标题："╭─ a: 标题 ─"
+  const inBorder = (
+    <Box key={`head:${section.id}`}>
+      <Text> </Text>
+      {head}
+      <Text> </Text>
+    </Box>
+  )
+  const box = (
     <Box
-      key={`section:${section.id}`}
+      key={`box:${section.id}`}
       flexDirection="column"
       borderStyle="round"
       borderColor={section.border}
@@ -137,21 +173,18 @@ function frame(els: Els, section: Section, body: SectionBody | undefined, column
       flexShrink={0}
       flexGrow={isFill ? 1 : 0}
     >
-      {TITLE_IN_BORDER ? (
-        <Box key={`title:${section.id}`} position="absolute" top={-1} left={1}>
-          {head}
-        </Box>
-      ) : (
-        head
-      )}
-      {status.length > 0 ? (
-        <Box key={`status:${section.id}`} position="absolute" top={-1} right={1}>
-          <Text color={COLOR.muted}>{segments(els, status)}</Text>
-        </Box>
-      ) : null}
+      {TITLE_IN_BORDER ? null : head}
       {body?.rows ?? []}
     </Box>
   )
+  return bordered(els, {
+    key: `section:${section.id}`,
+    columns,
+    grow: isFill,
+    box,
+    head: TITLE_IN_BORDER ? inBorder : null,
+    status: status.length > 0 ? <Text color={COLOR.muted}>{segments(els, status)}</Text> : null,
+  })
 }
 
 /** 收成一行的列表（设计稿 .fold）："▸ 图标 标题 ──── 计数"；整行是一个 Button，按展开键展开它 */

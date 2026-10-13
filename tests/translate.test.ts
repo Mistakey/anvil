@@ -335,7 +335,7 @@ test('各种宽度下框占满 band、不超宽；状态放不进输入框右侧
     await ui.input({ key: (await field(ui)).key ?? '', text: CHINESE })
     const frame = await ui.find({ key: 'translate' })
     expect(frame?.props.width).toBe(columns)
-    expect(frame?.props.borderStyle).toBe('round')
+    expect((await ui.find({ key: 'box:translate' }))?.props.borderStyle).toBe('round')
     const status = await ui.find({ key: 'status:translate' })
     // 挪到下面时折成几行，原因不截断
     expect(status?.text.replace(/\s/g, '')).toContain('模型出错（500server_error），按Enter重试')

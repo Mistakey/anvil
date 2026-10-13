@@ -10,7 +10,7 @@ import type { Elements, RenderElement } from 'claude-code'
 import type { GitOperation, GitView, Identity } from '../types'
 import { COLOR, ICON, SEPARATOR, fitSegments } from './style'
 import type { Segment } from './style'
-import { fit } from './text'
+import { cells, fit } from './text'
 
 export const EMPTY_IDENTITY: Identity = { dir: '', git: null, model: null, effort: null, tokensPerSecond: null }
 
@@ -170,8 +170,9 @@ export function tokensPerSecond(output: number | null | undefined, firstAt: numb
 
 // ---------------------------------------------------------------- 两行的文字
 
-/** 分支、worktree 名、子目录各自最多占几格（设计稿：worktree 里的分支截成 20 格） */
+/** 分支、worktree 名、子目录各自最多占几格（设计稿：worktree 里的分支截成 20 格）；整行放不下时再收到 10 格 */
 const NAME_CELLS = 20
+const NARROW_NAME_CELLS = 10
 
 /** 几组之间空两格（设计稿 .ft） */
 const GROUP_GAP = '  '
@@ -190,17 +191,17 @@ function spaced(groups: readonly Segment[][]): Segment[] {
 }
 
 /** 第一行：目录名、分支、停在一半的命令、各项计数和储藏、改动行数 */
-export function gitLine(identity: Identity): Segment[] {
+export function gitLine(identity: Identity, names: number = NAME_CELLS): Segment[] {
   const git = identity.git
   const dirIcon: Segment = { text: `${ICON.dir} `, color: COLOR.usage }
   if (!git) return [dirIcon, { text: identity.dir || '—', bold: true }]
 
   const dir: Segment[] = [dirIcon, { text: git.repo, bold: true }]
-  if (git.worktree) dir.push({ text: ' ' }, { text: `${ICON.worktree} `, color: COLOR.dim }, { text: fit(git.worktree, NAME_CELLS) })
-  if (git.sub) dir.push({ text: fit(`/${git.sub}`, NAME_CELLS), color: COLOR.muted })
+  if (git.worktree) dir.push({ text: ' ' }, { text: `${ICON.worktree} `, color: COLOR.dim }, { text: fit(git.worktree, names) })
+  if (git.sub) dir.push({ text: fit(`/${git.sub}`, names), color: COLOR.muted })
 
   const branch: Segment[] = []
-  if (git.branch !== null) branch.push({ text: `${ICON.branch} ${fit(git.branch, NAME_CELLS)}`, color: COLOR.branch })
+  if (git.branch !== null) branch.push({ text: `${ICON.branch} ${fit(git.branch, names)}`, color: COLOR.branch })
   else if (git.commit !== null) branch.push({ text: `${ICON.detached} @${git.commit}`, color: COLOR.branch })
   if (branch.length > 0) {
     if (git.ahead > 0) branch.push({ text: ` ↑${git.ahead}`, color: COLOR.ahead })
@@ -265,5 +266,8 @@ function line(els: Els, key: string, segments: readonly Segment[], columns: numb
 
 /** 交给面板的两行 */
 export function identityRows(els: Els, identity: Identity, columns: number): RenderElement[] {
-  return [line(els, 'identity:git', gitLine(identity), columns), line(els, 'identity:model', modelLine(identity), columns)]
+  // 名字长时先把名字截短，让后面的计数和行数留在行里；还放不下再从行尾截
+  const full = gitLine(identity)
+  const first = cells(full.map(segment => segment.text).join('')) <= columns - 2 ? full : gitLine(identity, NARROW_NAME_CELLS)
+  return [line(els, 'identity:git', first, columns), line(els, 'identity:model', modelLine(identity), columns)]
 }
