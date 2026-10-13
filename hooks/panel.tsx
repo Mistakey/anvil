@@ -24,9 +24,9 @@ export const hidesPanel = (origin: PaneCloseOrigin) => origin.kind === 'person'
 
 /**
  * 标题嵌进上边框（绝对定位压在边框那一行上）；D11 实测引擎画不出来时改成 false，
- * 标题退成框内第一行（spec D10 已定的退路）。
+ * 标题退成框内第一行（spec D10 已定的退路）。翻译框用同一套边框样式，也照它画。
  */
-const TITLE_IN_BORDER = true
+export const TITLE_IN_BORDER = true
 
 type Els = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
 

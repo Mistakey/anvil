@@ -45,7 +45,7 @@
 - advisor 这类服务端工具不走 `tool.check`/`tool.call`，只出现在 `turn.step` 结果的 `serverToolUses` 里；`tool.check` 带 `agentId`。
 - `$.command.register` 的 `name` 和 `command.run` 的匹配器要写字面量，否则 validate 会当成没有 `.catch` 的 gating hook。
 - 收 `$` 的辅助函数必须是文件顶层的函数声明（或绑定到函数的顶层 const）；写在 `register` 里的闭包会让模块加载失败（"$ is passed to …, which is not a function declared at the top of this file"）。状态作参数传进去（anvil-k0t.12）。
-- `claude plugin test` 里插件自己调 `$.ui.scroll`（比如在按键处理里）会以 "no implementation for ui.scroll" 拒绝，测试挂的 `ui.scroll` 钩子接不到；滚动只能在交互会话里验证，代码要接住这个拒绝（anvil-k0t.12）。
+- `claude plugin test` 里插件自己调 `$.ui.scroll`（比如在按键处理里）会以 "no implementation for ui.scroll" 拒绝，测试挂的 `ui.scroll` 钩子接不到；滚动只能在交互会话里验证，代码要接住这个拒绝（anvil-k0t.12）。`$.ui.focus` 一样（"no implementation for ui.focus"），测试挂的 `ui.focus` 钩子接不到（anvil-k0t.20）。
 - `claude plugin test` 的 `$` 没有 `ui.close`，测试里的插件改写 `ui.close` 的 `origin` 会被拒（"an origin other than the engine set"）：用户手动关面板（origin `person`）测不了，判断写成纯函数测，接线在交互会话里验证（anvil-k0t.15）。
 - auto mode 会拦截读取 `~/.claude.json`。
 - plugin test 里 `$.session.compact` 的 `messages` 不能是空数组（"a compaction leaves at least one"），整条链会被跳过；`expect` 没有 `toBeCloseTo`，金额先取整再比（anvil-k0t.14）。
