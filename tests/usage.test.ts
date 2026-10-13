@@ -47,74 +47,85 @@ test('四项固定顺序：5h、7d、上下文、花费；名称一列暗色', (
   expect(rows.every(row => row.labelWidth === GRID.label)).toBe(true)
 })
 
-/** 第二行两列：左列"↻ 重置时刻"按最长的"↻ MM-DD HH:MM"（13 格）留宽，列间 2 格，右列"预计 N%" */
-const two = (reset: string, forecast: string) => `${`↻ ${reset}`.padEnd(13)}  ${forecast}`
+// 第二行两列的图标（Nerd Font）
+const RESET = '\u{F0450}'
+const FINE = '\u{F0079}'
+const ALERT = '\u{F0083}'
+const EMPTY = '\u{F008E}'
 
-test('5h：第一行进度条、百分比；第二行两列"↻ 重置时刻""预计 N%"，N ≥ 100 红字', () => {
+/** 第二行两列：左列"󰑐 重置时刻"按最长的"󰑐 00:00 00-00"（13 格，图标 1 格）留宽，列间 2 格，右列预测图标 */
+const two = (reset: string, forecast: string) => `${RESET} ${reset}${' '.repeat(11 - reset.length)}  ${forecast}`
+const lineAt = (rows: GridRow[], key: string) => rowOf(rows, key)?.lines[1] ?? []
+const limitsOf = (...rateLimits: Usage['rateLimits']): Usage => ({ ...WORKING, rateLimits })
+
+test('5h：第一行进度条、百分比；第二行两列：暗色"󰑐 重置时刻"，会用完时红"󰂃 用完时刻"', () => {
   const rows = usageRows(WORKING, NOW, INNER)
   expect(firstOf(rows, 'five_hour')).toBe(`${barText(62)}  62%`)
-  // 窗口 17:00 开始，3 小时用了 62%，到 22:00 重置时用到 103%
-  expect(detailOf(rows, 'five_hour')).toBe(two('22:00', '预计 103%'))
-  const detail = rowOf(rows, 'five_hour')?.lines[1] ?? []
-  expect(detail[0]).toEqual({ text: '↻ 22:00      ', color: COLOR.label })
-  expect(detail.at(-1)).toEqual({ text: '预计 103%', color: COLOR.danger })
+  // 窗口 17:00 开始，3 小时用了 62%，按这个速度 4 小时 50 分钟用完：21:50
+  expect(detailOf(rows, 'five_hour')).toBe(two('22:00', `${ALERT} 21:50`))
+  const detail = lineAt(rows, 'five_hour')
+  expect(detail[0]).toEqual({ text: `${RESET} 22:00      `, color: COLOR.label })
+  expect(detail.slice(1).filter(one => one.text.trim() !== '')).toEqual([{ text: `${ALERT} 21:50`, color: COLOR.danger }])
 })
 
-test('预计 N%：按当前速度线性外推到重置时（取整），不到 100 暗色、到 100 起红字', () => {
+test('预测按当前速度线性外推到重置时：用不完绿色 󰁹 不写字；会用完红色 󰂃 加用完时刻', () => {
   // 窗口 18:00 开始，2 小时用了 18.4%，到 23:00 重置时用到 46%
-  const slow: Usage = { ...WORKING, rateLimits: [{ kind: 'five_hour', percentUsed: 18.4, resetsAt: iso(at(13, 23)) }] }
-  const rows = usageRows(slow, NOW, INNER)
-  expect(detailOf(rows, 'five_hour')).toBe(two('23:00', '预计 46%'))
-  expect(rowOf(rows, 'five_hour')?.lines[1]?.every(one => one.color === COLOR.label)).toBe(true)
-  // 7d 窗口 10-12 17:00 开始，27 小时用了 128 × 27 / 168 %，到 10-19 17:00 重置时用到 128%
-  const fast: Usage = { ...WORKING, rateLimits: [{ kind: 'seven_day', percentUsed: (128 * 27) / 168, resetsAt: iso(at(19, 17)) }] }
-  const red = usageRows(fast, NOW, INNER)
-  expect(firstOf(red, 'seven_day')).toBe(`${barText((128 * 27) / 168)}  21%`)
-  expect(detailOf(red, 'seven_day')).toBe(two('10-19 17:00', '预计 128%'))
-  expect(rowOf(red, 'seven_day')?.lines[1]?.at(-1)).toEqual({ text: '预计 128%', color: COLOR.danger })
-  // 正好 100 也红
-  const edge: Usage = { ...WORKING, rateLimits: [{ kind: 'five_hour', percentUsed: 60, resetsAt: iso(at(13, 22)) }] }
-  expect(rowOf(usageRows(edge, NOW, INNER), 'five_hour')?.lines[1]?.at(-1)).toEqual({ text: '预计 100%', color: COLOR.danger })
+  const slow = usageRows(limitsOf({ kind: 'five_hour', percentUsed: 18.4, resetsAt: iso(at(13, 23)) }), NOW, INNER)
+  expect(detailOf(slow, 'five_hour')).toBe(two('23:00', FINE))
+  expect(lineAt(slow, 'five_hour').at(-1)).toEqual({ text: FINE, color: COLOR.ok })
+  // 7d 窗口 10-12 17:00 开始，27 小时用了 128 × 27 / 168 %：131 小时 15 分钟用完，10-18 04:15
+  const fast = usageRows(limitsOf({ kind: 'seven_day', percentUsed: (128 * 27) / 168, resetsAt: iso(at(19, 17)) }), NOW, INNER)
+  expect(firstOf(fast, 'seven_day')).toBe(`${barText((128 * 27) / 168)}  21%`)
+  expect(detailOf(fast, 'seven_day')).toBe(two('17:00 10-19', `${ALERT} 04:15 10-18`))
+  expect(lineAt(fast, 'seven_day').at(-1)).toEqual({ text: `${ALERT} 04:15 10-18`, color: COLOR.danger })
+  // 正好在重置那一刻用完也算用完
+  const edge = usageRows(limitsOf({ kind: 'five_hour', percentUsed: 60, resetsAt: iso(at(13, 22)) }), NOW, INNER)
+  expect(detailOf(edge, 'five_hour')).toBe(two('22:00', `${ALERT} 22:00`))
 })
 
-test('窗口刚开始也照常推算，不设等待期；还没用时写"预计 0%"', () => {
-  // 窗口 19:50 开始，10 分钟用了 2%，按这个速度 5 小时用到 60%；重置不在当天写 MM-DD HH:MM
-  const early: Usage = { ...WORKING, rateLimits: [{ kind: 'five_hour', percentUsed: 2, resetsAt: iso(at(14, 0, 50)) }] }
-  expect(detailOf(usageRows(early, NOW, INNER), 'five_hour')).toBe(two('10-14 00:50', '预计 60%'))
-  const idle: Usage = { ...WORKING, rateLimits: [{ kind: 'five_hour', percentUsed: 0, resetsAt: iso(at(13, 22)) }] }
-  expect(detailOf(usageRows(idle, NOW, INNER), 'five_hour')).toBe(two('22:00', '预计 0%'))
+test('窗口刚开始也照常推算，不设等待期；还没用时是 󰁹', () => {
+  // 窗口 19:50 开始，10 分钟用了 2%，按这个速度 5 小时用到 60%；重置不在当天写 HH:MM MM-DD
+  const early = limitsOf({ kind: 'five_hour', percentUsed: 2, resetsAt: iso(at(14, 0, 50)) })
+  expect(detailOf(usageRows(early, NOW, INNER), 'five_hour')).toBe(two('00:50 10-14', FINE))
+  const idle = limitsOf({ kind: 'five_hour', percentUsed: 0, resetsAt: iso(at(13, 22)) })
+  expect(detailOf(usageRows(idle, NOW, INNER), 'five_hour')).toBe(two('22:00', FINE))
   expect(projectedPercent(30, at(13, 22), 5 * 3_600_000, NOW)).toBe(50)
 })
 
-test('已用满 100%：照公式写"预计 N%"（≥ 100，红字）', () => {
-  const full: Usage = {
-    ...WORKING,
-    rateLimits: [
-      { kind: 'five_hour', percentUsed: 100, resetsAt: iso(at(13, 22)) },
-      { kind: 'seven_day', percentUsed: 100, resetsAt: iso(at(19, 17)) },
-    ],
-  }
+test('已用满 100%：红色 󰂎，不写字', () => {
+  const full = limitsOf(
+    { kind: 'five_hour', percentUsed: 100, resetsAt: iso(at(13, 22)) },
+    { kind: 'seven_day', percentUsed: 100, resetsAt: iso(at(19, 17)) },
+  )
   const rows = usageRows(full, NOW, INNER)
-  expect(detailOf(rows, 'five_hour')).toBe(two('22:00', '预计 167%'))
-  expect(detailOf(rows, 'seven_day')).toBe(two('10-19 17:00', '预计 622%'))
-  for (const key of ['five_hour', 'seven_day']) expect(rowOf(rows, key)?.lines[1]?.at(-1)?.color, key).toBe(COLOR.danger)
+  expect(detailOf(rows, 'five_hour')).toBe(two('22:00', EMPTY))
+  expect(detailOf(rows, 'seven_day')).toBe(two('17:00 10-19', EMPTY))
+  for (const key of ['five_hour', 'seven_day']) expect(lineAt(rows, key).at(-1), key).toEqual({ text: EMPTY, color: COLOR.danger })
 })
 
-test('重置时刻一律绝对时刻：当天 HH:MM，不是当天 MM-DD HH:MM；不写星期、"明天"', () => {
-  // 窗口 10/8 09:00 开始，131 小时用了 18%，到重置时用到 23%
-  expect(detailOf(usageRows(WORKING, NOW, INNER), 'seven_day')).toBe(two('10-15 09:00', '预计 23%'))
-  const tomorrow: Usage = { ...WORKING, rateLimits: [{ kind: 'seven_day', percentUsed: 95, resetsAt: iso(at(14, 9)) }] }
-  expect(detailOf(usageRows(tomorrow, NOW, INNER), 'seven_day')).toBe(two('10-14 09:00', '预计 103%'))
+test('重置时刻、用完时刻一律绝对时刻：当天 HH:MM，不是当天 HH:MM MM-DD；不写星期、"明天"', () => {
+  // 窗口 10/8 09:00 开始，131 小时用了 18%，用不完
+  expect(detailOf(usageRows(WORKING, NOW, INNER), 'seven_day')).toBe(two('09:00 10-15', FINE))
+  // 窗口 10/7 09:00 开始，155 小时用了 95%：163 小时 9 分钟用完，10-14 04:09
+  const tomorrow = limitsOf({ kind: 'seven_day', percentUsed: 95, resetsAt: iso(at(14, 9)) })
+  expect(detailOf(usageRows(tomorrow, NOW, INNER), 'seven_day')).toBe(two('09:00 10-14', `${ALERT} 04:09 10-14`))
 })
 
-test('第二行两列：5h、7d 的"预计"起点相同', () => {
-  for (const inner of [46, 47, 50, 66, 70]) {
-    const rows = usageRows(WORKING, NOW, inner)
-    const starts = ['five_hour', 'seven_day'].map(key => {
-      const line = text(rowOf(rows, key)?.lines[1] ?? [])
-      return cells(line.slice(0, line.indexOf('预计')))
-    })
-    expect(starts, `${inner} 格`).toEqual([15, 15])
+test('第二行两列：5h、7d 的右列起点相同，不管是哪个图标', () => {
+  const mixed = limitsOf(
+    { kind: 'five_hour', percentUsed: 18.4, resetsAt: iso(at(13, 23)) },
+    { kind: 'seven_day', percentUsed: (128 * 27) / 168, resetsAt: iso(at(19, 17)) },
+  )
+  for (const usage of [WORKING, mixed]) {
+    for (const inner of [46, 47, 50, 66, 70]) {
+      const rows = usageRows(usage, NOW, inner)
+      const starts = ['five_hour', 'seven_day'].map(key => {
+        const line = text(lineAt(rows, key))
+        const at = [...line].findIndex(char => [FINE, ALERT, EMPTY].includes(char))
+        return cells([...line].slice(0, at).join(''))
+      })
+      expect(starts, `${inner} 格`).toEqual([15, 15])
+    }
   }
 })
 
@@ -145,15 +156,14 @@ test('花费：只有本会话总额一行', () => {
   expect(rowOf(usageRows(EMPTY_USAGE, NOW, INNER), 'cost')?.lines.map(text)).toEqual(['—'])
 })
 
-test('第二行的细节都暗色（预计 ≥ 100% 除外）；不写"本会话""上一条""压缩""≈"、星期、"明天""用尽"', () => {
-  // 7d 用不完：预计也是暗色
+test('第二行的细节都暗色（预测图标除外）；不写"预计"、↻、"本会话""上一条""压缩""≈"、星期、"明天""用尽"', () => {
+  // 7d 用不完：除了绿色 󰁹 都是暗色
   const rows = usageRows(WORKING, NOW, INNER)
-  for (const key of ['seven_day', 'context']) {
-    const detail = rowOf(rows, key)?.lines[1] ?? []
-    expect(detail.length > 0 && detail.every(one => one.color === COLOR.label), key).toBe(true)
-  }
+  expect(lineAt(rows, 'seven_day').slice(0, -1).every(one => one.color === COLOR.label)).toBe(true)
+  const context = lineAt(rows, 'context')
+  expect(context.length > 0 && context.every(one => one.color === COLOR.label)).toBe(true)
   const all = rows.flatMap(row => row.lines.map(text)).join('\n')
-  for (const word of ['本会话', '上一条', '压缩', '≈', '周', '明天', '用尽']) expect(all).not.toContain(word)
+  for (const word of ['预计', '↻', '本会话', '上一条', '压缩', '≈', '周', '明天', '用尽']) expect(all).not.toContain(word)
 })
 
 test('三条进度条一样长、百分比上下对齐，数字变长变短不挪位置', () => {
@@ -228,19 +238,23 @@ test('各种宽度下每行都不超出值那一列，放不下的整块折到�
       if (columns >= 40) expect(row.lines.map(text).join(' / '), `${columns} 列 ${row.key}`).not.toContain('…')
     }
     if (columns >= 40) {
-      expect(detailOf(rows, 'seven_day'), `${columns} 列`).toBe(two('10-19 17:00', '预计 128%'))
-      expect(detailOf(rows, 'five_hour'), `${columns} 列`).toBe(two('22:00', '预计 103%'))
-      // 第二行右列不超出百分比那一列的右边界
+      // 第二行起不超出百分比那一列的右边界（40 列时 7d 的用完时刻整块折到第三行）
       for (const key of ['five_hour', 'seven_day']) {
-        expect(cells(text(rowOf(rows, key)?.lines[1] ?? [])) <= barWidth(inner) + 1 + FIELD.percent, `${columns} 列 ${key}`).toBe(true)
+        for (const line of rowOf(rows, key)?.lines.slice(1) ?? []) {
+          expect(cells(text(line)) <= barWidth(inner) + 1 + FIELD.percent, `${columns} 列 ${key}`).toBe(true)
+        }
       }
     }
+    if (columns >= 44) {
+      expect(detailOf(rows, 'seven_day'), `${columns} 列`).toBe(two('17:00 10-19', `${ALERT} 04:15 10-18`))
+      expect(detailOf(rows, 'five_hour'), `${columns} 列`).toBe(two('22:00', `${ALERT} 21:50`))
+    }
   }
-  // 约 51 列停靠（框内 47 格）：7d 的重置和预计在第二行一行排完
+  // 约 51 列停靠（框内 47 格）：7d 的重置和用完时刻在第二行一行排完
   expect(rowOf(usageRows(busy, NOW, 47), 'seven_day')?.lines).toHaveLength(2)
 })
 
-test('格式：token、金额、时刻、重置时刻', () => {
+test('格式：token、金额、时刻（当天 HH:MM，不是当天 HH:MM MM-DD）', () => {
   expect([formatTokens(999), formatTokens(152_000), formatTokens(999_600), formatTokens(1_000_000), formatTokens(1_250_000)]).toEqual([
     '999',
     '152k',
@@ -251,9 +265,9 @@ test('格式：token、金额、时刻、重置时刻', () => {
   expect([formatUsd(0.314), formatUsd(4.2), formatUsd(123.4)]).toEqual(['$0.31', '$4.20', '$123'])
   expect([formatWhen(at(13, 21, 5), NOW), formatWhen(at(14, 1, 30), NOW), formatWhen(at(19, 17), NOW), formatWhen(at(12, 9), NOW)]).toEqual([
     '21:05',
-    '10-14 01:30',
-    '10-19 17:00',
-    '10-12 09:00',
+    '01:30 10-14',
+    '17:00 10-19',
+    '09:00 10-12',
   ])
 })
 
@@ -354,7 +368,7 @@ test('终端上，约 70 列和拖宽、拖窄后：用量框每项两行（花�
     expect(await ui.find({ key: 'row:cost:2' })).toBeUndefined()
     const name = (await ui.findAll({ type: 'Text' })).filter(one => one.text === '上下文').at(-1)
     expect(name?.props.color).toBe(COLOR.label)
-    expect(flat(await ui.find({ key: 'row:five_hour:2' }))).toBe(two('22:00', '预计 103%'))
+    expect(flat(await ui.find({ key: 'row:five_hour:2' }))).toBe(two('22:00', `${ALERT} 21:50`))
     expect(flat(await ui.find({ key: 'section:usage' }))).not.toContain('…')
     await ui.unmount()
   }
@@ -379,40 +393,94 @@ test('窗口还没开始时用量框第二行写"发送消息后开始计时"', 
   await ui.unmount()
 })
 
-test('终端上（框内约 50、70 格）：第二行两列对齐，预计 46% 暗色、128% 红字；百分比右对齐同一列；没有星期、"明天""用尽"', async ($, on) => {
+/** 用量框里各行的 key，按画的顺序 */
+async function boxKeys(ui: { find(query: { key: string }): Promise<{ children: unknown[] } | undefined> }) {
+  const box = await ui.find({ key: 'box:usage' })
+  return (box?.children ?? []).map(one => (one as { props?: { key?: string } }).props?.key)
+}
+
+test('终端上（框内约 50、70 格）：项与项之间空一行，缓存框不空', async ($, on) => {
+  engine(on)
+  await $.session.start(SESSION)
+  for (const columns of [54, 74]) {
+    const ui = await $.ui.mount(pane(columns))
+    expect(await boxKeys(ui), `${columns} 列`).toEqual([
+      'row:five_hour',
+      'row:five_hour:2',
+      'space:seven_day',
+      'row:seven_day',
+      'row:seven_day:2',
+      'space:context',
+      'row:context',
+      'row:context:2',
+      'space:cost',
+      'row:cost',
+    ])
+    for (const key of ['seven_day', 'context', 'cost']) {
+      const gap = await ui.find({ key: `space:${key}` })
+      expect(gap?.props.height, key).toBe(1)
+      expect(flat(gap)).toBe('')
+    }
+    const cache = await ui.find({ key: 'box:cache' })
+    const keys = (cache?.children ?? []).map(one => (one as { props?: { key?: string } }).props?.key)
+    expect(keys).toEqual(['row:cache', 'row:state', 'row:keepalive'])
+    await ui.unmount()
+  }
+})
+
+test('终端上（框内约 50、70 格）：三种预测图标和颜色、用完时刻；两列起点对齐；百分比右对齐同一列；没有"预计"、↻', async ($, on) => {
   const reading = engine(on)
-  reading.current = {
-    ...READING,
-    context: { tokens: 49_000, window: 1_000_000, percent: 5 },
-    rateLimits: [
+  const states: SessionUsage['rateLimits'][] = [
+    // 5h 用不完（绿 󰁹），7d 会用完（红 󰂃 用完时刻，不是当天）
+    [
       { kind: 'five_hour', percentUsed: 18.4, resetsAt: iso(at(13, 23)) },
       { kind: 'seven_day', percentUsed: (128 * 27) / 168, resetsAt: iso(at(19, 17)) },
     ],
-  }
-  await $.session.start(SESSION)
-  for (const columns of [54, 74]) {
-    const inner = columns - 4
-    const ui = await $.ui.mount(pane(columns))
-    const five = flat(await ui.find({ key: 'row:five_hour:2' }))
-    const seven = flat(await ui.find({ key: 'row:seven_day:2' }))
-    expect(five, `${columns} 列`).toBe(two('23:00', '预计 46%'))
-    expect(seven, `${columns} 列`).toBe(two('10-19 17:00', '预计 128%'))
-    // 右列起点相同；不超出百分比那一列的右边界
-    expect(cells(five.slice(0, five.indexOf('预计')))).toBe(cells(seven.slice(0, seven.indexOf('预计'))))
-    const percentEdge = barWidth(inner) + 1 + FIELD.percent
-    for (const line of [five, seven]) expect(cells(line) <= percentEdge, `${columns} 列 ${line}`).toBe(true)
-    // 三行百分比右对齐在同一列：名称之后的值都正好到百分比那一列的右边界
-    for (const [key, label] of [['five_hour', '5h'], ['seven_day', '7d'], ['context', '上下文']] as const) {
-      const first = flat(await ui.find({ key: `row:${key}` }))
-      expect(first, `${columns} 列 ${key}`).toMatch(/%$/)
-      expect(cells(first) - cells(label), `${columns} 列 ${key}`).toBe(percentEdge)
+    // 5h 会用完（当天的用完时刻），7d 已用满（红 󰂎）
+    [
+      { kind: 'five_hour', percentUsed: 62, resetsAt: iso(at(13, 22)) },
+      { kind: 'seven_day', percentUsed: 100, resetsAt: iso(at(19, 17)) },
+    ],
+  ]
+  const expected = [
+    [two('23:00', FINE), two('17:00 10-19', `${ALERT} 04:15 10-18`)],
+    [two('22:00', `${ALERT} 21:50`), two('17:00 10-19', EMPTY)],
+  ]
+  const colors = [
+    [[FINE, COLOR.ok], [`${ALERT} 04:15 10-18`, COLOR.danger]],
+    [[`${ALERT} 21:50`, COLOR.danger], [EMPTY, COLOR.danger]],
+  ]
+  for (const [index, rateLimits] of states.entries()) {
+    reading.current = { ...READING, context: { tokens: 49_000, window: 1_000_000, percent: 5 }, rateLimits }
+    await $.session.start(SESSION)
+    for (const columns of [54, 74]) {
+      const inner = columns - 4
+      const ui = await $.ui.mount(pane(columns))
+      const five = flat(await ui.find({ key: 'row:five_hour:2' }))
+      const seven = flat(await ui.find({ key: 'row:seven_day:2' }))
+      expect([five, seven], `${columns} 列`).toEqual(expected[index])
+      // 左列暗色"󰑐 重置时刻"，补宽到 13 格；右列起点相同；不超出百分比那一列的右边界
+      const resets = (await ui.findAll({ type: 'Text' })).filter(one => one.text.startsWith(RESET) && one.props.color !== undefined)
+      expect(resets.map(one => [cells(one.text), one.props.color]), `${columns} 列`).toEqual([
+        [13, COLOR.label],
+        [13, COLOR.label],
+      ])
+      const start = (line: string) => cells([...line].slice(0, [...line].findIndex(char => [FINE, ALERT, EMPTY].includes(char))).join(''))
+      expect([start(five), start(seven)], `${columns} 列`).toEqual([15, 15])
+      const percentEdge = barWidth(inner) + 1 + FIELD.percent
+      for (const line of [five, seven]) expect(cells(line) <= percentEdge, `${columns} 列 ${line}`).toBe(true)
+      // 三行百分比右对齐在同一列：名称之后的值都正好到百分比那一列的右边界
+      for (const [key, label] of [['five_hour', '5h'], ['seven_day', '7d'], ['context', '上下文']] as const) {
+        const first = flat(await ui.find({ key: `row:${key}` }))
+        expect(first, `${columns} 列 ${key}`).toMatch(/%$/)
+        expect(cells(first) - cells(label), `${columns} 列 ${key}`).toBe(percentEdge)
+      }
+      const texts = await ui.findAll({ type: 'Text' })
+      for (const [shown, color] of colors[index] ?? []) expect(texts.filter(one => one.text === shown).at(-1)?.props.color, shown).toBe(color)
+      const all = flat(await ui.find({ key: 'section:usage' }))
+      expect(all).not.toContain('…')
+      for (const word of ['预计', '↻', '周', '明天', '用尽']) expect(all).not.toContain(word)
+      await ui.unmount()
     }
-    const texts = await ui.findAll({ type: 'Text' })
-    expect(texts.filter(one => one.text === '预计 46%').at(-1)?.props.color).toBe(COLOR.label)
-    expect(texts.filter(one => one.text === '预计 128%').at(-1)?.props.color).toBe(COLOR.danger)
-    const all = flat(await ui.find({ key: 'section:usage' }))
-    expect(all).not.toContain('…')
-    for (const word of ['周', '明天', '用尽']) expect(all).not.toContain(word)
-    await ui.unmount()
   }
 })

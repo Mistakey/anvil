@@ -13,7 +13,7 @@ export const COLOR = {
   faint: '#5b5f67',
   /** 提示文字、身份栏的图标；翻译框有内容时的边框 */
   dim: '#8c939f',
-  /** 用量框、缓存框的名称列，用量框第二行的细节（↻ 重置时刻、已用 / 上限），我的消息的序号；取自用户 statusline 的次要标签 */
+  /** 用量框、缓存框的名称列，用量框第二行的细节（󰑐 重置时刻、已用 / 上限），我的消息的序号；取自用户 statusline 的次要标签 */
   label: '#6b7280',
   /** 进度条的底 */
   track: '#3a3f48',
@@ -43,6 +43,11 @@ export const ICON = {
   agents: '\u{F06A9}',
   usage: '\u{F029A}',
   cache: '\u{F01BC}',
+  // 用量框第二行：重置时刻；预测（nf-md-battery、battery_alert、battery_outline）
+  reset: '\u{F0450}',
+  battery: '\u{F0079}',
+  batteryAlert: '\u{F0083}',
+  batteryOut: '\u{F008E}',
   // 身份栏
   dir: '\u{F07C}',
   branch: '\u{F418}',

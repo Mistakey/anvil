@@ -52,7 +52,7 @@ import type { Loop } from './keepalive'
 import { CLOSED, isClosed, scrollList, toggleDetail, toggleList } from './list'
 import { faultedModule, liveOf, spinAfter } from './live'
 import { NO_MESSAGES, addMessage, contentText, isMyMessage, messageList, reconcile, settleMessages, userTexts } from './messages'
-import { PANE, PANEL_SUBCOMMAND, drawPanel, gridRow, hidesPanel, innerWidth } from './panel'
+import { PANE, PANEL_SUBCOMMAND, drawPanel, gridRow, hidesPanel, innerWidth, spacedGridRows } from './panel'
 import { readSettings } from './settings'
 import {
   EMPTY_BOX,
@@ -74,7 +74,7 @@ import {
 } from './translate'
 import type { Translation } from './translate'
 import { EMPTY_USAGE, applyReading, usageRows } from './usage'
-import type { GridRow, Reading } from './usage'
+import type { Reading } from './usage'
 import type { Denial, GitView, Identity, KeepaliveStop, ListId, Scrolled, Settings, SubAgent } from '../types'
 
 // 模块结构（照 flightdeck 的 register.tsx / core.ts），引擎扫描源码的规则见 AGENTS.md Pitfalls「模块结构」：
@@ -604,12 +604,11 @@ async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderI
   const inner = innerWidth(e.props.bodyColumns)
   // 保活的续期请求在路上：接在"进行中"后面转动的图标
   const renewing = loop.inFlight ? spinAfter(els, live, { key: 'spin:keepalive', color: keepalive.color }) : undefined
-  const grid = (rows: GridRow[]) => rows.flatMap(row => gridRow(els, row, inner))
   return drawPanel(els, {
     columns: e.props.bodyColumns,
     rows: e.props.scroll.bodyRows,
     bodies: {
-      usage: { rows: grid(usageRows(current, now, inner)) },
+      usage: { rows: spacedGridRows(els, usageRows(current, now, inner), inner) },
       cache: { rows: cacheRows(cached, keepalive, now, inner).flatMap(row => gridRow(els, row, inner, row.key === 'keepalive' ? renewing : undefined)) },
     },
     lists: {

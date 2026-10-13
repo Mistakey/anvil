@@ -312,6 +312,15 @@ export function gridRow(els: Els, row: GridRow, inner: number, tail?: RenderElem
   ))
 }
 
+/** 用量框：项与项之间空一行（缓存框不空），空行也是一个元素，框的高度照样按元素数算 */
+export function spacedGridRows(els: Els, rows: readonly GridRow[], inner: number): RenderElement[] {
+  const { Box } = els
+  return rows.flatMap((row, index) => [
+    ...(index === 0 ? [] : [<Box key={`space:${row.key}`} width={inner} height={1} flexShrink={0} />]),
+    ...gridRow(els, row, inner),
+  ])
+}
+
 /**
  * 每个列表这次画出哪几项。占满剩余高度的只有一个：展开的列表；没有展开时是我的消息。
  * 其余区块的高度先算出来（没画的占 0 行，收成一行的占 1 行，框占内容加 2 行边框，区块之间的分隔线各占 1 行），剩下的给它。
