@@ -41,4 +41,6 @@
 - `$.store` 由本机所有会话共享，先 get 再 set 不是原子操作，总量上限 4 MiB；连续 `cleanupPeriodDays`（默认 30 天）没有会话读写就会被清掉，长期设置放 `userConfig`（`docs/adr/0003-settings-in-config.md`）。
 - advisor 这类服务端工具不走 `tool.check`/`tool.call`，只出现在 `turn.step` 结果的 `serverToolUses` 里；`tool.check` 带 `agentId`。
 - `$.command.register` 的 `name` 和 `command.run` 的匹配器要写字面量，否则 validate 会当成没有 `.catch` 的 gating hook。
+- 收 `$` 的辅助函数必须是文件顶层的函数声明（或绑定到函数的顶层 const）；写在 `register` 里的闭包会让模块加载失败（"$ is passed to …, which is not a function declared at the top of this file"）。状态作参数传进去（anvil-k0t.12）。
+- `claude plugin test` 里插件自己调 `$.ui.scroll`（比如在按键处理里）会以 "no implementation for ui.scroll" 拒绝，测试挂的 `ui.scroll` 钩子接不到；滚动只能在交互会话里验证，代码要接住这个拒绝（anvil-k0t.12）。
 - auto mode 会拦截读取 `~/.claude.json`。
