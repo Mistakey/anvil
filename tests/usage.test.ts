@@ -7,7 +7,7 @@ import { cells } from '../hooks/text'
 import { EMPTY_USAGE, exhaustAt, formatTokens, formatUsd, formatWhen, usageRows } from '../hooks/usage'
 import type { GridRow } from '../hooks/usage'
 import type { Usage } from '../types'
-import { SESSION, usage, world } from './world'
+import { SESSION, world } from './world'
 
 // 本地时间 2026-10-13（周二）20:00；格式化按本地时区，测试也按本地时区造时刻
 const at = (day: number, hour: number, minute = 0) => new Date(2026, 9, day, hour, minute).getTime()
@@ -149,13 +149,12 @@ const SUMMARY = [{ role: 'user' as const, text: '摘要', toolUses: [] }]
 
 function engine(on: On) {
   mock.clock(on, { now: NOW })
-  world(on)
+  const reading = { current: READING }
+  world(on, { reading })
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
-  on('turn.complete', () => ({ text: '' }))
   on('session.measure', ($, e) => ({ changed: e.changed }))
-  on('session.compact', () => ({ messages: SUMMARY }))
-  return usage(on, READING)
+  return reading
 }
 
 /** 画出来的一个元素里所有的字，按文档顺序 */

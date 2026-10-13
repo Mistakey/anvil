@@ -46,6 +46,7 @@
 - `claude plugin test` 里插件自己调 `$.ui.scroll`（比如在按键处理里）会以 "no implementation for ui.scroll" 拒绝，测试挂的 `ui.scroll` 钩子接不到；滚动只能在交互会话里验证，代码要接住这个拒绝（anvil-k0t.12）。
 - `claude plugin test` 的 `$` 没有 `ui.close`，测试里的插件改写 `ui.close` 的 `origin` 会被拒（"an origin other than the engine set"）：用户手动关面板（origin `person`）测不了，判断写成纯函数测，接线在交互会话里验证（anvil-k0t.15）。
 - auto mode 会拦截读取 `~/.claude.json`。
+- plugin test 里 `$.session.compact` 的 `messages` 不能是空数组（"a compaction leaves at least one"），整条链会被跳过；`expect` 没有 `toBeCloseTo`，金额先取整再比（anvil-k0t.14）。
 
 ### 模块结构（引擎加载前扫描源码，不合规则整个模块不加载）
 

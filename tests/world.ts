@@ -1,12 +1,33 @@
-import type { CommandRunInput, On, PaneOpenArgs, PromptSubmitInput, SessionStartInput, SessionUsage } from 'claude-code'
+import type { CommandRunInput, HookStream, On, PaneOpenArgs, PromptSubmitInput, SessionStartInput, SessionUsage, TurnCompleteInput, TurnStepInput, TurnUsage } from 'claude-code'
 
 export const SESSION: SessionStartInput = { cwd: '/work', surface: null, isInteractive: true }
 
-// 插件之下的世界：替引擎回答骨架用到的调用，并记下插件注册的命令和写进 `$.state` 的值
-export function world(on: On) {
+export type WorldOptions = {
+  /** `$.session.model()` 的回答 */
+  model?: string
+  /** 引擎的实时上下文（`$.session.usage().context.tokens`），测试中途可改 */
+  live?: { tokens?: number }
+  /** 主输入框里的草稿，测试中途可改；`$.prompt.fill` 写进这里 */
+  box?: { text: string }
+  /** 下一次请求的回复带的 usage，测试中途可改；null 表示没有回复 */
+  reply?: { usage: TurnUsage | null }
+  /** `$.session.usage()` 的整份读数（用量框用），测试中途可改；给了它就不看 `live` */
+  reading?: { current: SessionUsage }
+}
+
+// 插件之下的世界：替引擎回答插件用到的调用，并记下插件注册的命令、写进 `$.state` 的值、
+// 进入会话的消息和放回主输入框的文本
+export function world(on: On, options: WorldOptions = {}) {
   const commands: string[] = []
   const state = new Map<string, unknown>()
+  const entered: string[] = []
+  const fills: string[] = []
+  const box = options.box ?? { text: '' }
   on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.model', () => ({ value: options.model ?? 'claude-opus-5-5' }))
+  on('session.usage', () => ({
+    value: options.reading?.current ?? { startedAt: 0, context: { window: 1000000, tokens: options.live?.tokens }, rateLimits: [] },
+  }))
   on('command.register', ($, e) => {
     commands.push(e.name)
     return { value: { command: e.name } }
@@ -16,7 +37,23 @@ export function world(on: On) {
     state.set(`${e.plugin}.${e.key}`, e.value)
     return next(e)
   })
-  return { commands, state }
+  on('classic.SessionStart', () => ({}))
+  on('turn.step', async function* ($, e) {
+    return { turnId: e.turnId, index: e.index, answer: 'ok', toolUses: [], stopReason: 'end_turn' as const, usage: options.reply ? options.reply.usage : usage() }
+  })
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  on('session.compact', ($, e) => ({ messages: e.messages }))
+  on('prompt.submit', ($, e) => {
+    entered.push(e.text)
+    return { text: e.text }
+  })
+  on('prompt.read', () => ({ value: { text: box.text, cursor: box.text.length } }))
+  on('prompt.fill', ($, e) => {
+    fills.push(e.text)
+    box.text = e.mode === 'replace' ? e.text : box.text + e.text
+    return { isFilled: true }
+  })
+  return { commands, state, entered, fills, box }
 }
 
 /**
@@ -44,12 +81,6 @@ export function panes(on: On) {
   return { opens, closes, screen }
 }
 
-/** 替引擎回答 `$.session.usage()`；读数可以中途改 */
-export function usage(on: On, initial: SessionUsage) {
-  const reading = { current: initial }
-  on('session.usage', () => ({ value: reading.current }))
-  return reading
-}
 
 export const anvil = (args: string): CommandRunInput => ({
   command: 'anvil',
@@ -58,4 +89,28 @@ export const anvil = (args: string): CommandRunInput => ({
   presentation: { isFullscreen: true, columns: 160 },
 })
 
+// ---------------------------------------------------------------- 主会话的请求和消息
+
+export const usage = (over: Partial<TurnUsage> = {}): TurnUsage => ({
+  input_tokens: 2, output_tokens: 1000, cache_read_input_tokens: 150000, cache_creation_input_tokens: 500, model: 'claude-opus-5-5', ...over,
+})
+
+let steps = 0
+/** 一次请求：`agentId` 有值时是子 agent 的 */
+export const stepInput = (over: Partial<TurnStepInput> = {}): TurnStepInput => ({
+  turnId: `t${++steps}`, index: 0, model: 'claude-opus-5-5', messageCount: 3, ...over,
+})
+
+// TurnCompleteInput 按 reason 分支；测试只用回答了的那一支
+type AnsweredTurn = Exclude<TurnCompleteInput, { reason: 'refusal' }>
+export const turnInput = (over: Partial<AnsweredTurn> = {}): TurnCompleteInput => ({
+  answer: 'ok', durationMs: 1000, isAborted: false, turnId: `t${++steps}`, reason: 'answer', usage: usage(), ...over,
+})
+
 export const typed = (text: string): PromptSubmitInput => ({ text, wait: false, origin: { kind: 'composer' } })
+
+/** 读完一次请求的流，拿到它的结果 */
+export async function drain<C, R>(stream: HookStream<C, R>): Promise<R> {
+  for await (const chunk of stream) void chunk
+  return stream.result
+}

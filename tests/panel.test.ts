@@ -2,15 +2,13 @@ import type { On, PromptSubmitInput } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
 import { hidesPanel } from '../hooks/panel'
-import { SESSION, anvil, panes, typed, world } from './world'
+import { SESSION, anvil, drain, panes, stepInput, turnInput, typed, world } from './world'
 
 const OPEN = { id: 'anvil', title: 'anvil', columns: 70 }
 
-// 提交消息时插件之下的引擎：消息照常进入会话
 function engine(on: On) {
   mock.clock(on)
   world(on)
-  on('prompt.submit', ($, e) => ({ text: e.text }))
   return panes(on)
 }
 
@@ -92,4 +90,20 @@ test('/anvil 列出 panel 子命令；panel 后面的词不对时给出用法', 
     ['用法：/anvil <子命令>', '  /anvil panel hide|show  在当前会话隐藏或显示 anvil 面板'].join('\n'),
   )
   expect((await $.command.run(anvil('panel up'))).text).toBe('用法：/anvil panel hide|show')
+})
+
+test('守卫拦下这条消息时，面板照样补开（先补开面板，再过守卫）', async ($, on) => {
+  const clock = mock.clock(on, { now: 10 * 3_600_000 })
+  world(on)
+  const { opens, screen } = panes(on)
+  screen.placed = false
+  await $.session.start(SESSION)
+  await drain($.turn.step(stepInput()))
+  await $.turn.complete(turnInput())
+  await clock.advance(2 * 3_600_000)
+
+  screen.placed = true
+  const first = await $.prompt.submit(typed('继续'))
+  expect(first.drop).toMatch(/^anvil：缓存已过期/)
+  expect(opens).toEqual([OPEN, OPEN])
 })
