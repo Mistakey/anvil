@@ -90,6 +90,39 @@ export function bar(percent: number, width: number = GRID.middle): Segment[] {
 
 export const SEPARATOR: Segment = { text: ' · ', color: COLOR.faint }
 
+/** 一行里不拆开的一块；join 是它和前一块排在同一行时夹在中间的字（如 " · "），折到下一行行首时不画 */
+export type Piece = { segments: Segment[]; join?: Segment }
+
+export const piece = (segments: Segment[], join?: Segment): Piece => ({ segments, join })
+
+/**
+ * 把几块文字排成几行：第一行 first 格，之后每行 next 格；一块在这一行放不下就整块折到下一行。
+ * 只有一块比一整行还宽时才截断加 `…`。
+ */
+export function flow(pieces: readonly Piece[], first: number, next: number): Segment[][] {
+  const lines: Segment[][] = [[]]
+  let left = first
+  for (const one of pieces) {
+    const size = cells(one.segments.map(segment => segment.text).join(''))
+    let line = lines[lines.length - 1] ?? []
+    let join = line.length > 0 ? one.join : undefined
+    if (size + cells(join?.text ?? '') > left && (line.length > 0 || lines.length === 1)) {
+      line = []
+      lines.push(line)
+      left = next
+      join = undefined
+    }
+    if (join) {
+      line.push(join)
+      left -= cells(join.text)
+    }
+    const shown = size > left ? fitSegments(one.segments, left) : one.segments
+    line.push(...shown)
+    left -= cells(shown.map(segment => segment.text).join(''))
+  }
+  return lines
+}
+
 /** 一行几段文字截到 room 格以内：放不下的那段截短、末尾换成 `…`，后面的丢掉 */
 export function fitSegments(list: readonly Segment[], room: number): Segment[] {
   const kept: Segment[] = []
