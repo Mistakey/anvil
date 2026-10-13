@@ -26,7 +26,7 @@ const PRICES: ReadonlyArray<readonly [string, number, number]> = [
   ['haiku', 0.1, 2],
 ]
 
-/** 主会话的缓存状态；只在 register.ts 的闭包里，随模块加载新建，`/clear` 时清零 */
+/** 主会话的缓存状态；只在 register.ts 的闭包里，随模块加载新建，`/clear` 和会话内恢复别的会话时清零 */
 export type Cache = {
   /** 最后一次主会话请求的时刻，0 表示本会话还没有 */
   lastRequestAt: number
@@ -141,19 +141,18 @@ export type ResumeFields = {
 /**
  * 恢复会话时按引擎给的字段起步（D1）。
  *
+ * 会话内 `/resume`、`/branch` 换的是另一个会话：上一个会话的读数、命中率、冷写都不再算，先清零（同 `/clear`，
+ * 计价用的模型保留），再只按引擎给的字段起步。
  * `context_tokens` 是上一条回复的输入加输出，正是重建量；输出部分不单列，记在 context 里。
  * 引擎判定 `prompt_cache_likely_expired` 时，过期时刻最晚取现在：哪怕按 1 小时还没到（引擎知道真实 TTL）。
  */
 export function seedFromResume(c: Cache, e: ResumeFields, now: number) {
   if (e.source !== 'resume' && e.source !== 'fork') return
-  if (typeof e.context_tokens === 'number' && e.context_tokens > 0) {
-    c.context = e.context_tokens
-    c.output = 0
-  }
+  resetForClear(c)
+  if (typeof e.context_tokens === 'number' && e.context_tokens > 0) c.context = e.context_tokens
   if (typeof e.model === 'string') c.model = e.model
   if (typeof e.seconds_since_last_response === 'number') stampRequest(c, now - e.seconds_since_last_response * 1000)
   if (e.prompt_cache_likely_expired === true) c.expiresAt = Math.min(c.expiresAt || now, now)
-  c.compacted = false
 }
 
 const ratio = (part: { read: number; input: number } | null) => part && part.input > 0 ? part.read / part.input : null

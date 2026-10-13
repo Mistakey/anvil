@@ -700,8 +700,9 @@ export const register: Register = (on, options) => {
   on('classic.SessionStart', async ($, e, next) => {
     const result = await next(e)
     await resumeCache($, cache, e)
-    // `/clear` 是新的对话，上一段空闲的停下不再算；恢复的会话按起步的缓存状态定时（冷了不发）
-    if (e.source === 'clear') startStretch(loop)
+    // `/clear`、会话内恢复别的会话（`/resume`、`/branch`）都换了对话：上一段空闲的停下不再算，
+    // 按起步的缓存状态重新定时（冷了不发）
+    if (e.source === 'clear' || e.source === 'resume' || e.source === 'fork') startStretch(loop)
     await cacheChanged($, cache, loop, redraw, settings)
     await refreshGit($, gitRefresh).catch(() => undefined)
     return result
