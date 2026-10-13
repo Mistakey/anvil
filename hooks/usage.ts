@@ -110,11 +110,11 @@ const meter = (percent: number, text: string, inner: number): Piece =>
 
 /**
  * 按当前用量线性外推，用尽时刻早于重置时就是"预计用尽"的时刻；否则 null。
- * 窗口开始 = 重置时刻 − 窗口长度；窗口刚开始也照常推算，不设等待期。已用满时是推算出的用满时刻。
+ * 窗口开始 = 重置时刻 − 窗口长度；窗口刚开始也照常推算，不设等待期。
  */
 export function exhaustAt(percent: number, resetsAt: number, windowMs: number, now: number): number | null {
   const elapsed = now - (resetsAt - windowMs)
-  if (percent <= 0 || elapsed <= 0) return null
+  if (percent <= 0 || elapsed <= 0 || percent >= 100) return null
   const at = now + (elapsed * (100 - percent)) / percent
   return at < resetsAt ? at : null
 }
@@ -125,7 +125,10 @@ export function projectedPercent(percent: number, resetsAt: number, windowMs: nu
   return Math.round(elapsed > 0 ? (percent * windowMs) / elapsed : percent)
 }
 
-/** 5h、7d：进度条 百分比；第二行 ↻ 重置时刻，后接预计：会在重置前用尽是红字"· 预计 HH:MM 用尽"，否则暗色"· 预计用到 N%" */
+/**
+ * 5h、7d：进度条 百分比；第二行 ↻ 重置时刻，后接预计：会在重置前用尽是红字"· 预计 HH:MM 用尽"，否则暗色"· 预计用到 N%"；
+ * 已用满是红字"· 已用尽"
+ */
 function limitRow(kind: 'five_hour' | 'seven_day', limits: readonly RateLimit[], now: number, inner: number): GridSpec {
   const { label, ms } = WINDOWS[kind] ?? { label: kind, ms: 0 }
   const limit = limits.find(one => one.kind === kind)
@@ -137,10 +140,13 @@ function limitRow(kind: 'five_hour' | 'seven_day', limits: readonly RateLimit[],
   const percent = limit.percentUsed
   const detail: Piece[] = [piece([minor(`↻ ${formatReset(resetsAt, now)}`)])]
   const at = exhaustAt(percent, resetsAt, ms, now)
+  const danger = (text: string) => piece([{ text, color: COLOR.danger }], { text: ' · ', color: COLOR.danger })
   detail.push(
-    at === null
+    percent >= 100
+      ? danger('已用尽')
+      : at === null
       ? piece([minor(`预计用到 ${projectedPercent(percent, resetsAt, ms, now)}%`)], minor(' · '))
-      : piece([{ text: `预计 ${formatWhen(at, now)} 用尽`, color: COLOR.danger }], { text: ' · ', color: COLOR.danger }),
+        : danger(`预计 ${formatWhen(at, now)} 用尽`),
   )
   return { key: kind, label, value: [meter(percent, `${Math.round(percent)}%`, inner)], detail }
 }

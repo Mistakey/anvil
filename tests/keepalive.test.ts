@@ -449,11 +449,14 @@ describe('缓存框', () => {
     expect([59, 60, 61, 552].map(minutes => formatExpired(minutes * MIN + 30 * SEC))).toEqual(['59 分钟', '1 小时 0 分钟', '1 小时 1 分钟', '9 小时 12 分钟'])
   })
 
-  test('还没有请求、刚压缩完：命中率写 —，不画 ● 那一行', () => {
-    const none = cacheRows(view(freshCache()), ENABLED, at(13, 20), 66)
-    expect(none.map(row => row.key)).toEqual(['cache', 'keepalive'])
-    expect(valueOf(none, 'cache')).toBe('—')
-    expect(cacheRows(sample({ compacted: true }), ENABLED, at(13, 22, 50), 66).map(row => row.key)).toEqual(['cache', 'keepalive'])
+  test('还没有请求、刚压缩完：命中率写 —，● 那一行照画，暗色"● —"，框始终三行', () => {
+    for (const rows of [cacheRows(view(freshCache()), ENABLED, at(13, 20), 66), cacheRows(sample({ compacted: true }), ENABLED, at(13, 22, 50), 66)]) {
+      expect(rows.map(row => row.key)).toEqual(['cache', 'state', 'keepalive'])
+      const state = rows[1]
+      expect(state?.label).toEqual([{ text: '●', color: COLOR.label }])
+      expect(state?.lines[0]).toEqual([{ text: '—', color: COLOR.label }])
+    }
+    expect(valueOf(cacheRows(view(freshCache()), ENABLED, at(13, 20), 66), 'cache')).toBe('—')
   })
 
   test('命中率：低于 80% 变黄、低于 50% 变红，图标暗色；不写"命中率"和上一条', () => {

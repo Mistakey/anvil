@@ -24,9 +24,9 @@ export function hitColor(rate: number): string | undefined {
   return undefined
 }
 
-/** ● | "有效 · 21:40 过期"（绿）或"已过期 N 分钟"（红），● 同色；还没有请求、刚压缩完时这一行不画 */
-function stateRow(view: CacheView, now: number): GridSpec | null {
-  if (view.expiresAt === null || view.compacted) return null
+/** ● | "有效 · 21:40 过期"（绿）或"已过期 N 分钟"（红），● 同色；还没有请求、刚压缩完时暗色"● —"，框始终三行 */
+function stateRow(view: CacheView, now: number): GridSpec {
+  if (view.expiresAt === null || view.compacted) return { key: 'state', label: [{ text: '●', color: COLOR.label }], value: [piece([{ text: '—', color: COLOR.label }])] }
   const [text, color] =
     now >= view.expiresAt
       ? [`已过期 ${formatExpired(now - view.expiresAt)}`, COLOR.danger]
@@ -39,10 +39,9 @@ export function cacheRows(view: CacheView, keepalive: Segment, now: number, inne
   const session = view.hitRate.session
   // 不写"命中率"，名称一列放缓存图标；还没有读数写 —，不写像算出来的 0
   const hit: Segment = session === null ? { text: '—' } : { text: `${Math.round(session * 100)}%`, color: hitColor(session) }
-  const state = stateRow(view, now)
   const rows: GridSpec[] = [
     { key: 'cache', label: [{ text: ICON.cache, color: COLOR.label }], value: [piece([hit])] },
-    ...(state ? [state] : []),
+    stateRow(view, now),
     // 状态字长（如出错原因）时逐行折下去，同一个颜色
     {
       key: 'keepalive',

@@ -403,7 +403,8 @@ test('我的消息占满剩余高度，身份栏贴底：各区块加身份栏�
   await addDenials($, 2)
   await addMessages($, 60)
   for (const columns of PANEL_WIDTHS) {
-    for (const bodyRows of [36, 48]) {
+    // 37 行：50 列时我的消息恰好剩 2 行（"更早的"一行加最新一条），再矮就放不下最新一条
+    for (const bodyRows of [37, 48]) {
       const ui = await $.ui.mount(sized(columns, bodyRows))
       expect(await totalHeight(ui), `${columns} 列 ${bodyRows} 行`).toBe(bodyRows)
       // 最新的一条在最下面

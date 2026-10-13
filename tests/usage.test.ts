@@ -79,6 +79,21 @@ test('窗口刚开始也照常推算，不设等待期；还没用时写"预计�
   expect(projectedPercent(30, at(13, 22), 5 * 3_600_000, NOW)).toBe(50)
 })
 
+test('已用满 100%：第二行接红字"· 已用尽"，不写推算的时刻', () => {
+  const full: Usage = {
+    ...WORKING,
+    rateLimits: [
+      { kind: 'five_hour', percentUsed: 100, resetsAt: iso(at(13, 22)) },
+      { kind: 'seven_day', percentUsed: 100, resetsAt: iso(at(19, 17)) },
+    ],
+  }
+  const rows = usageRows(full, NOW, INNER)
+  expect(detailOf(rows, 'five_hour')).toBe('↻ 22:00 · 已用尽')
+  expect(detailOf(rows, 'seven_day')).toBe('↻ 17:00 周一 · 已用尽')
+  for (const key of ['five_hour', 'seven_day']) expect(rowOf(rows, key)?.lines[1]?.slice(1).every(one => one.color === COLOR.danger), key).toBe(true)
+  expect(exhaustAt(100, at(13, 22), 5 * 3_600_000, NOW)).toBe(null)
+})
+
 test('7d：重置时刻时间在前（↻ 09:00 周四、↻ 09:00 明天）；7d 也写预计', () => {
   // 窗口 10/8 09:00 开始，131 小时用了 18%，到重置时用到 23%
   expect(detailOf(usageRows(WORKING, NOW, INNER), 'seven_day')).toBe('↻ 09:00 周四 · 预计用到 23%')
