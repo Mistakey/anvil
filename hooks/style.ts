@@ -61,10 +61,7 @@ export const ICON = {
   failed: '\u{F00D}',
 } as const
 
-/**
- * 用量框和缓存框的两列：名称 | 值，列间空 2 格。用量框名称 6 格；缓存框第一行的名称位置放缓存图标和命中率，
- * 名称 8 格（cachebox.ts 的 CACHE_LABEL）。
- */
+/** 用量框和缓存框的两列：名称 | 值，列间空 2 格；名称都是 6 格，两框的值从同一列起 */
 export const GRID = { label: 6, gap: 2 } as const
 
 /** 值那一列的宽度；折下去的行也从这一列起 */

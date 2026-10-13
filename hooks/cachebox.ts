@@ -1,4 +1,4 @@
-// 缓存框（spec D8、D10）：两行。第一行名称的位置是缓存图标加本会话命中率，值是过期状态；第二行是保活。
+// 缓存框（spec D8、D10）：三行。缓存图标 | 本会话命中率；● | 过期状态；保活。名称一列和用量框同宽，两框的值从同一列起。
 // 读数来自 `$.state` 的 anvil.cache（缓存状态）和保活状态（keepalive.ts），绘制在 register.ts 和 panel.tsx。
 
 import type { CacheView } from '../types'
@@ -7,9 +7,6 @@ import type { Segment } from './style'
 import { wrap } from './text'
 import { formatWhen, layoutRow } from './usage'
 import type { GridRow, GridSpec } from './usage'
-
-/** 缓存框名称一列的宽度：放得下"图标 100%"，状态和保活从同一列起 */
-export const CACHE_LABEL = 8
 
 const MINUTE = 60_000
 
@@ -27,30 +24,31 @@ export function hitColor(rate: number): string | undefined {
   return undefined
 }
 
-/** "● 有效 · 21:40 过期"（绿）或"● 已过期 N 分钟"（红）；还没有请求、刚压缩完时不写 */
-function cacheState(view: CacheView, now: number): Segment[] {
-  if (view.expiresAt === null || view.compacted) return []
-  if (now >= view.expiresAt) return [{ text: `● 已过期 ${formatExpired(now - view.expiresAt)}`, color: COLOR.danger }]
-  return [{ text: `● 有效 · ${formatWhen(view.expiresAt, now)} 过期`, color: COLOR.ok }]
+/** ● | "有效 · 21:40 过期"（绿）或"已过期 N 分钟"（红），● 同色；还没有请求、刚压缩完时这一行不画 */
+function stateRow(view: CacheView, now: number): GridSpec | null {
+  if (view.expiresAt === null || view.compacted) return null
+  const [text, color] =
+    now >= view.expiresAt
+      ? [`已过期 ${formatExpired(now - view.expiresAt)}`, COLOR.danger]
+      : [`有效 · ${formatWhen(view.expiresAt, now)} 过期`, COLOR.ok]
+  return { key: 'state', label: [{ text: '●', color }], value: [piece([{ text, color }])] }
 }
 
-/** 缓存框的两行，按框内宽度 inner 排好（layoutRow） */
+/** 缓存框的几行，按框内宽度 inner 排好（layoutRow） */
 export function cacheRows(view: CacheView, keepalive: Segment, now: number, inner: number): GridRow[] {
   const session = view.hitRate.session
-  // 不写"命中率"，用缓存图标代替；还没有读数写 —，不写像算出来的 0
-  const hit: Segment[] = [
-    { text: `${ICON.cache} `, color: COLOR.label },
-    session === null ? { text: '—' } : { text: `${Math.round(session * 100)}%`, color: hitColor(session) },
-  ]
-  const state = cacheState(view, now)
+  // 不写"命中率"，名称一列放缓存图标；还没有读数写 —，不写像算出来的 0
+  const hit: Segment = session === null ? { text: '—' } : { text: `${Math.round(session * 100)}%`, color: hitColor(session) }
+  const state = stateRow(view, now)
   const rows: GridSpec[] = [
-    { key: 'cache', label: hit, value: state.length > 0 ? [piece(state)] : [] },
+    { key: 'cache', label: [{ text: ICON.cache, color: COLOR.label }], value: [piece([hit])] },
+    ...(state ? [state] : []),
     // 状态字长（如出错原因）时逐行折下去，同一个颜色
     {
       key: 'keepalive',
       label: '保活',
-      value: wrap(keepalive.text, valueWidth(inner, CACHE_LABEL), Number.MAX_SAFE_INTEGER).map(line => piece([{ ...keepalive, text: line }], { text: ' ' })),
+      value: wrap(keepalive.text, valueWidth(inner), Number.MAX_SAFE_INTEGER).map(line => piece([{ ...keepalive, text: line }], { text: ' ' })),
     },
   ]
-  return rows.map(row => layoutRow(row, inner, CACHE_LABEL))
+  return rows.map(row => layoutRow(row, inner))
 }
