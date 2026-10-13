@@ -1,11 +1,17 @@
-import type { On } from 'claude-code'
+// `/anvil` 命令的纯逻辑：说明和兜底回答。注册和执行都在 register.ts。
+
+/** `/anvil` 注册时的说明；name 留在 register.ts 写字面量，validate 才认得 */
+export const COMMAND = {
+  description: 'anvil 只作用于当前会话的命令；不带参数时列出子命令',
+  argumentHint: '<子命令>',
+} as const
 
 /**
- * 功能模块交给 `/anvil` 的一个子命令的说明，如 `/anvil panel hide|show`。
+ * 功能交给 `/anvil` 的一个子命令的说明，如 `/anvil panel hide|show`。
  *
- * 执行由功能模块自己注册，匹配器写字面量、和这里的 name、args 对上：
+ * 执行在 register.ts 里注册，匹配器写字面量、和这里的 name、args 对上：
  * `on('command.run', { command: 'anvil', args: /^\s*panel\s+(hide|show)\s*$/ }, async ($, e) => ...)`。
- * 没被功能模块接走的 `/anvil`（不带子命令、子命令未知、后面的词不对）由这里兜底回答。
+ * 没被接走的 `/anvil`（不带子命令、子命令未知、后面的词不对）由兜底的 command.run 用 answer 回答。
  */
 export type Subcommand = {
   name: string
@@ -33,18 +39,4 @@ export function answer(subcommands: readonly Subcommand[], args: string): string
   const subcommand = subcommands.find(one => one.name === name)
   if (subcommand === undefined) return `没有子命令 ${name}。\n${list(subcommands)}`
   return `用法：${line(subcommand)}`
-}
-
-/** `/anvil` 命令入口：会话开始时注册命令，兜底回答功能模块没接走的调用；要最后接入 */
-export function registerCommand(on: On, subcommands: readonly Subcommand[]) {
-  on('session.start', {}, async ($, e, next) => {
-    await $.command.register({
-      name: 'anvil',
-      description: 'anvil 只作用于当前会话的命令；不带参数时列出子命令',
-      argumentHint: '<子命令>',
-    })
-    return next(e)
-  })
-
-  on('command.run', { command: 'anvil' }, async ($, e) => ({ text: answer(subcommands, e.args) }))
 }

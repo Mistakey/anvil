@@ -1,4 +1,4 @@
-import type { On, PluginOptions } from 'claude-code'
+import type { PluginOptions } from 'claude-code'
 
 import type { Settings, TranslateBackend } from '../types'
 
@@ -38,14 +38,4 @@ export function readSettings(options: PluginOptions): Settings {
     translateApiUrl: text(options, 'translateApiUrl'),
     translateApiModel: text(options, 'translateApiModel'),
   }
-}
-
-const SETTINGS = { plugin: 'anvil', key: 'settings' } as const
-
-/** 会话开始时把生效的设置写进 `$.state`，供拿不到 options 的读者（测试）核对 */
-export function publishSettings(on: On, settings: Settings) {
-  on('session.start', {}, async ($, e, next) => {
-    await $.state.set(SETTINGS, settings)
-    return next(e)
-  })
 }
