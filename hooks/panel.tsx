@@ -9,7 +9,7 @@ import type { ListId, PanelFold } from '../types'
 import type { Subcommand } from './command'
 import { earlierText, fitCount, fitRows } from './list'
 import type { Fit } from './list'
-import { COLOR, GRID, ICON, restWidth } from './style'
+import { COLOR, GRID, ICON, fitSegments, restWidth } from './style'
 import type { Segment } from './style'
 import { cells, fit, padStart } from './text'
 import type { GridRow } from './usage'
@@ -78,6 +78,8 @@ export type PanelView = {
   /** 三个列表的内容；还没接上内容的列表照样能展开、收成一行 */
   lists: Partial<Record<ListId, ListBody>>
   fold: PanelFold
+  /** 身份栏的两行，接在缓存框下面（不带框） */
+  identity?: RenderElement[]
   /** 按了列表的展开键，或焦点在标题、"更早的"那行上按了 Enter */
   onToggle: (id: ListId) => void
 }
@@ -96,21 +98,6 @@ function segments(els: Els, list: readonly Segment[]) {
 /** 右上角状态能用的格数：不压住标题，左右各留一格边框线 */
 function statusRoom(columns: number, title: string): number {
   return Math.max(0, columns - 2 - cells(title) - 4)
-}
-
-function fitStatus(list: readonly Segment[], room: number): Segment[] {
-  const kept: Segment[] = []
-  let left = room
-  for (const segment of list) {
-    const size = cells(segment.text)
-    if (size > left) {
-      if (left > 1) kept.push({ ...segment, text: fit(segment.text, left) })
-      break
-    }
-    kept.push(segment)
-    left -= size
-  }
-  return kept
 }
 
 /**
@@ -137,7 +124,7 @@ function frame(els: Els, section: Section, body: SectionBody | undefined, column
   // 列表标题前面引擎还画"a: "，占 3 格
   const shown = TITLE_IN_BORDER ? ` ${title} ` : title
   const taken = section.hotkey && onPress ? `${shown}a: ` : shown
-  const status = body?.status ? fitStatus([{ text: ' ' }, ...body.status, { text: ' ' }], statusRoom(columns, taken)) : []
+  const status = body?.status ? fitSegments([{ text: ' ' }, ...body.status, { text: ' ' }], statusRoom(columns, taken)) : []
   const head = heading(els, section, shown, onPress)
   return (
     <Box
@@ -257,7 +244,7 @@ export function gridRow(els: Els, row: GridRow, inner: number): RenderElement {
 function fitLists(view: PanelView, fillId: SectionId): Map<ListId, Fit> {
   const { expanded } = view.fold
   const fits = new Map<ListId, Fit>()
-  let used = 0
+  let used = view.identity?.length ?? 0
   for (const section of SECTIONS) {
     const id = section.id
     if (id === fillId) continue
@@ -315,6 +302,7 @@ export function drawPanel(els: Els, view: PanelView): RenderElement {
   return (
     <Box flexDirection="column" width={columns} minHeight={view.rows}>
       {drawn}
+      {view.identity ?? []}
     </Box>
   )
 }

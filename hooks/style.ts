@@ -1,5 +1,7 @@
 // 面板共用的样式（spec D10，取自设计稿 Version 32）：颜色、图标、三列网格、进度条。
 
+import { cells, fit } from './text'
+
 /** 一段同色文字；一行由几段拼成 */
 export type Segment = { text: string; color?: string; bold?: boolean }
 
@@ -7,6 +9,8 @@ export const COLOR = {
   text: '#e6e9ee',
   /** 标签、次要文字 */
   muted: '#a7adb8',
+  /** 身份栏的图标等更淡的文字 */
+  dim: '#8c939f',
   /** 分隔符 `·` 和中性边框 */
   faint: '#5b5f67',
   /** 进度条的底 */
@@ -25,6 +29,11 @@ export const COLOR = {
   agentsBorder: '#845d7b',
   denials: '#e07a7a',
   denialsBorder: '#895152',
+  // 身份栏的 git 配色，取自用户原来的 statusline
+  branch: '#b18bd0',
+  ahead: '#d7a65f',
+  added: '#7fae6f',
+  deleted: '#c47878',
 } as const
 
 /** Nerd Font 图标；图标后一律留一个空格 */
@@ -34,6 +43,15 @@ export const ICON = {
   agents: '\u{F06A9}',
   usage: '\u{F029A}',
   cache: '\u{F01BC}',
+  // 身份栏
+  dir: '\u{F07C}',
+  branch: '\u{F418}',
+  detached: '\u{F417}',
+  worktree: '\u{F402}',
+  stash: '\u{F51E}',
+  lines: '\u{F440}',
+  pause: '\u{F04C}',
+  model: '\u{F4BC}',
 } as const
 
 /** 用量框和缓存框共用的三列网格：标签 8 格 | 18 格 | 其余，列间空 1 格 */
@@ -63,3 +81,19 @@ export function bar(percent: number, width: number = GRID.middle): Segment[] {
 }
 
 export const SEPARATOR: Segment = { text: ' · ', color: COLOR.faint }
+
+/** 一行几段文字截到 room 格以内：放不下的那段截短、末尾换成 `…`，后面的丢掉 */
+export function fitSegments(list: readonly Segment[], room: number): Segment[] {
+  const kept: Segment[] = []
+  let left = room
+  for (const segment of list) {
+    const size = cells(segment.text)
+    if (size > left) {
+      if (left > 1) kept.push({ ...segment, text: fit(segment.text, left) })
+      break
+    }
+    kept.push(segment)
+    left -= size
+  }
+  return kept
+}
