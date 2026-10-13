@@ -2,5 +2,45 @@
   "name": "anvil",
   "version": "0.1.0",
   "description": "个人自用的 Claude Code mod：额度利用率（缓存保活）、会话信息显示、英文沟通（中译英输入框）",
-  "author": { "name": "kelch" }
+  "author": { "name": "kelch" },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "threshold": {
+      "title": "上下文阈值",
+      "description": "单位 token。上下文达到它的会话自动开启缓存保活，冷发送守卫也只拦这类会话",
+      "type": "number",
+      "default": 50000
+    },
+    "autoKeepalive": {
+      "title": "自动开启缓存保活",
+      "description": "上下文达到阈值的会话自动开启缓存保活；本会话可用 /anvil keepalive off|on 关闭或恢复",
+      "type": "boolean",
+      "default": true
+    },
+    "guard": {
+      "title": "冷发送守卫",
+      "description": "缓存已过期且上下文达到阈值时，拦下发给模型的第一条消息一次，提示重建代价",
+      "type": "boolean",
+      "default": true
+    },
+    "translateBackend": {
+      "title": "翻译后端",
+      "description": "haiku、sonnet 用订阅内的模型；api 用下面两项的 OpenAI 兼容接口，key 读环境变量 ANVIL_TRANSLATE_API_KEY",
+      "type": "string",
+      "options": ["haiku", "sonnet", "api"],
+      "default": "haiku"
+    },
+    "translateApiUrl": {
+      "title": "自有 API 接口地址",
+      "description": "OpenAI 兼容接口的地址，翻译后端选 api 时使用",
+      "type": "string",
+      "default": ""
+    },
+    "translateApiModel": {
+      "title": "自有 API 模型名",
+      "description": "翻译后端选 api 时请求的模型名",
+      "type": "string",
+      "default": ""
+    }
+  }
 }

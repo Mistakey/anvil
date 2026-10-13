@@ -5,6 +5,7 @@
 ## 开发
 
 - 仓库本身就是一个插件：`.claude-plugin/plugin.json` 是清单，`hooks/hooks.json` 指向入口 `hooks/register.ts`。
+- 结构：设置在清单的 `userConfig`，`hooks/settings.ts` 收窄成 `Settings`；`$.state` 的类型契约在 `types/index.d.ts`。功能模块一个文件一个，导出 `registerXxx(on, settings)`，在 `register.ts` 里按顺序接入；`/anvil` 子命令的说明交给 `registerCommand`（`hooks/command.ts`，最后接入，兜底列子命令），执行由功能模块自己的 `command.run` 钩子接。测试在 `tests/`，`tests/world.ts` 替引擎回答插件之下的调用。
 - 加载调试：`claude --plugin-dir C:\work\5.code\personal\anvil`，保存即热重载。
 - 检查：`claude plugin validate .` 列出挂的事件、调用的 API 和引擎会拒绝的内容；测试：`claude plugin test .` 跑 `*.test.ts`。
 - 类型：交互加载一次后，引擎在 `.claude-plugin/types/` 生成当前构建的声明（已忽略提交）；查 API 就 grep 其中的 `claude-code/index.d.ts`。类型检查：`npx -p typescript tsc -p .`。`plugin validate`、`plugin test` 和普通 `claude -p` 都不生成类型；不开交互会话时用 `CLAUDE_CODE_PLUGIN_DIR_WATCH=1 claude --plugin-dir <dir> -p "ok" --model haiku --max-turns 1`。新 worktree 里没有类型，先这样加载一次再跑 `tsc`。
@@ -42,3 +43,15 @@
 - advisor 这类服务端工具不走 `tool.check`/`tool.call`，只出现在 `turn.step` 结果的 `serverToolUses` 里；`tool.check` 带 `agentId`。
 - `$.command.register` 的 `name` 和 `command.run` 的匹配器要写字面量，否则 validate 会当成没有 `.catch` 的 gating hook。
 - auto mode 会拦截读取 `~/.claude.json`。
+
+### 模块结构（引擎加载前扫描源码，不合规则整个模块不加载）
+
+以下在 2.1.296 上由 validate 和 plugin test 实测（anvil-k0t.11）。
+
+- `hooks/hooks.json` 的 `modules` 只能有一项，第二项被拒：一个插件只有一个 hooks 模块，按功能分文件而不是分模块。
+- `$` 只能交给同一文件里声明的函数：不能跨 import 传，也不能交给存起来、从对象或数组里取的函数。用到 `$` 的代码和接收它的钩子写在同一个文件里；跨文件只传不含 `$` 的数据和纯函数。
+- `on` 可以交给本模块自己具名的函数（可以跨文件），但不能经对象属性或数组里的函数传，也不能用这类函数的返回值。
+- 同一事件在整个模块里（跨文件合计）只能不带匹配器注册一次；带匹配器的不限，`{}` 也算匹配器、匹配全部。几个功能模块都要的事件（`session.start` 等）一律带匹配器注册。同一模块里先注册的钩子在外层先跑。
+- `command.run` 的匹配器可以用正则匹配 `args`，如 `{ command: 'anvil', args: /^\s*panel\s+(hide|show)\s*$/ }`，仍算 answers its own command。
+- plugin test 里测试拿到的 `$` 没有 `state`，读不到插件写的 `$.state`；在测试自己的 `on('state.set')` 里记下 `e.value` 再 `next(e)`。
+- `claude plugin validate` 会校验 `userConfig` 各项的 `type`，但不列出各项设置；要列出来用 `claude --plugin-dir <dir> plugin configure anvil@inline`（不带 `--values-stdin` 时只读），默认值靠 plugin test 核对。
