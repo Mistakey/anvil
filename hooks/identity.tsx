@@ -1,18 +1,21 @@
-// 身份栏（spec D8）：面板最底的两行。第一行是目录名和 git 状态，第二行是模型、effort 和输出速度。
+// 身份栏（spec D8）：面板最底的三行。第一行是目录名和 git 状态，第二行是模型和 effort，
+// 第三行是主会话最近一次请求的输出速度、首字等待和整次用时。
 // git 取法照用户原来的 ~/.claude/statusline.mjs（`--no-optional-locks`、分离 HEAD 写 `@提交号`、
 // `@{u}` 领先落后、储藏数），改成一条 `status --porcelain=v2 --branch --show-stash` 取齐分支、上游、
 // 领先落后、各项计数和储藏数；目录名、改动行数、停在一半的命令是 statusline 没有的，按 D8 加。
-// tok/s 照 .13 探针：首字是请求流里第一块不是 engine 的，结束是 stop 那块，只算主会话。
+// token/s 照 .13 探针：首字是请求流里第一块不是 engine 的，结束是 stop 那块，只算主会话；
+// 首字等待从请求开始算到首字，整次用时从请求开始算到 stop 那块。
 // 只放不碰 `$` 的纯逻辑和界面组件；运行 git、读 git 目录和记请求时刻在 register.ts。
 
 import type { Elements, RenderElement } from 'claude-code'
 
 import type { GitOperation, GitView, Identity } from '../types'
+import { formatDuration } from './cache'
 import { COLOR, ICON, SEPARATOR, fitSegments } from './style'
 import type { Segment } from './style'
 import { cells, fit } from './text'
 
-export const EMPTY_IDENTITY: Identity = { dir: '', git: null, model: null, effort: null, tokensPerSecond: null }
+export const EMPTY_IDENTITY: Identity = { dir: '', git: null, model: null, effort: null, tokensPerSecond: null, firstTokenMs: null, requestMs: null }
 
 // ---------------------------------------------------------------- git 的读法
 
@@ -130,7 +133,7 @@ export function gitView(paths: RepoPaths, status: Status, lines: GitView['lines'
   return view
 }
 
-// ---------------------------------------------------------------- 模型、effort、tok/s
+// ---------------------------------------------------------------- 模型、effort、速度
 
 /** Opus 5.5、Sonnet 4.5、Haiku；不认识的原样 */
 export function modelLabel(id: string): string {
@@ -183,7 +186,13 @@ export function tokensPerSecond(output: number | null | undefined, firstAt: numb
   return span > 0 ? Math.round(output / (span / 1000)) : null
 }
 
-// ---------------------------------------------------------------- 两行的文字
+/** 秒数：不到 60 秒一位小数（12.7s），60 秒起按 D10 的时长写法（1m35s） */
+export function formatSeconds(ms: number): string {
+  const tenths = Math.round(Math.max(0, ms) / 100)
+  return tenths < 600 ? `${(tenths / 10).toFixed(1)}s` : formatDuration(ms)
+}
+
+// ---------------------------------------------------------------- 三行的文字
 
 /** 分支、worktree 名、子目录各自最多占几格（设计稿：worktree 里的分支截成 20 格）；整行放不下时再收到 10 格 */
 const NAME_CELLS = 20
@@ -249,13 +258,24 @@ export function gitLine(identity: Identity, names: number = NAME_CELLS): Segment
   return spaced([dir, branch, git.operation ? opSegments(git.operation) : [], counts, changed])
 }
 
-/** 第二行：模型 · effort · tok/s；还没有的项不写 */
+const joined = (parts: readonly Segment[][]) => parts.flatMap((part, index) => (index === 0 ? part : [SEPARATOR, ...part]))
+
+/** 第二行：模型 · effort；还没有的项不写 */
 export function modelLine(identity: Identity): Segment[] {
   const parts: Segment[][] = []
   if (identity.model) parts.push([{ text: `${ICON.model} `, color: COLOR.dim }, { text: modelLabel(identity.model) }])
   if (identity.effort !== null) parts.push([effortSegment(identity.effort)])
-  if (identity.tokensPerSecond !== null) parts.push([{ text: String(identity.tokensPerSecond) }, { text: ' tok/s', color: COLOR.muted }])
-  return parts.flatMap((part, index) => (index === 0 ? part : [SEPARATOR, ...part]))
+  return joined(parts)
+}
+
+/** 第三行：N token/s · 首字 N s · 用时 N s；数值不着色，缺的项不写，还没有请求时写 — */
+export function speedLine(identity: Identity): Segment[] {
+  const icon: Segment = { text: `${ICON.speed} `, color: COLOR.dim }
+  const parts: Segment[][] = []
+  if (identity.tokensPerSecond !== null) parts.push([{ text: String(identity.tokensPerSecond) }, { text: ' token/s', color: COLOR.muted }])
+  if (identity.firstTokenMs !== null) parts.push([{ text: '首字 ', color: COLOR.muted }, { text: formatSeconds(identity.firstTokenMs) }])
+  if (identity.requestMs !== null) parts.push([{ text: '用时 ', color: COLOR.muted }, { text: formatSeconds(identity.requestMs) }])
+  return parts.length === 0 ? [icon, { text: '—' }] : [icon, ...joined(parts)]
 }
 
 // ---------------------------------------------------------------- 绘制
@@ -279,10 +299,14 @@ function line(els: Els, key: string, segments: readonly Segment[], columns: numb
   )
 }
 
-/** 交给面板的两行 */
+/** 交给面板的三行 */
 export function identityRows(els: Els, identity: Identity, columns: number): RenderElement[] {
   // 名字长时先把名字截短，让后面的计数和行数留在行里；还放不下再从行尾截
   const full = gitLine(identity)
   const first = cells(full.map(segment => segment.text).join('')) <= columns - 2 ? full : gitLine(identity, NARROW_NAME_CELLS)
-  return [line(els, 'identity:git', first, columns), line(els, 'identity:model', modelLine(identity), columns)]
+  return [
+    line(els, 'identity:git', first, columns),
+    line(els, 'identity:model', modelLine(identity), columns),
+    line(els, 'identity:speed', speedLine(identity), columns),
+  ]
 }

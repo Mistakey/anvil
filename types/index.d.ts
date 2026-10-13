@@ -35,12 +35,6 @@ export type Usage = {
   rateLimits: RateLimit[]
   /** 本会话花费，`/cost` 同源 */
   costUsd: number | null
-  /** 主会话已压缩次数 */
-  compactions: number
-  /** 主会话这一轮开始时的会话花费，一轮结束时用来算上一条消息的花费 */
-  costAtTurnStart: number | null
-  /** 上一条消息的花费 */
-  lastMessageCostUsd: number | null
 }
 
 /** 主会话的缓存状态（spec D1、D2），供缓存框显示；时刻都是 `$.clock.now()` 的毫秒 */
@@ -218,7 +212,7 @@ export type GitView = {
   operation: GitOperation | null
 }
 
-/** 身份栏（spec D8）：面板最底的两行 */
+/** 身份栏（spec D8）：面板最底的三行 */
 export type Identity = {
   /** 不在 git 里时取会话目录名 */
   dir: string
@@ -230,6 +224,10 @@ export type Identity = {
   effort: string | number | null
   /** 主会话最近一次请求的输出速度：输出 token 数 ÷ 首字到结束的秒数 */
   tokensPerSecond: number | null
+  /** 主会话最近一次请求的首字等待：请求开始到首字，毫秒 */
+  firstTokenMs: number | null
+  /** 主会话最近一次请求的整次用时：请求开始到结束，毫秒 */
+  requestMs: number | null
 }
 
 /** 翻译框的四种显示状态（spec D5）：示例和按键提示、正在翻译、已追加 N 个词、失败原因 */

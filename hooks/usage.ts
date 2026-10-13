@@ -1,18 +1,11 @@
-// 用量框的纯逻辑（spec D8、D10）：5h、7d、上下文、花费四行。读数的收集在 register.ts。
+// 用量框的纯逻辑（spec D8、D10）：5h、7d、上下文、花费。读数的收集在 register.ts。
 
 import type { RateLimit, Usage } from '../types'
-import { cells, padEnd, padStart } from './text'
-import { COLOR, FIELD, GAP, bar, flow, levelColor, piece, valueWidth } from './style'
+import { padStart } from './text'
+import { COLOR, FIELD, GRID, bar, barWidth, flow, levelColor, piece, valueWidth } from './style'
 import type { Piece, Segment } from './style'
 
-export const EMPTY_USAGE: Usage = {
-  context: null,
-  rateLimits: [],
-  costUsd: null,
-  compactions: 0,
-  costAtTurnStart: null,
-  lastMessageCostUsd: null,
-}
+export const EMPTY_USAGE: Usage = { context: null, rateLimits: [], costUsd: null }
 
 /** 引擎的一次读数（`$.session.usage()` 或 `session.measure`）里用量框要的部分 */
 export type Reading = {
@@ -29,22 +22,6 @@ export function applyReading(usage: Usage, reading: Reading): Usage {
     rateLimits: reading.rateLimits.map(({ kind, percentUsed, resetsAt }) => ({ kind, percentUsed, resetsAt })),
     costUsd: reading.cost?.usd ?? usage.costUsd,
   }
-}
-
-/** 主会话一轮开始：记下当时的会话花费 */
-export function startTurn(usage: Usage, costUsd: number | null): Usage {
-  return { ...usage, costAtTurnStart: costUsd, costUsd: costUsd ?? usage.costUsd }
-}
-
-/** 主会话一轮结束：上一条消息的花费是两次读数之差 */
-export function completeTurn(usage: Usage, costUsd: number | null): Usage {
-  const start = usage.costAtTurnStart
-  const last = costUsd !== null && start !== null ? Math.max(0, costUsd - start) : usage.lastMessageCostUsd
-  return { ...usage, costUsd: costUsd ?? usage.costUsd, costAtTurnStart: null, lastMessageCostUsd: last }
-}
-
-export function compacted(usage: Usage): Usage {
-  return { ...usage, compactions: usage.compactions + 1 }
 }
 
 // ---------------------------------------------------------------- 格式
@@ -65,16 +42,27 @@ const two = (n: number) => String(n).padStart(2, '0')
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 const DAY = 86_400_000
 
-/** 本地时刻：今天写 HH:MM，明天写"明天 HH:MM"，更远写"周四 HH:MM" */
-export function formatWhen(at: number, now: number): string {
+/** 本地时刻的时分，和它是今天、明天还是星期几（今天为 null） */
+function clockOf(at: number, now: number): { hhmm: string; day: string | null } {
   const date = new Date(at)
   const hhmm = `${two(date.getHours())}:${two(date.getMinutes())}`
   const today = new Date(now)
   today.setHours(0, 0, 0, 0)
   const days = Math.floor((at - today.getTime()) / DAY)
-  if (days <= 0) return hhmm
-  if (days === 1) return `明天 ${hhmm}`
-  return `${WEEKDAYS[date.getDay()]} ${hhmm}`
+  if (days <= 0) return { hhmm, day: null }
+  return { hhmm, day: days === 1 ? '明天' : (WEEKDAYS[date.getDay()] ?? '') }
+}
+
+/** 本地时刻：今天写 HH:MM，明天写"明天 HH:MM"，更远写"周四 HH:MM" */
+export function formatWhen(at: number, now: number): string {
+  const { hhmm, day } = clockOf(at, now)
+  return day === null ? hhmm : `${day} ${hhmm}`
+}
+
+/** 重置时刻：时间在前，"17:00 周一""01:30 明天"，今天只写 HH:MM（5h、7d 的 ↻ 上下对齐） */
+export function formatReset(at: number, now: number): string {
+  const { hhmm, day } = clockOf(at, now)
+  return day === null ? hhmm : `${hhmm} ${day}`
 }
 
 /** 重置时刻：ISO 8601；也认 Unix 秒、毫秒（statusline 见过这几种） */
@@ -91,18 +79,21 @@ export function parseResetsAt(resetsAt: string | undefined): number | null {
 // ---------------------------------------------------------------- 行
 
 /**
- * 两列的一行：名称 | 值。值已排到值那一列的宽度以内，放不下的块整块折到下一行：
- * lines 的第一行和名称同一行，其余各是一行，名称那一列空着，从值那一列起。
+ * 两列的一项：名称 | 值。值已排到值那一列的宽度以内：lines 的第一行和名称同一行，
+ * 其余各是一行，名称那一列空着，从值那一列起（第二行的细节、放不下折下去的块）。
+ * labelWidth：名称那一列的宽度。
  */
-export type GridRow = { key: string; label: string; lines: Segment[][] }
+export type GridRow = { key: string; label: Segment[]; labelWidth: number; lines: Segment[][] }
 
-/** 排版前的一行：值由几块组成，每块不拆开 */
-export type GridSpec = { key: string; label: string; value: Piece[] }
+/** 排版前的一项：value 和名称同一行起，detail 另起一行；每块不拆开，放不下整块折到下一行 */
+export type GridSpec = { key: string; label: string | Segment[]; value: Piece[]; detail?: Piece[] }
 
-/** 按框内宽度 inner 排一行：值那一列放不下就整块折到下一行，不截断信息 */
-export function layoutRow(spec: GridSpec, inner: number): GridRow {
-  const width = valueWidth(inner)
-  return { key: spec.key, label: spec.label, lines: flow(spec.value, width, width) }
+/** 按框内宽度 inner 排一项：值那一列放不下就整块折到下一行，不截断信息 */
+export function layoutRow(spec: GridSpec, inner: number, labelWidth: number = GRID.label): GridRow {
+  const width = valueWidth(inner, labelWidth)
+  const label = typeof spec.label === 'string' ? [{ text: spec.label, color: COLOR.label }] : spec.label
+  const detail = spec.detail ? flow(spec.detail, width, width) : []
+  return { key: spec.key, label, labelWidth, lines: [...flow(spec.value, width, width), ...detail] }
 }
 
 const WINDOWS: Record<string, { label: string; ms: number }> = {
@@ -110,18 +101,12 @@ const WINDOWS: Record<string, { label: string; ms: number }> = {
   seven_day: { label: '7d', ms: 7 * DAY },
 }
 
-const muted = (text: string): Segment => ({ text, color: COLOR.muted })
-/** 次要的：上一条、↻ 重置时刻、压缩次数 */
+/** 第二行的细节暗色 */
 const minor = (text: string): Segment => ({ text, color: COLOR.label })
 
-/** 定宽的数值字段：右对齐补到 width 格（进度条后的百分比） */
-export const field = (text: string, width: number) => padStart(text, width)
-
-/** 值那一列开头的定宽字段：左对齐，右侧补空格到 width 格 */
-export const lead = (text: string, width: number) => padEnd(text, width)
-
-/** 进度条加定宽的百分比，同色 */
-const meter = (percent: number, text: string): Piece => piece([...bar(percent), { text: ` ${field(text, FIELD.percent)}`, color: levelColor(percent) }])
+/** 进度条加右对齐的百分比，同色；三条进度条一样长，百分比上下对齐 */
+const meter = (percent: number, text: string, inner: number): Piece =>
+  piece([...bar(percent, barWidth(inner)), { text: ` ${padStart(text, FIELD.percent)}`, color: levelColor(percent) }])
 
 /**
  * 按当前用量线性外推，用尽时刻早于重置时就是"预计用尽"的时刻；否则 null。
@@ -134,55 +119,50 @@ export function exhaustAt(percent: number, resetsAt: number, windowMs: number, n
   return at < resetsAt ? at : null
 }
 
-/** 5h、7d：进度条 百分比  ↻ 重置时刻（  预计用尽）；↻ 沿用用户 statusline 的写法 */
-function limitRow(kind: 'five_hour' | 'seven_day', limits: readonly RateLimit[], now: number): GridSpec {
+/** 5h、7d：进度条 百分比；第二行 ↻ 重置时刻，会在重置前用尽时接红字"· 预计 HH:MM 用尽" */
+function limitRow(kind: 'five_hour' | 'seven_day', limits: readonly RateLimit[], now: number, inner: number): GridSpec {
   const { label, ms } = WINDOWS[kind] ?? { label: kind, ms: 0 }
   const limit = limits.find(one => one.kind === kind)
   const resetsAt = parseResetsAt(limit?.resetsAt)
   // 没有读数，或窗口已经过了重置时刻：下一条消息才开始新窗口
   if (limit === undefined || resetsAt === null || resetsAt <= now) {
-    return { key: kind, label, value: [meter(0, '0%'), piece([minor('发送消息后开始计时')], GAP)] }
+    return { key: kind, label, value: [meter(0, '0%', inner)], detail: [piece([minor('发送消息后开始计时')])] }
   }
   const percent = limit.percentUsed
-  const value: Piece[] = [meter(percent, `${Math.round(percent)}%`), piece([minor(`↻ ${formatWhen(resetsAt, now)}`)], GAP)]
-  if (kind === 'five_hour') {
-    const at = exhaustAt(percent, resetsAt, ms, now)
-    if (at !== null) value.push(piece([{ text: `预计 ${formatWhen(at, now)} 用尽`, color: COLOR.high }], GAP))
-  }
-  return { key: kind, label, value }
+  const detail: Piece[] = [piece([minor(`↻ ${formatReset(resetsAt, now)}`)])]
+  const at = exhaustAt(percent, resetsAt, ms, now)
+  if (at !== null) detail.push(piece([{ text: `预计 ${formatWhen(at, now)} 用尽`, color: COLOR.danger }], { text: ' · ', color: COLOR.danger }))
+  return { key: kind, label, value: [meter(percent, `${Math.round(percent)}%`, inner)], detail }
 }
 
-/** 上下文：已用 / 上限  百分比  压缩 N 次；已用补到定宽（同一个上限下），百分比右对齐 */
-function contextRow(usage: Usage): GridSpec {
+/** 上下文：进度条 百分比；第二行 已用 / 上限 */
+function contextRow(usage: Usage, inner: number): GridSpec {
   const context = usage.context
-  const compactions = piece([minor(`压缩 ${usage.compactions} 次`)], GAP)
+  const window = context === null ? '' : ` / ${formatTokens(context.window)}`
   if (context === null || context.percent === undefined || context.tokens === undefined) {
-    const window = context === null ? [] : [muted(` / ${formatTokens(context.window)}`)]
-    return { key: 'context', label: '上下文', value: [piece([{ text: '—' }, ...window]), compactions] }
+    return { key: 'context', label: '上下文', value: [meter(0, '—', inner)], detail: [piece([minor(`—${window}`)])] }
   }
   const percent = context.percent
-  const tokens = formatTokens(context.tokens)
-  const window = ` / ${formatTokens(context.window)}`
-  const used = [
-    { text: tokens },
-    muted(lead(window, cells(window) + FIELD.tokens - cells(tokens))),
-    { text: ` ${field(`${Math.round(percent)}%`, FIELD.percent)}`, color: levelColor(percent) },
-  ]
-  return { key: 'context', label: '上下文', value: [piece(used), compactions] }
-}
-
-/** 花费：本会话 $  上一条 $；本会话不写"本会话"，上一条暗色 */
-function costRow(usage: Usage): GridSpec {
-  const usd = (value: number | null) => (value === null ? '—' : formatUsd(value))
   return {
-    key: 'cost',
-    label: '花费',
-    value: [piece([{ text: lead(usd(usage.costUsd), FIELD.usd) }]), piece([minor(`上一条 ${usd(usage.lastMessageCostUsd)}`)], GAP)],
+    key: 'context',
+    label: '上下文',
+    value: [meter(percent, `${Math.round(percent)}%`, inner)],
+    detail: [piece([minor(`${formatTokens(context.tokens)}${window}`)])],
   }
 }
 
-/** 用量框的四行，按框内宽度 inner 排好（layoutRow） */
+/** 花费：本会话总额（引擎报的会话花费，`/cost` 同源） */
+function costRow(usage: Usage): GridSpec {
+  return { key: 'cost', label: '花费', value: [piece([{ text: usage.costUsd === null ? '—' : formatUsd(usage.costUsd) }])] }
+}
+
+/** 用量框的四项，按框内宽度 inner 排好（layoutRow） */
 export function usageRows(usage: Usage, now: number, inner: number): GridRow[] {
-  const rows = [limitRow('five_hour', usage.rateLimits, now), limitRow('seven_day', usage.rateLimits, now), contextRow(usage), costRow(usage)]
+  const rows = [
+    limitRow('five_hour', usage.rateLimits, now, inner),
+    limitRow('seven_day', usage.rateLimits, now, inner),
+    contextRow(usage, inner),
+    costRow(usage),
+  ]
   return rows.map(row => layoutRow(row, inner))
 }
