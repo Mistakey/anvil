@@ -9,7 +9,7 @@ import type { ListId, PanelFold } from '../types'
 import type { Subcommand } from './command'
 import { earlierText, fitCount, fitRows } from './list'
 import type { Fit } from './list'
-import { COLOR, GRID, ICON, fitSegments, restWidth } from './style'
+import { COLOR, GRID, ICON, fitSegments, restWidth, spanWidth } from './style'
 import type { Segment } from './style'
 import { cells, fit, padStart } from './text'
 import type { GridRow } from './usage'
@@ -260,12 +260,20 @@ export function gridRow(els: Els, row: GridRow, inner: number): RenderElement {
       <Box width={GRID.label} flexShrink={0}>
         <Text color={COLOR.muted}>{fit(row.label, GRID.label)}</Text>
       </Box>
-      <Box width={GRID.middle} flexShrink={0}>
-        <Text>{segments(els, row.middle)}</Text>
-      </Box>
-      <Box width={restWidth(inner)} flexShrink={0}>
-        <Text wrap="truncate">{segments(els, row.rest)}</Text>
-      </Box>
+      {row.span ? (
+        <Box width={spanWidth(inner)} flexShrink={0}>
+          <Text wrap="truncate">{segments(els, row.middle)}</Text>
+        </Box>
+      ) : (
+        [
+          <Box key="middle" width={GRID.middle} flexShrink={0}>
+            <Text>{segments(els, row.middle)}</Text>
+          </Box>,
+          <Box key="rest" width={restWidth(inner)} flexShrink={0}>
+            <Text wrap="truncate">{segments(els, row.rest)}</Text>
+          </Box>,
+        ]
+      )}
     </Box>
   )
 }

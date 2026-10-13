@@ -59,6 +59,20 @@ export type CacheView = {
   coldWrites: { count: number; usd: number }
 }
 
+/**
+ * 缓存保活自己停下的原因（spec D3）：一段空闲续满 12 小时（limit，灰）、读数不达标（reading，红）、
+ * 请求出错（error，红）。停下只结束这一段空闲，下一次主会话请求后清掉。
+ */
+export type KeepaliveStop = { kind: 'limit' | 'reading' | 'error'; reason: string }
+
+/** 保活循环的读数，缓存框据此和设置、上下文一起定出保活状态 */
+export type KeepaliveView = {
+  /** 这一段空闲里停下了；null 表示没停 */
+  stopped: KeepaliveStop | null
+  /** 这一段空闲里已经续期过，或续期请求正在路上 */
+  renewing: boolean
+}
+
 /** 子 agent 的四种状态（spec D8）：运行中、已完成、出错、输出被截断 */
 export type AgentStatus = 'running' | 'done' | 'failed' | 'truncated'
 
@@ -201,6 +215,13 @@ declare module 'claude-code' {
       settings: Settings
       /** 缓存状态，每次变化时写入；`/clear` 后清零重写 */
       cache: CacheView
+      /**
+       * 缓存保活在本会话被关闭：`/anvil keepalive off` 后为 true，`on` 改回 false。
+       * 放在 `$.state` 里，新会话（含 `/clear`、`/resume`）随引擎重置回到默认。
+       */
+      keepaliveOff: boolean
+      /** 保活循环的读数 */
+      keepalive: KeepaliveView
       /** 子 agent 列表，按序号从旧到新 */
       agents: SubAgent[]
       /** 面板的展开状态 */

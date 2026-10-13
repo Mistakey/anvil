@@ -19,12 +19,30 @@ import { agentList, callAgent, completeAgent, spawnAgent, stepAgent } from './ag
 
 import * as cacheState from './cache'
 import type { Cache, ResumeFields, Submission } from './cache'
+import { cacheRows, cacheStatus } from './cachebox'
 
 import { COMMAND, answer } from './command'
 import { EMPTY_IDENTITY, GIT, NUMSTAT, REV_PARSE, STATUS, baseName, gitView, identityRows, operationOf, parseNumstat, parseRepo, parseStatus, tokensPerSecond } from './identity'
 import type { RebaseFiles } from './identity'
 import type { Subcommand } from './command'
 import { describeInput } from './describe'
+import {
+  KEEPALIVE_SUBCOMMAND,
+  LIMIT_STOP,
+  PING_PROMPT,
+  disarm,
+  dueAction,
+  freshLoop,
+  isEnabled,
+  keepaliveStatus,
+  loopView,
+  nextDelay,
+  renew,
+  startStretch,
+  stopFor,
+  thrownStop,
+} from './keepalive'
+import type { Loop } from './keepalive'
 import { CLOSED, isClosed, scrollList, toggleDetail, toggleList } from './list'
 import { PANE, PANEL_SUBCOMMAND, drawPanel, gridRow, hidesPanel, innerWidth } from './panel'
 import { readSettings } from './settings'
@@ -47,8 +65,8 @@ import {
 } from './translate'
 import type { Translation } from './translate'
 import { EMPTY_USAGE, applyReading, compacted as addCompaction, completeTurn, startTurn, usageRows } from './usage'
-import type { Reading } from './usage'
-import type { GitView, ListId, Settings, SubAgent } from '../types'
+import type { GridRow, Reading } from './usage'
+import type { GitView, KeepaliveStop, ListId, Settings, SubAgent } from '../types'
 
 // 模块结构（照 flightdeck 的 register.tsx / core.ts），引擎扫描源码的规则见 AGENTS.md Pitfalls「模块结构」：
 // - 所有 on(...) 都写在下面的 register 里；用到 `$` 的辅助函数写在本文件顶层（`$` 不能跨文件传）。
@@ -75,6 +93,7 @@ async function publishSettings($: EngineInterface, settings: Settings) {
 // ---------------------------------------------------------------- 缓存状态（D1、D2）与冷发送守卫（D4）
 
 const CACHE = { plugin: 'anvil', key: 'cache' } as const
+const cacheView = atom(CACHE, cacheState.view(cacheState.freshCache()))
 
 /** 把缓存状态的读数写进 `$.state`，缓存框和测试从这里读 */
 async function publishCache($: EngineInterface, cache: Cache) {
@@ -143,6 +162,104 @@ async function restoreDraft($: EngineInterface, text: string) {
   } catch {
     // 没有主输入框（headless）或读写被拒：提示行仍在，用户可以重新输入
   }
+}
+
+// ---------------------------------------------------------------- 缓存保活（D3），循环照 cache-tax 的 keepwarm
+
+const keepaliveOff = atom({ plugin: 'anvil', key: 'keepaliveOff' } as const, false)
+const keepaliveLoop = atom({ plugin: 'anvil', key: 'keepalive' } as const, loopView(freshLoop()))
+
+async function publishLoop($: EngineInterface, loop: Loop) {
+  await update($, keepaliveLoop, () => loopView(loop))
+}
+
+/** 按缓存状态重新定时（cache-tax 的 arm）：没开、已停下、冷了都不定时；这段空闲到上限就停下 */
+async function armKeepalive($: EngineInterface, cache: Cache, loop: Loop, settings: Settings) {
+  disarm(loop)
+  if (loop.stopped || !isEnabled(settings, await read($, keepaliveOff), cache.context)) return publishLoop($, loop)
+  const delay = nextDelay(cache, await $.clock.now())
+  if (delay === 'limit') return stopKeepalive($, loop, LIMIT_STOP)
+  if (delay !== null) loop.pending = $.clock.after(delay, () => void pingKeepalive($, cache, loop, settings).catch(() => undefined))
+  await publishLoop($, loop)
+}
+
+async function stopKeepalive($: EngineInterface, loop: Loop, stop: KeepaliveStop) {
+  disarm(loop)
+  loop.stopped = stop
+  await publishLoop($, loop)
+}
+
+/** 定时器到点：发一次 fork，读数达标就续期、再定时，否则停下（cache-tax 的 ping） */
+async function pingKeepalive($: EngineInterface, cache: Cache, loop: Loop, settings: Settings) {
+  loop.pending = null
+  if (loop.stopped || loop.inFlight) return
+  if (!isEnabled(settings, await read($, keepaliveOff), cache.context)) return publishLoop($, loop)
+  const now = await $.clock.now()
+  const action = dueAction(cache, now)
+  if (action === 'limit') return stopKeepalive($, loop, LIMIT_STOP)
+  if (action === 'rearm') return armKeepalive($, cache, loop, settings)
+
+  const stretch = cache.lastRequestAt
+  loop.inFlight = true
+  await publishLoop($, loop)
+  let stop: KeepaliveStop | null
+  try {
+    stop = stopFor(await $.model.fork({ prompt: PING_PROMPT }))
+  } catch (error) {
+    stop = thrownStop(error)
+  }
+  loop.inFlight = false
+  // 请求路上用户回来发了消息：这一段空闲已经结束，结果不再算到新的一段上（cache-tax 没有这层）
+  if (cache.lastRequestAt !== stretch) return publishLoop($, loop)
+  if (stop) return stopKeepalive($, loop, stop)
+  renew(cache, now)
+  loop.renewals += 1
+  await publishCache($, cache)
+  await armKeepalive($, cache, loop, settings)
+}
+
+async function turnKeepaliveOff($: EngineInterface, loop: Loop) {
+  await update($, keepaliveOff, () => true)
+  disarm(loop)
+  await publishLoop($, loop)
+  return '已关闭缓存保活（本会话）。/anvil keepalive on 重新启用。'
+}
+
+/** 重新启用：本会话的关闭和这一段空闲的停下都清掉，按缓存状态重新定时 */
+async function turnKeepaliveOn($: EngineInterface, cache: Cache, loop: Loop, settings: Settings) {
+  await update($, keepaliveOff, () => false)
+  loop.stopped = null
+  await armKeepalive($, cache, loop, settings)
+  return settings.autoKeepalive ? '已重新启用缓存保活。' : '已重新启用缓存保活；/config 里关掉了自动开启，本会话仍不保活。'
+}
+
+// ---------------------------------------------------------------- 缓存框
+
+/** 缓存框随时刻变的部分要重画：过期那一刻改写"已过期"，之后每分钟更新过期时长 */
+type Redraw = { timer: { cancel: () => void } | null }
+
+const EXPIRED_REDRAW_MS = 60 * 1000
+
+async function scheduleRedraw($: EngineInterface, cache: Cache, redraw: Redraw) {
+  redraw.timer?.cancel()
+  redraw.timer = null
+  if (cache.expiresAt === 0 || cache.compacted) return
+  const now = await $.clock.now()
+  const wait = now < cache.expiresAt ? cache.expiresAt - now : EXPIRED_REDRAW_MS
+  redraw.timer = $.clock.after(wait, () => {
+    try {
+      $.ui.invalidate('ui.render')
+    } catch {
+      // 没有界面（headless、plugin test）：不用重画
+    }
+    void scheduleRedraw($, cache, redraw).catch(() => undefined)
+  })
+}
+
+/** 缓存状态变了：保活按新的状态重新定时，缓存框定好下一次重画 */
+async function cacheChanged($: EngineInterface, cache: Cache, loop: Loop, redraw: Redraw, settings: Settings) {
+  await armKeepalive($, cache, loop, settings)
+  await scheduleRedraw($, cache, redraw)
 }
 
 // ---------------------------------------------------------------- 用量框
@@ -365,7 +482,7 @@ async function notePanelClosed($: EngineInterface, e: PaneCloseInput) {
   if (hidesPanel(e.origin)) await update($, panelHidden, () => true)
 }
 
-async function drawAnvilPanel($: EngineInterface, e: RenderInput<'Pane'>) {
+async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderInput<'Pane'>) {
   const els = $.ui.resolve(e)
   const [current, list, folding, now, who] = await Promise.all([
     read($, usage),
@@ -374,11 +491,17 @@ async function drawAnvilPanel($: EngineInterface, e: RenderInput<'Pane'>) {
     $.clock.now(),
     read($, identity),
   ])
+  const [cached, off, loop] = await Promise.all([read($, cacheView), read($, keepaliveOff), read($, keepaliveLoop)])
+  const keepalive = keepaliveStatus({ settings, off, context: cached.context, loop })
   const inner = innerWidth(e.props.bodyColumns)
+  const grid = (rows: GridRow[]) => rows.map(row => gridRow(els, row, inner))
   return drawPanel(els, {
     columns: e.props.bodyColumns,
     rows: e.props.scroll.bodyRows,
-    bodies: { usage: { rows: usageRows(current, now, inner).map(row => gridRow(els, row, inner)) } },
+    bodies: {
+      usage: { rows: grid(usageRows(current, now, inner)) },
+      cache: { status: cacheStatus(cached, now), rows: grid(cacheRows(cached, keepalive, now, inner)) },
+    },
     lists: { agents: agentList(els, list, { detail: folding.detail, now, inner, onPress: id => void pressAgent($, id) }) },
     fold: folding,
     identity: identityRows(els, who, e.props.bodyColumns),
@@ -464,7 +587,7 @@ async function showTranslate($: EngineInterface) {
 // ---------------------------------------------------------------- /anvil 命令
 
 // 各功能交出的 /anvil 子命令说明，按列出的顺序排
-const SUBCOMMANDS: readonly Subcommand[] = [PANEL_SUBCOMMAND, TRANSLATE_SUBCOMMAND]
+const SUBCOMMANDS: readonly Subcommand[] = [PANEL_SUBCOMMAND, TRANSLATE_SUBCOMMAND, KEEPALIVE_SUBCOMMAND]
 
 async function registerAnvil($: EngineInterface) {
   await $.command.register({ name: 'anvil', description: COMMAND.description, argumentHint: COMMAND.argumentHint })
@@ -475,12 +598,16 @@ async function registerAnvil($: EngineInterface) {
 export const register: Register = (on, options) => {
   const settings = readSettings(options)
   const cache = cacheState.freshCache()
+  const loop = freshLoop()
+  const redraw: Redraw = { timer: null }
   const gitRefresh: GitRefresh = { isRunning: false, isWanted: false }
 
   on('session.start', async ($, e, next) => {
     await publishSettings($, settings)
     // 功能在这里按顺序接入
     await startCache($, cache)
+    // 重新加载模块时循环是新的：换掉上一次加载留下的读数
+    await publishLoop($, loop)
     await startUsage($)
     await startIdentity($, gitRefresh).catch(() => undefined)
     await startPanel($)
@@ -492,6 +619,9 @@ export const register: Register = (on, options) => {
   on('classic.SessionStart', async ($, e, next) => {
     const result = await next(e)
     await resumeCache($, cache, e)
+    // `/clear` 是新的对话，上一段空闲的停下不再算；恢复的会话按起步的缓存状态定时（冷了不发）
+    if (e.source === 'clear') startStretch(loop)
+    await cacheChanged($, cache, loop, redraw, settings)
     await refreshGit($, gitRefresh).catch(() => undefined)
     return result
   })
@@ -509,6 +639,10 @@ export const register: Register = (on, options) => {
       return result
     }
     await stepStarted($, cache)
+    // 用户回来了：这一段空闲结束，一轮结束时再定时（cache-tax 也是一轮结束才定时）
+    startStretch(loop)
+    await publishLoop($, loop)
+    await scheduleRedraw($, cache, redraw)
     // tok/s 从首字算起（D11 实测）：首字是第一块不是 engine 的，结束是 stop 那块
     let firstAt: number | null = null
     let stopAt: number | null = null
@@ -533,6 +667,7 @@ export const register: Register = (on, options) => {
     const result = await next(e)
     if (!e.agentId) {
       await turnCompleted($, cache, e)
+      await cacheChanged($, cache, loop, redraw, settings)
       await completeUsageTurn($)
       await refreshGit($, gitRefresh).catch(() => undefined)
     } else {
@@ -565,6 +700,7 @@ export const register: Register = (on, options) => {
     // precompute 只预先算好摘要、不换掉对话；被否决的压缩也没换
     if (!e.agentId && e.trigger !== 'precompute' && result.skip === undefined) {
       await compacted($, cache)
+      await cacheChanged($, cache, loop, redraw, settings)
       await noteCompaction($).catch(() => undefined)
     }
     return result
@@ -587,7 +723,7 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  on('ui.render', { component: 'Pane', requestId: 'anvil' }, async ($, e) => drawAnvilPanel($, e))
+  on('ui.render', { component: 'Pane', requestId: 'anvil' }, async ($, e) => drawAnvilPanel($, settings, e))
 
   // 翻译框常驻在主输入框上方
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => (await drawTranslate($, settings, e)) ?? next(e))
@@ -603,6 +739,10 @@ export const register: Register = (on, options) => {
   on('command.run', { command: 'anvil', args: /^\s*panel\s+show\s*$/ }, async $ => ({ text: await showPanel($) }))
   on('command.run', { command: 'anvil', args: /^\s*translate\s+hide\s*$/ }, async $ => ({ text: await hideTranslate($) }))
   on('command.run', { command: 'anvil', args: /^\s*translate\s+show\s*$/ }, async $ => ({ text: await showTranslate($) }))
+  on('command.run', { command: 'anvil', args: /^\s*keepalive\s+off\s*$/ }, async $ => ({ text: await turnKeepaliveOff($, loop) }))
+  on('command.run', { command: 'anvil', args: /^\s*keepalive\s+on\s*$/ }, async $ => ({
+    text: await turnKeepaliveOn($, cache, loop, settings),
+  }))
 
   // 兜底回答功能没接走的 /anvil
   on('command.run', { command: 'anvil' }, async ($, e) => ({ text: answer(SUBCOMMANDS, e.args) }))
