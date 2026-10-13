@@ -8,8 +8,8 @@ const OPEN = { id: 'anvil', title: 'anvil', columns: 70 }
 
 function engine(on: On) {
   mock.clock(on)
-  world(on)
-  return panes(on)
+  const { state } = world(on)
+  return { ...panes(on), state }
 }
 
 test('会话开始时自己打开面板，请求约 70 列，Esc 不关面板', async ($, on) => {
@@ -45,13 +45,15 @@ test('不是用户自己提交的消息（后台通知等）不触发再开', as
   expect(opens).toHaveLength(1)
 })
 
-test('/anvil panel hide 关掉面板，本会话不再自动打开；show 重新打开', async ($, on) => {
-  const { opens, closes, screen } = engine(on)
+test('/anvil panel 切换：隐藏后本会话不再自动打开，再敲一次重新打开；新会话回到显示', async ($, on) => {
+  const { opens, closes, screen, state } = engine(on)
   await $.session.start(SESSION)
+  expect(state.get('anvil.panelHidden'), '新会话不带隐藏').toBe(undefined)
 
-  const hidden = await $.command.run(anvil('panel hide'))
-  expect(hidden.text).toContain('已隐藏 anvil 面板')
+  const hidden = await $.command.run(anvil('panel'))
+  expect(hidden.text).toBe('面板已隐藏（本会话）')
   expect(closes).toEqual(['anvil'])
+  expect(state.get('anvil.panelHidden')).toBe(true)
 
   // 提交消息、重新加载（session.start 再来一次）都不再自动打开
   screen.placed = false
@@ -60,37 +62,40 @@ test('/anvil panel hide 关掉面板，本会话不再自动打开；show 重新
   expect(opens).toHaveLength(1)
 
   screen.placed = true
-  const shown = await $.command.run(anvil(' panel  show '))
-  expect(shown.text).toBe('已显示 anvil 面板。')
+  const shown = await $.command.run(anvil(' panel '))
+  expect(shown.text).toBe('面板已显示')
   expect(opens).toEqual([OPEN, OPEN])
+  expect(state.get('anvil.panelHidden')).toBe(false)
 })
 
-test('show 时引擎放不下面板，说明原因', async ($, on) => {
+test('切换到显示时引擎放不下面板，说明原因', async ($, on) => {
   const { screen } = engine(on)
   screen.placed = false
   await $.session.start(SESSION)
 
-  const shown = await $.command.run(anvil('panel show'))
-  expect(shown.text).toBe('anvil 面板暂时放不下：终端 120 列，不到 144 列')
+  await $.command.run(anvil('panel'))
+  const shown = await $.command.run(anvil('panel'))
+  expect(shown.text).toBe('面板已显示，但暂时放不下：终端 120 列，不到 144 列')
 })
 
 // plugin test 的 `$` 没有 ui.close，测试也不能冒充用户关（origin 由引擎盖章，改了会被拒）：
 // 关闭来源的判断用纯函数测，接线由交互会话验证
-test('用户手动关掉面板等同 hide；anvil 自己关和卸载时的关闭不算', () => {
+test('用户手动关掉面板等同隐藏；anvil 自己关和卸载时的关闭不算', () => {
   expect(hidesPanel({ kind: 'person' })).toBe(true)
   expect(hidesPanel({ kind: 'plugin' })).toBe(false)
   expect(hidesPanel({ kind: 'unload' })).toBe(false)
 })
 
-test('/anvil 列出 panel 子命令；panel 后面的词不对时给出用法', async ($, on) => {
+test('/anvil 列出 panel 子命令；旧写法 hide|show 按未知子命令处理', async ($, on) => {
   engine(on)
   await $.session.start(SESSION)
 
   // 其余功能的子命令也在列表里，这里只看 panel 那一行
   const list = (await $.command.run(anvil(''))).text ?? ''
-  expect(list).toStartWith('用法：/anvil <子命令>\n')
-  expect(list).toMatch(/^ {2}\/anvil panel hide\|show +在当前会话隐藏或显示 anvil 面板$/m)
-  expect((await $.command.run(anvil('panel up'))).text).toBe('用法：/anvil panel hide|show')
+  expect(list).toStartWith('用法：/anvil <子命令>')
+  expect(list).toMatch(/^ {2}\/anvil panel +显示或隐藏 anvil 面板（现在：显示）$/m)
+  expect((await $.command.run(anvil('panel hide'))).text).toStartWith('没有子命令 panel hide。')
+  expect((await $.command.run(anvil('panel show'))).text).toStartWith('没有子命令 panel show。')
 })
 
 test('守卫拦下这条消息时，面板照样补开（先补开面板，再过守卫）', async ($, on) => {

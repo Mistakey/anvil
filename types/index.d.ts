@@ -257,8 +257,8 @@ declare module 'claude-code' {
   interface PluginState {
     anvil: {
       /**
-       * anvil 面板在本会话被隐藏：`/anvil panel hide` 或用户手动关掉面板后为 true，
-       * 本会话不再自动打开，`/anvil panel show` 改回 false。
+       * anvil 面板在本会话被隐藏：`/anvil panel` 隐藏或用户手动关掉面板后为 true，
+       * 本会话不再自动打开，再敲 `/anvil panel` 改回 false。
        */
       panelHidden: boolean
       /** 用量框的读数 */
@@ -272,10 +272,11 @@ declare module 'claude-code' {
       /** 缓存状态，每次变化时写入；`/clear` 后清零重写 */
       cache: CacheView
       /**
-       * 缓存保活在本会话被关闭：`/anvil keepalive off` 后为 true，`on` 改回 false。
+       * 本会话用 `/anvil keepalive` 切换过的保活开关：true 开、false 关，不看自动开启和阈值；
+       * 没切换过（读不到值，按 null）时按默认（自动开启且上下文达到阈值）。
        * 放在 `$.state` 里，新会话（含 `/clear`、`/resume`）随引擎重置回到默认。
        */
-      keepaliveOff: boolean
+      keepaliveOverride: boolean | null
       /** 保活循环的读数 */
       keepalive: KeepaliveView
       /** 子 agent 列表，按序号从旧到新 */
@@ -293,7 +294,7 @@ declare module 'claude-code' {
       fold: PanelFold
       /** 身份栏 */
       identity: Identity
-      /** 翻译框在本会话被隐藏：`/anvil translate hide` 后为 true，`show` 改回 false */
+      /** 翻译框在本会话被隐藏：`/anvil translate` 切换，隐藏时为 true */
       translateHidden: boolean
       /** 翻译框的状态 */
       translate: TranslateBox

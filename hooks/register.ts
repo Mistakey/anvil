@@ -27,7 +27,7 @@ import { COMMAND, answer } from './command'
 import { addDenial, denialContent, denialList, denialSource } from './denials'
 import { EMPTY_IDENTITY, GIT, NUMSTAT, REV_PARSE, STATUS, baseName, gitView, identityRows, operationOf, parseNumstat, parseRepo, parseStatus, tokensPerSecond } from './identity'
 import type { RebaseFiles } from './identity'
-import type { Subcommand } from './command'
+import type { Listed, Subcommand } from './command'
 import { describeInput } from './describe'
 import {
   KEEPALIVE_SUBCOMMAND,
@@ -78,8 +78,8 @@ import type { Denial, GitView, KeepaliveStop, ListId, Scrolled, Settings, SubAge
 // - 几个功能都要的事件（session.start 等）只注册一次、不带匹配器：处理函数里按写下的顺序依次调用各功能，
 //   先后顺序就是处理函数里的行序。新功能往这类事件里加一行调用，放在它依赖的功能之后、`/anvil` 命令之前。
 // - 只属于一个功能的事件用真匹配器注册（带 args 的 command.run、按 requestId 的 Pane ui.render 等），
-//   不用 `{}` 空匹配器。新功能的子命令说明加进 SUBCOMMANDS，执行写成带 args 匹配器的 command.run，
-//   注册在兜底的 command.run 之前。
+//   不用 `{}` 空匹配器。新功能的子命令说明加进 SUBCOMMANDS、现在的状态加进 subcommandStates，
+//   执行写成带 args 匹配器的 command.run（只认子命令本身，敲一次切换一次），注册在兜底的 command.run 之前。
 // - 面板的区块（panel.tsx 的 SECTIONS）由各功能填内容：在 drawAnvilPanel 里把该区块的 SectionBody
 //   放进 bodies；三个列表（我的消息、自动模式拒绝、子 agent）交 ListBody 放进 lists，按上限截、
 //   "更早的"那行、展开和收成一行由 panel.tsx 按共同规则做（list.ts）。身份栏的两行交 identity，接在区块之后。
@@ -170,7 +170,7 @@ async function restoreDraft($: EngineInterface, text: string) {
 
 // ---------------------------------------------------------------- 缓存保活（D3），循环照 cache-tax 的 keepwarm
 
-const keepaliveOff = atom({ plugin: 'anvil', key: 'keepaliveOff' } as const, false)
+const keepaliveOverride = atom({ plugin: 'anvil', key: 'keepaliveOverride' } as const, null as boolean | null)
 const keepaliveLoop = atom({ plugin: 'anvil', key: 'keepalive' } as const, loopView(freshLoop()))
 
 async function publishLoop($: EngineInterface, loop: Loop) {
@@ -180,7 +180,7 @@ async function publishLoop($: EngineInterface, loop: Loop) {
 /** 按缓存状态重新定时（cache-tax 的 arm）：没开、已停下、冷了都不定时；这段空闲到上限就停下 */
 async function armKeepalive($: EngineInterface, cache: Cache, loop: Loop, settings: Settings) {
   disarm(loop)
-  if (loop.stopped || !isEnabled(settings, await read($, keepaliveOff), cache.context)) return publishLoop($, loop)
+  if (loop.stopped || !isEnabled(settings, await read($, keepaliveOverride), cache.context)) return publishLoop($, loop)
   const delay = nextDelay(cache, await $.clock.now())
   if (delay === 'limit') return stopKeepalive($, loop, LIMIT_STOP)
   if (delay !== null) loop.pending = $.clock.after(delay, () => void pingKeepalive($, cache, loop, settings).catch(() => undefined))
@@ -197,7 +197,7 @@ async function stopKeepalive($: EngineInterface, loop: Loop, stop: KeepaliveStop
 async function pingKeepalive($: EngineInterface, cache: Cache, loop: Loop, settings: Settings) {
   loop.pending = null
   if (loop.stopped || loop.inFlight) return
-  if (!isEnabled(settings, await read($, keepaliveOff), cache.context)) return publishLoop($, loop)
+  if (!isEnabled(settings, await read($, keepaliveOverride), cache.context)) return publishLoop($, loop)
   const now = await $.clock.now()
   const action = dueAction(cache, now)
   if (action === 'limit') return stopKeepalive($, loop, LIMIT_STOP)
@@ -222,19 +222,23 @@ async function pingKeepalive($: EngineInterface, cache: Cache, loop: Loop, setti
   await armKeepalive($, cache, loop, settings)
 }
 
-async function turnKeepaliveOff($: EngineInterface, loop: Loop) {
-  await update($, keepaliveOff, () => true)
-  disarm(loop)
-  await publishLoop($, loop)
-  return '已关闭缓存保活（本会话）。/anvil keepalive on 重新启用。'
+/**
+ * `/anvil keepalive`：运行中（已启用、进行中）就关掉，没开或已停下就开启，之后不再看自动开启和阈值（D3）。
+ * 开启时这一段空闲的停下也清掉，按缓存状态重新定时；关闭时 armKeepalive 只撤掉定时器。
+ */
+async function toggleKeepalive($: EngineInterface, cache: Cache, loop: Loop, settings: Settings) {
+  const isRunning = isEnabled(settings, await read($, keepaliveOverride), cache.context) && loop.stopped === null
+  const isOn = !isRunning
+  await update($, keepaliveOverride, () => isOn)
+  if (isOn) loop.stopped = null
+  await armKeepalive($, cache, loop, settings)
+  return isOn ? '缓存保活已开启（本会话）' : '缓存保活已关闭（本会话）'
 }
 
-/** 重新启用：本会话的关闭和这一段空闲的停下都清掉，按缓存状态重新定时 */
-async function turnKeepaliveOn($: EngineInterface, cache: Cache, loop: Loop, settings: Settings) {
-  await update($, keepaliveOff, () => false)
-  loop.stopped = null
-  await armKeepalive($, cache, loop, settings)
-  return settings.autoKeepalive ? '已重新启用缓存保活。' : '已重新启用缓存保活；/config 里关掉了自动开启，本会话仍不保活。'
+/** 缓存框和 `/anvil` 列表里的保活状态 */
+async function keepaliveNow($: EngineInterface, settings: Settings) {
+  const [cached, override, loop] = await Promise.all([read($, cacheView), read($, keepaliveOverride), read($, keepaliveLoop)])
+  return keepaliveStatus({ settings, override, context: cached.context, loop })
 }
 
 // ---------------------------------------------------------------- 缓存框
@@ -532,16 +536,16 @@ async function reopenPanel($: EngineInterface, e: PromptSubmitInput) {
   await openPanel($).catch(() => undefined)
 }
 
-async function hidePanel($: EngineInterface) {
-  await update($, panelHidden, () => true)
-  await $.ui.close({ id: PANE.id })
-  return '已隐藏 anvil 面板（本会话）。/anvil panel show 重新显示。'
-}
-
-async function showPanel($: EngineInterface) {
+/** `/anvil panel`：显示着就隐藏（本会话不再自动打开），隐藏着就重新打开 */
+async function togglePanel($: EngineInterface) {
+  if (!(await read($, panelHidden))) {
+    await update($, panelHidden, () => true)
+    await $.ui.close({ id: PANE.id })
+    return '面板已隐藏（本会话）'
+  }
   await update($, panelHidden, () => false)
   const opened = await openPanel($)
-  return opened.isPlaced ? '已显示 anvil 面板。' : `anvil 面板暂时放不下：${opened.reason}`
+  return opened.isPlaced ? '面板已显示' : `面板已显示，但暂时放不下：${opened.reason}`
 }
 
 async function notePanelClosed($: EngineInterface, e: PaneCloseInput) {
@@ -559,8 +563,7 @@ async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderI
     $.clock.now(),
     read($, identity),
   ])
-  const [cached, off, loop] = await Promise.all([read($, cacheView), read($, keepaliveOff), read($, keepaliveLoop)])
-  const keepalive = keepaliveStatus({ settings, off, context: cached.context, loop })
+  const [cached, keepalive] = await Promise.all([read($, cacheView), keepaliveNow($, settings)])
   // 用户进了面板要按 Enter 时，列表里不该有已撤回的消息：画完核对一遍，有变化会再画
   if (e.props.isFocused) $.clock.after(0, () => void syncMessages($).catch(() => undefined))
   const inner = innerWidth(e.props.bodyColumns)
@@ -648,20 +651,24 @@ async function drawTranslate($: EngineInterface, settings: Settings, e: RenderIn
   })
 }
 
-async function hideTranslate($: EngineInterface) {
-  await update($, translateHidden, () => true)
-  return '已隐藏翻译框（本会话）。/anvil translate show 重新显示。'
-}
-
-async function showTranslate($: EngineInterface) {
-  await update($, translateHidden, () => false)
-  return '已显示翻译框。'
+/** `/anvil translate`：显示着就隐藏，隐藏着就恢复 */
+async function toggleTranslate($: EngineInterface) {
+  const isHidden = !(await read($, translateHidden))
+  await update($, translateHidden, () => isHidden)
+  return isHidden ? '翻译框已隐藏（本会话）' : '翻译框已显示'
 }
 
 // ---------------------------------------------------------------- /anvil 命令
 
 // 各功能交出的 /anvil 子命令说明，按列出的顺序排
 const SUBCOMMANDS: readonly Subcommand[] = [PANEL_SUBCOMMAND, TRANSLATE_SUBCOMMAND, KEEPALIVE_SUBCOMMAND]
+
+/** `/anvil` 不带参数时列出的各子命令在本会话现在的状态，和 SUBCOMMANDS 同序 */
+async function subcommandStates($: EngineInterface, settings: Settings): Promise<Listed[]> {
+  const [panel, translate, keepalive] = await Promise.all([read($, panelHidden), read($, translateHidden), keepaliveNow($, settings)])
+  const states = [panel ? '隐藏' : '显示', translate ? '隐藏' : '显示', keepalive.text]
+  return SUBCOMMANDS.map((subcommand, index) => ({ ...subcommand, state: states[index] ?? '' }))
+}
 
 async function registerAnvil($: EngineInterface) {
   await $.command.register({ name: 'anvil', description: COMMAND.description, argumentHint: COMMAND.argumentHint })
@@ -825,15 +832,10 @@ export const register: Register = (on, options) => {
   })
 
   // 功能自己的子命令在这里接入（带 args 匹配器），兜底的放最后
-  on('command.run', { command: 'anvil', args: /^\s*panel\s+hide\s*$/ }, async $ => ({ text: await hidePanel($) }))
-  on('command.run', { command: 'anvil', args: /^\s*panel\s+show\s*$/ }, async $ => ({ text: await showPanel($) }))
-  on('command.run', { command: 'anvil', args: /^\s*translate\s+hide\s*$/ }, async $ => ({ text: await hideTranslate($) }))
-  on('command.run', { command: 'anvil', args: /^\s*translate\s+show\s*$/ }, async $ => ({ text: await showTranslate($) }))
-  on('command.run', { command: 'anvil', args: /^\s*keepalive\s+off\s*$/ }, async $ => ({ text: await turnKeepaliveOff($, loop) }))
-  on('command.run', { command: 'anvil', args: /^\s*keepalive\s+on\s*$/ }, async $ => ({
-    text: await turnKeepaliveOn($, cache, loop, settings),
-  }))
+  on('command.run', { command: 'anvil', args: /^\s*panel\s*$/ }, async $ => ({ text: await togglePanel($) }))
+  on('command.run', { command: 'anvil', args: /^\s*translate\s*$/ }, async $ => ({ text: await toggleTranslate($) }))
+  on('command.run', { command: 'anvil', args: /^\s*keepalive\s*$/ }, async $ => ({ text: await toggleKeepalive($, cache, loop, settings) }))
 
   // 兜底回答功能没接走的 /anvil
-  on('command.run', { command: 'anvil' }, async ($, e) => ({ text: answer(SUBCOMMANDS, e.args) }))
+  on('command.run', { command: 'anvil' }, async ($, e) => ({ text: answer(await subcommandStates($, settings), e.args) }))
 }

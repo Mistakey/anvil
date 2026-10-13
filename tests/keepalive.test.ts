@@ -157,14 +157,14 @@ describe('自动开启', () => {
 })
 
 describe('/anvil keepalive', () => {
-  test('off 后本会话不再发请求，on 恢复', async ($, on) => {
+  test('默认开着的会话里切换一次就关掉，本会话不再发请求；再切换一次重新开启', async ($, on) => {
     const w = engine(on, { forks: [WARM] })
     await $.session.start(SESSION)
     await turn($)
     await w.clock.advance(10 * MIN)
 
-    const off = await $.command.run(anvil('keepalive off'))
-    expect(off.text).toBe('已关闭缓存保活（本会话）。/anvil keepalive on 重新启用。')
+    const off = await $.command.run(anvil('keepalive'))
+    expect(off.text).toBe('缓存保活已关闭（本会话）')
     expect(await keepaliveRow($)).toEqual({ text: '已关闭（本会话）', color: COLOR.muted })
     await w.clock.advance(50 * MIN)
     expect(w.forks).toHaveLength(0)
@@ -173,30 +173,83 @@ describe('/anvil keepalive', () => {
     await w.clock.advance(50 * MIN)
     expect(w.forks).toHaveLength(0)
 
-    const back = await $.command.run(anvil(' keepalive  on '))
-    expect(back.text).toBe('已重新启用缓存保活。')
-    expect(await keepaliveRow($)).toEqual({ text: '已启用', color: COLOR.ok })
+    const back = await $.command.run(anvil(' keepalive '))
+    expect(back.text).toBe('缓存保活已开启（本会话）')
+    expect(await keepaliveRow($)).toEqual({ text: '已启用（本会话）', color: COLOR.ok })
     // 这段空闲已过 50 分钟、缓存还有效：马上补一次
     await w.clock.advance(1 * SEC)
     expect(w.forks).toHaveLength(1)
+    expect(await keepaliveRow($)).toEqual({ text: '进行中（本会话）', color: COLOR.ok })
   })
 
-  test('off 只记在本会话的 $.state 里：新会话（引擎重置 $.state）回到默认', async ($, on) => {
+  test('/config 关掉自动开启时，切换一次就在本会话开启，按时发 fork', { options: { autoKeepalive: false } }, async ($, on) => {
+    const w = engine(on, { forks: [WARM, WARM] })
+    await $.session.start(SESSION)
+    await turn($)
+    expect((await keepaliveRow($)).text).toBe('未启用（自动开启已关闭）')
+
+    expect((await $.command.run(anvil('keepalive'))).text).toBe('缓存保活已开启（本会话）')
+    await w.clock.advance(49 * MIN)
+    expect(w.forks).toHaveLength(0)
+    await w.clock.advance(1 * MIN)
+    expect(w.forks).toHaveLength(1)
+    expect(cacheOf(w.state).expiresAt).toBe(START + 50 * MIN + HOUR)
+    await w.clock.advance(50 * MIN)
+    expect(w.forks).toHaveLength(2)
+
+    expect((await $.command.run(anvil('keepalive'))).text).toBe('缓存保活已关闭（本会话）')
+    await w.clock.advance(2 * HOUR)
+    expect(w.forks).toHaveLength(2)
+  })
+
+  test('上下文低于阈值时也能手动开启', async ($, on) => {
+    const small = usage({ cache_read_input_tokens: 40000 })
+    const w = engine(on, { forks: [WARM], reply: { usage: small } })
+    await $.session.start(SESSION)
+    await turn($, { usage: small })
+    expect((await keepaliveRow($)).text).toBe('未启用（上下文低于 50k）')
+
+    expect((await $.command.run(anvil('keepalive'))).text).toBe('缓存保活已开启（本会话）')
+    expect(await keepaliveRow($)).toEqual({ text: '已启用（本会话）', color: COLOR.ok })
+    await w.clock.advance(50 * MIN)
+    expect(w.forks).toHaveLength(1)
+  })
+
+  test('保活已停下时，切换一次就在本会话重新开始，而不是关掉；再切换一次才关掉', async ($, on) => {
+    const w = engine(on, { forks: [{ read: 0, write: 150000 }, WARM] })
+    await $.session.start(SESSION)
+    await turn($)
+    await w.clock.advance(50 * MIN)
+    expect((await keepaliveRow($)).text).toBe('已停止（续期时缓存已过期）')
+
+    expect((await $.command.run(anvil('keepalive'))).text).toBe('缓存保活已开启（本会话）')
+    expect(await keepaliveRow($)).toEqual({ text: '已启用（本会话）', color: COLOR.ok })
+    // 缓存还有效、已过发请求的时刻：马上补一次
+    await w.clock.advance(1 * SEC)
+    expect(w.forks).toHaveLength(2)
+    expect((await keepaliveRow($)).text).toBe('进行中（本会话）')
+
+    expect((await $.command.run(anvil('keepalive'))).text).toBe('缓存保活已关闭（本会话）')
+  })
+
+  test('本会话的开关只记在 $.state 里：新会话（引擎重置 $.state）回到默认', async ($, on) => {
     const w = engine(on)
     await $.session.start(SESSION)
-    expect(w.state.get('anvil.keepaliveOff')).toBe(undefined)
-    await $.command.run(anvil('keepalive off'))
-    expect(w.state.get('anvil.keepaliveOff')).toBe(true)
-    await $.command.run(anvil('keepalive on'))
-    expect(w.state.get('anvil.keepaliveOff')).toBe(false)
+    expect(w.state.get('anvil.keepaliveOverride')).toBe(undefined)
+    await $.command.run(anvil('keepalive'))
+    expect(w.state.get('anvil.keepaliveOverride')).toBe(true)
+    await $.command.run(anvil('keepalive'))
+    expect(w.state.get('anvil.keepaliveOverride')).toBe(false)
   })
 
-  test('/anvil 列出 keepalive 子命令；后面的词不对时给出用法', async ($, on) => {
+  test('/anvil 列出 keepalive 子命令和现在的保活状态；旧写法 off|on 按未知子命令处理', async ($, on) => {
     engine(on)
     await $.session.start(SESSION)
+    await turn($)
     const list = (await $.command.run(anvil(''))).text ?? ''
-    expect(list).toMatch(/^ {2}\/anvil keepalive off\|on +在当前会话关闭或重新启用缓存保活$/m)
-    expect((await $.command.run(anvil('keepalive maybe'))).text).toBe('用法：/anvil keepalive off|on')
+    expect(list).toMatch(/^ {2}\/anvil keepalive +开启或关闭缓存保活（现在：已启用）$/m)
+    expect((await $.command.run(anvil('keepalive off'))).text).toStartWith('没有子命令 keepalive off。')
+    expect((await $.command.run(anvil('keepalive on'))).text).toStartWith('没有子命令 keepalive on。')
   })
 })
 
@@ -344,13 +397,17 @@ describe('缓存框', () => {
     expect(text(none?.rest ?? [])).toBe('')
   })
 
-  test('保活五种状态', () => {
+  test('保活状态：自动开启的五种，加上本会话手动开、手动关', () => {
     const idle = { stopped: null, renewing: false }
-    const base = { settings: SETTINGS, off: false, context: 151000, loop: idle }
+    const base = { settings: SETTINGS, override: null, context: 151000, loop: idle }
     expect(keepaliveStatus(base)).toEqual({ text: '已启用', color: COLOR.ok })
     expect(keepaliveStatus({ ...base, loop: { stopped: null, renewing: true } })).toEqual({ text: '进行中', color: COLOR.ok })
-    expect(keepaliveStatus({ ...base, off: true })).toEqual({ text: '已关闭（本会话）', color: COLOR.muted })
+    expect(keepaliveStatus({ ...base, override: false })).toEqual({ text: '已关闭（本会话）', color: COLOR.muted })
     expect(keepaliveStatus({ ...base, context: 32000 })).toEqual({ text: '未启用（上下文低于 50k）', color: COLOR.muted })
+    expect(keepaliveStatus({ ...base, settings: { ...SETTINGS, autoKeepalive: false } })).toEqual({
+      text: '未启用（自动开启已关闭）',
+      color: COLOR.muted,
+    })
     expect(keepaliveStatus({ ...base, loop: { stopped: { kind: 'limit', reason: '空闲超过 12 小时' }, renewing: true } })).toEqual({
       text: '已停止（空闲超过 12 小时）',
       color: COLOR.muted,
@@ -360,6 +417,17 @@ describe('缓存框', () => {
       color: COLOR.danger,
     })
     expect(keepaliveStatus({ ...base, loop: { stopped: { kind: 'error', reason: '续期请求被中断' }, renewing: false } }).color).toBe(COLOR.danger)
+
+    // 本会话手动开：不看自动开启和阈值；手动关：不看停下
+    const manual = { ...base, override: true, context: 0, settings: { ...SETTINGS, autoKeepalive: false } }
+    expect(keepaliveStatus(manual)).toEqual({ text: '已启用（本会话）', color: COLOR.ok })
+    expect(keepaliveStatus({ ...manual, loop: { stopped: null, renewing: true } })).toEqual({ text: '进行中（本会话）', color: COLOR.ok })
+    expect(keepaliveStatus({ ...manual, loop: { stopped: { kind: 'limit', reason: '空闲超过 12 小时' }, renewing: true } }).text).toBe(
+      '已停止（空闲超过 12 小时）',
+    )
+    expect(keepaliveStatus({ ...base, override: false, loop: { stopped: { kind: 'error', reason: '续期请求被中断' }, renewing: false } }).text).toBe(
+      '已关闭（本会话）',
+    )
   })
 
   test('终端上画出缓存框：上边框状态、四行，各种宽度下不超宽', async ($, on) => {
