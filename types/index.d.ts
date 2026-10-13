@@ -18,6 +18,31 @@ export type Settings = {
   translateApiModel: string
 }
 
+/** 一个额度窗口的读数，取自引擎的 `rateLimits` */
+export type RateLimit = {
+  /** `five_hour`、`seven_day` 等 */
+  kind: string
+  /** 0 到 100 */
+  percentUsed: number
+  /** 重置时刻，ISO 8601 */
+  resetsAt?: string
+}
+
+/** 用量框的读数（spec D8） */
+export type Usage = {
+  /** 上下文窗口；还没有读数时为 null */
+  context: { tokens?: number; window: number; percent?: number } | null
+  rateLimits: RateLimit[]
+  /** 本会话花费，`/cost` 同源 */
+  costUsd: number | null
+  /** 主会话已压缩次数 */
+  compactions: number
+  /** 主会话这一轮开始时的会话花费，一轮结束时用来算上一条消息的花费 */
+  costAtTurnStart: number | null
+  /** 上一条消息的花费 */
+  lastMessageCostUsd: number | null
+}
+
 /** 主会话的缓存状态（spec D1、D2），供缓存框显示；时刻都是 `$.clock.now()` 的毫秒 */
 export type CacheView = {
   /** 估算的过期时刻：最后一次主会话请求 + 1 小时；本会话还没有请求时为 null */
@@ -37,6 +62,13 @@ export type CacheView = {
 declare module 'claude-code' {
   interface PluginState {
     anvil: {
+      /**
+       * anvil 面板在本会话被隐藏：`/anvil panel hide` 或用户手动关掉面板后为 true，
+       * 本会话不再自动打开，`/anvil panel show` 改回 false。
+       */
+      panelHidden: boolean
+      /** 用量框的读数 */
+      usage: Usage
       /**
        * 本次加载生效的设置，会话开始（含每次重新加载模块）时写入。
        * 功能模块用 register 传进来的 settings；这份给拿不到 options 的读者（测试）核对。

@@ -1,4 +1,4 @@
-import type { CommandRunInput, HookStream, On, PromptSubmitInput, SessionStartInput, TurnCompleteInput, TurnStepInput, TurnUsage } from 'claude-code'
+import type { CommandRunInput, HookStream, On, PaneOpenArgs, PromptSubmitInput, SessionStartInput, SessionUsage, TurnCompleteInput, TurnStepInput, TurnUsage } from 'claude-code'
 
 export const SESSION: SessionStartInput = { cwd: '/work', surface: null, isInteractive: true }
 
@@ -11,6 +11,8 @@ export type WorldOptions = {
   box?: { text: string }
   /** 下一次请求的回复带的 usage，测试中途可改；null 表示没有回复 */
   reply?: { usage: TurnUsage | null }
+  /** `$.session.usage()` 的整份读数（用量框用），测试中途可改；给了它就不看 `live` */
+  reading?: { current: SessionUsage }
 }
 
 // 插件之下的世界：替引擎回答插件用到的调用，并记下插件注册的命令、写进 `$.state` 的值、
@@ -23,7 +25,9 @@ export function world(on: On, options: WorldOptions = {}) {
   const box = options.box ?? { text: '' }
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.model', () => ({ value: options.model ?? 'claude-opus-5-5' }))
-  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1000000, tokens: options.live?.tokens }, rateLimits: [] } }))
+  on('session.usage', () => ({
+    value: options.reading?.current ?? { startedAt: 0, context: { window: 1000000, tokens: options.live?.tokens }, rateLimits: [] },
+  }))
   on('command.register', ($, e) => {
     commands.push(e.name)
     return { value: { command: e.name } }
@@ -51,6 +55,32 @@ export function world(on: On, options: WorldOptions = {}) {
   })
   return { commands, state, entered, fills, box }
 }
+
+/**
+ * 替引擎管面板：记下每次 `$.ui.open` 和 `$.ui.close`。
+ * `placed` 是引擎这时肯不肯把面板放下（终端够不够宽），测试中途可以改。
+ */
+export function panes(on: On) {
+  const opens: PaneOpenArgs[] = []
+  const closes: string[] = []
+  const shown = new Map<string, boolean>()
+  const screen = { placed: true }
+  on('ui.open', ($, e) => {
+    opens.push(e)
+    shown.set(e.id, screen.placed)
+    return { value: screen.placed ? { isPlaced: true } : { isPlaced: false, reason: '终端 120 列，不到 144 列' } }
+  })
+  on('ui.close', ($, e) => {
+    closes.push(e.id)
+    shown.delete(e.id)
+    return { value: undefined }
+  })
+  on('ui.panes', () => ({
+    value: [...shown].map(([id, isPlaced]) => ({ id, title: id, isShown: isPlaced, isFocused: false, isPlaced })),
+  }))
+  return { opens, closes, screen }
+}
+
 
 export const anvil = (args: string): CommandRunInput => ({
   command: 'anvil',
