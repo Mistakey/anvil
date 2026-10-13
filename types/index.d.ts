@@ -245,12 +245,17 @@ export type TranslateBox = {
   /** 失败原因（failed） */
   reason: string
   /**
-   * 输入框的第几代：开始写下一句时换一代。Input 没有清空的办法，
-   * 只能换 key 重建（AGENTS.md Pitfalls）。
+   * 输入框的第几代：翻译失败时换一代，好把引擎提交时清掉的中文画回去。
+   * Input 的值只能换 key 重建来重设（AGENTS.md Pitfalls）。
    */
   field: number
-  /** 新一代输入框起始的文字：开始写下一句时已经敲下的字 */
+  /** 新一代输入框起始的文字：失败时画回的中文；送去翻译时清掉，框重建时不再画回 */
   seed: string
+  /**
+   * 输入框里没有字。只有空框画按键提示、提示才放在输入框右侧；有字时输入框独占一行，
+   * 引擎才把长句折行（anvil-k0t.30 实测）
+   */
+  empty: boolean
 }
 
 declare module 'claude-code' {

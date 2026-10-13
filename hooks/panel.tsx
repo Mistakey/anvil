@@ -24,7 +24,7 @@ export const PANEL_SUBCOMMAND: Subcommand = { name: 'panel', summary: '显示或
 export const hidesPanel = (origin: PaneCloseOrigin) => origin.kind === 'person'
 
 /**
- * 标题嵌进上边框（spec D10）。翻译框用同一套边框样式，也照它画（bordered）。
+ * 标题嵌进上边框（spec D10）。翻译框只画上下两条边框、标题自己嵌进上边框，不经过这里（translate.tsx）。
  * 改成 false 时标题退成框内第一行（D10 已定的退路）。
  */
 export const TITLE_IN_BORDER = true

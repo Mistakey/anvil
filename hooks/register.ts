@@ -621,25 +621,28 @@ async function appendToPrompt($: EngineInterface, translation: string): Promise<
   }
 }
 
-/** 翻译框里按 Enter：翻译、追加；中文留在框里，失败时显示原因，再按 Enter 重试；追加过又没改时不做事 */
-async function submitChinese($: EngineInterface, settings: Settings, value: string) {
+/**
+ * 翻译框里按 Enter：翻译、追加。引擎已经清空框、把焦点交回主输入框，成功时照它的做法，不抢回焦点；
+ * 失败时把中文画回框里、焦点交给它，显示原因，再按 Enter 重试
+ */
+async function submitChinese($: EngineInterface, settings: Settings, band: string, value: string) {
   if (!shouldTranslate(await read($, translateBox), value)) return
   await update($, translateBox, box => startTranslating(box, value))
   const translation = await translateText($, settings, value)
   const refusal = 'error' in translation ? translation.error : await appendToPrompt($, translation.text)
-  await update($, translateBox, box =>
-    refusal === null && 'text' in translation ? translated(box, countWords(translation.text)) : failed(box, refusal ?? ''),
-  )
+  if (refusal === null && 'text' in translation) {
+    await update($, translateBox, box => translated(box, countWords(translation.text)))
+    return
+  }
+  const next = await update($, translateBox, box => failed(box, refusal ?? ''))
+  // plugin test 里没有 ui.focus 的实现，会拒绝；焦点只能在交互会话里验证
+  await $.ui.focus({ requestId: band, key: inputKey(next) }).catch(() => undefined)
 }
 
-/** 翻译框里改字：开始写下一句时换一代输入框，焦点交给新的那个 */
-async function typeChinese($: EngineInterface, band: string, value: string) {
-  const box = await read($, translateBox)
-  const next = typed(box, value)
-  if (next === null) return
-  await update($, translateBox, () => next)
-  // plugin test 里没有 ui.focus 的实现，会拒绝；焦点只能在交互会话里验证
-  if (next.field !== box.field) await $.ui.focus({ requestId: band, key: inputKey(next) }).catch(() => undefined)
+/** 翻译框里改字：记下框空没空，开始写下一句时去掉"已追加" */
+async function typeChinese($: EngineInterface, value: string) {
+  const next = typed(await read($, translateBox), value)
+  if (next !== null) await update($, translateBox, () => next)
 }
 
 /** 画翻译框；隐藏了、有问卷占着那一栏时返回 null，让出来 */
@@ -651,8 +654,8 @@ async function drawTranslate($: EngineInterface, settings: Settings, e: RenderIn
   return drawTranslateBox(els, {
     columns: e.props.bodyColumns,
     box,
-    onSubmit: value => void submitChinese($, settings, value),
-    onInput: value => void typeChinese($, e.requestId, value),
+    onSubmit: value => void submitChinese($, settings, e.requestId, value),
+    onInput: value => void typeChinese($, value),
   })
 }
 
