@@ -68,11 +68,14 @@ test('5h：第一行进度条、百分比；第二行两列：暗色"󰑐 重置
   expect(detail.slice(1).filter(one => one.text.trim() !== '')).toEqual([{ text: `${ALERT} 21:50`, color: COLOR.danger }])
 })
 
-test('没有存档时预测按窗口平均的速度外推：用不完绿色 󰁹 不写字；会用完红色 󰂃 加用完时刻', () => {
-  // 窗口 18:00 开始，2 小时用了 18.4%，到 23:00 重置时用到 46%
+test('没有存档时预测按窗口平均的速度外推：用不完绿色"󰁹 用完时刻"；会用完红色"󰂃 用完时刻"', () => {
+  // 窗口 18:00 开始，2 小时用了 18.4%，到 23:00 重置时用到 46%；按这个速度 8 小时 52 分钟用完，10-14 04:52
   const slow = usageRows(limitsOf({ kind: 'five_hour', percentUsed: 18.4, resetsAt: iso(at(13, 23)) }), NOW, INNER)
-  expect(detailOf(slow, 'five_hour')).toBe(two('23:00', FINE))
-  expect(lineAt(slow, 'five_hour').at(-1)).toEqual({ text: FINE, color: COLOR.ok })
+  expect(detailOf(slow, 'five_hour')).toBe(two('23:00', `${FINE} 04:52 10-14`))
+  expect(lineAt(slow, 'five_hour').at(-1)).toEqual({ text: `${FINE} 04:52 10-14`, color: COLOR.ok })
+  // 当天用完、晚于重置：窗口 16:00 开始，4 小时用了 60%，22:40 用完，重置是 21:00
+  const today = usageRows(limitsOf({ kind: 'five_hour', percentUsed: 60, resetsAt: iso(at(13, 21)) }), NOW, INNER)
+  expect(lineAt(today, 'five_hour').at(-1)).toEqual({ text: `${FINE} 22:40`, color: COLOR.ok })
   // 7d 窗口 10-12 17:00 开始，27 小时用了 128 × 27 / 168 %：131 小时 15 分钟用完，10-18 04:15
   const fast = usageRows(limitsOf({ kind: 'seven_day', percentUsed: (128 * 27) / 168, resetsAt: iso(at(19, 17)) }), NOW, INNER)
   expect(firstOf(fast, 'seven_day')).toBe(`${barText((128 * 27) / 168)}  21%`)
@@ -83,30 +86,31 @@ test('没有存档时预测按窗口平均的速度外推：用不完绿色 󰁹
   expect(detailOf(edge, 'five_hour')).toBe(two('22:00', `${ALERT} 22:00`))
 })
 
-test('窗口刚开始也照常推算，不设等待期；还没用时是 󰁹', () => {
-  // 窗口 19:50 开始，10 分钟用了 2%，按这个速度 5 小时用到 60%；重置不在当天写 HH:MM MM-DD
+test('窗口刚开始也照常推算，不设等待期，窗口开始前当作没用；还没用时是"󰁹 —"', () => {
+  // 窗口 19:50 开始，10 分钟用了 2%：速度按 2%/小时，49 小时用完，10-15 21:00；重置不在当天写 HH:MM MM-DD
   const early = limitsOf({ kind: 'five_hour', percentUsed: 2, resetsAt: iso(at(14, 0, 50)) })
-  expect(detailOf(usageRows(early, NOW, INNER), 'five_hour')).toBe(two('00:50 10-14', FINE))
+  expect(detailOf(usageRows(early, NOW, INNER), 'five_hour')).toBe(two('00:50 10-14', `${FINE} 21:00 10-15`))
   const idle = limitsOf({ kind: 'five_hour', percentUsed: 0, resetsAt: iso(at(13, 22)) })
-  expect(detailOf(usageRows(idle, NOW, INNER), 'five_hour')).toBe(two('22:00', FINE))
+  expect(detailOf(usageRows(idle, NOW, INNER), 'five_hour')).toBe(two('22:00', `${FINE} —`))
+  expect(lineAt(usageRows(idle, NOW, INNER), 'five_hour').at(-1)).toEqual({ text: `${FINE} —`, color: COLOR.ok })
   // 窗口 17:00 开始，3 小时用了 30%：没有存档，按窗口平均
   expect(burnRate(30, at(13, 22), 5 * 3_600_000, NOW, 3_600_000, [])).toEqual({ used: 30, span: 3 * 3_600_000 })
 })
 
-test('已用满 100%：红色 󰂎，不写字', () => {
+test('已用满 100%、存档里没有 ≥ 100% 的读数：红色"󰂎 —"', () => {
   const full = limitsOf(
     { kind: 'five_hour', percentUsed: 100, resetsAt: iso(at(13, 22)) },
     { kind: 'seven_day', percentUsed: 100, resetsAt: iso(at(19, 17)) },
   )
   const rows = usageRows(full, NOW, INNER)
-  expect(detailOf(rows, 'five_hour')).toBe(two('22:00', EMPTY))
-  expect(detailOf(rows, 'seven_day')).toBe(two('17:00 10-19', EMPTY))
-  for (const key of ['five_hour', 'seven_day']) expect(lineAt(rows, key).at(-1), key).toEqual({ text: EMPTY, color: COLOR.danger })
+  expect(detailOf(rows, 'five_hour')).toBe(two('22:00', `${EMPTY} —`))
+  expect(detailOf(rows, 'seven_day')).toBe(two('17:00 10-19', `${EMPTY} —`))
+  for (const key of ['five_hour', 'seven_day']) expect(lineAt(rows, key).at(-1), key).toEqual({ text: `${EMPTY} —`, color: COLOR.danger })
 })
 
 test('重置时刻、用完时刻一律绝对时刻：当天 HH:MM，不是当天 HH:MM MM-DD；不写星期、"明天"', () => {
-  // 窗口 10/8 09:00 开始，131 小时用了 18%，用不完
-  expect(detailOf(usageRows(WORKING, NOW, INNER), 'seven_day')).toBe(two('09:00 10-15', FINE))
+  // 窗口 10/8 09:00 开始，131 小时用了 18%，没有存档按窗口平均：596 小时 47 分钟用完，11-07 16:46，晚于重置
+  expect(detailOf(usageRows(WORKING, NOW, INNER), 'seven_day')).toBe(two('09:00 10-15', `${FINE} 16:46 11-07`))
   // 窗口 10/7 09:00 开始，155 小时用了 95%：163 小时 9 分钟用完，10-14 04:09
   const tomorrow = limitsOf({ kind: 'seven_day', percentUsed: 95, resetsAt: iso(at(14, 9)) })
   expect(detailOf(usageRows(tomorrow, NOW, INNER), 'seven_day')).toBe(two('09:00 10-14', `${ALERT} 04:09 10-14`))
@@ -429,27 +433,28 @@ test('终端上（框内约 50、70 格）：项与项之间空一行，缓存�
   }
 })
 
-test('终端上（框内约 50、70 格）：三种预测图标和颜色、用完时刻；两列起点对齐；百分比右对齐同一列；没有"预计"、↻', async ($, on) => {
+test('终端上（框内约 50、70 格）：三种预测图标和颜色、时刻；两列起点对齐；百分比右对齐同一列；没有"预计"、↻', async ($, on) => {
   const reading = engine(on)
   const states: SessionUsage['rateLimits'][] = [
-    // 5h 用不完（绿 󰁹），7d 会用完（红 󰂃 用完时刻，不是当天）
+    // 5h 用不完（绿 󰁹 用完时刻，不是当天），7d 会用完（红 󰂃 用完时刻，不是当天）
     [
       { kind: 'five_hour', percentUsed: 18.4, resetsAt: iso(at(13, 23)) },
       { kind: 'seven_day', percentUsed: (128 * 27) / 168, resetsAt: iso(at(19, 17)) },
     ],
-    // 5h 会用完（当天的用完时刻），7d 已用满（红 󰂎）
+    // 5h 会用完（当天的用完时刻），7d 已用满（红 󰂎 用满的时刻）
     [
       { kind: 'five_hour', percentUsed: 62, resetsAt: iso(at(13, 22)) },
       { kind: 'seven_day', percentUsed: 100, resetsAt: iso(at(19, 17)) },
     ],
   ]
   const expected = [
-    [two('23:00', FINE), two('17:00 10-19', `${ALERT} 04:15 10-18`)],
-    [two('22:00', `${ALERT} 21:50`), two('17:00 10-19', EMPTY)],
+    [two('23:00', `${FINE} 04:52 10-14`), two('17:00 10-19', `${ALERT} 04:15 10-18`)],
+    // 用满的时刻：本窗口存档里第一个 ≥ 100% 的读数，这里是这次读数的 20:00
+    [two('22:00', `${ALERT} 21:50`), two('17:00 10-19', `${EMPTY} 20:00`)],
   ]
   const colors = [
-    [[FINE, COLOR.ok], [`${ALERT} 04:15 10-18`, COLOR.danger]],
-    [[`${ALERT} 21:50`, COLOR.danger], [EMPTY, COLOR.danger]],
+    [[`${FINE} 04:52 10-14`, COLOR.ok], [`${ALERT} 04:15 10-18`, COLOR.danger]],
+    [[`${ALERT} 21:50`, COLOR.danger], [`${EMPTY} 20:00`, COLOR.danger]],
   ]
   for (const [index, rateLimits] of states.entries()) {
     reading.current = { ...READING, context: { tokens: 49_000, window: 1_000_000, percent: 5 }, rateLimits }
