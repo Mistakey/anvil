@@ -152,6 +152,35 @@ test('追加之后改的是原来那句，不清空，回到提示状态', async
   expect(await statusText(ui)).toBe('Enter 翻译 · Shift+Enter 换行')
 })
 
+test('翻译成功后对没改的中文再按 Enter：不再翻译、不再追加', async ($, on) => {
+  const { asked, fillModes } = engine(on)
+  await $.session.start(SESSION)
+  const ui = await band($)
+  const input = await field(ui)
+  await ui.input({ key: input.key ?? '', text: CHINESE })
+
+  await ui.input({ key: input.key ?? '', text: CHINESE })
+
+  expect(asked).toHaveLength(1)
+  expect(fillModes).toHaveLength(1)
+  expect(await statusText(ui)).toContain('已追加 4 个词')
+})
+
+test('翻译成功后改了中文再按 Enter，照常翻译、追加', async ($, on) => {
+  const { asked, fillModes } = engine(on)
+  await $.session.start(SESSION)
+  const ui = await band($)
+  const input = await field(ui)
+  await ui.input({ key: input.key ?? '', text: CHINESE })
+
+  await ui.input({ key: input.key ?? '', text: '把这个函数改成同步的' })
+
+  expect(asked).toHaveLength(2)
+  expect(asked[1]?.prompt).toContain('把这个函数改成同步的')
+  expect(fillModes).toHaveLength(2)
+  expect(await statusText(ui)).toContain('已追加 4 个词')
+})
+
 test('后端失败时显示原因、中文保留，按 Enter 重试', async ($, on) => {
   const { backend, asked, fillModes } = engine(on)
   backend.model.result = { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded', usage: ZERO }

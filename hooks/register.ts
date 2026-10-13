@@ -63,6 +63,7 @@ import {
   inputKey,
   modelReply,
   modelRequest,
+  shouldTranslate,
   startTranslating,
   translated,
   typed,
@@ -615,10 +616,9 @@ async function appendToPrompt($: EngineInterface, translation: string): Promise<
   }
 }
 
-/** 翻译框里按 Enter：翻译、追加；中文留在框里，失败时显示原因，再按 Enter 重试 */
+/** 翻译框里按 Enter：翻译、追加；中文留在框里，失败时显示原因，再按 Enter 重试；追加过又没改时不做事 */
 async function submitChinese($: EngineInterface, settings: Settings, value: string) {
-  if (value.trim() === '') return
-  if ((await read($, translateBox)).phase === 'working') return
+  if (!shouldTranslate(await read($, translateBox), value)) return
   await update($, translateBox, box => startTranslating(box, value))
   const translation = await translateText($, settings, value)
   const refusal = 'error' in translation ? translation.error : await appendToPrompt($, translation.text)

@@ -133,6 +133,15 @@ export const translated = (box: TranslateBox, words: number): TranslateBox => ({
 export const failed = (box: TranslateBox, reason: string): TranslateBox => ({ ...box, phase: 'failed', reason })
 
 /**
+ * 按 Enter 要不要翻译：框里没字、正在翻译时不翻；已经追加过、中文没改时也不翻，
+ * 同一句再追加一遍几乎一定是误按。
+ */
+export function shouldTranslate(box: TranslateBox, value: string): boolean {
+  if (value.trim() === '' || box.phase === 'working') return false
+  return !(box.phase === 'done' && value === box.text)
+}
+
+/**
  * 译文追加后，用户在框里改字：接着中文往后写（不只是空白）就是开始写下一句，
  * 换一代输入框、只留下新敲的字；改的是原来那句，就回到提示状态，中文照旧。
  * 不需要变时返回 null。
