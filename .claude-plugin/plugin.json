@@ -13,7 +13,7 @@
     },
     "autoKeepalive": {
       "title": "自动开启缓存保活",
-      "description": "上下文达到阈值的会话自动开启缓存保活；本会话可用 /anvil keepalive off|on 关闭或恢复",
+      "description": "决定默认：开着时，上下文达到阈值的会话自动开启缓存保活；单个会话可用 /anvil keepalive 切换开关，不受这项和阈值限制",
       "type": "boolean",
       "default": true
     },

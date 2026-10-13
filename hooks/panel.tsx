@@ -17,9 +17,9 @@ import type { GridRow } from './usage'
 /** 面板的 id，也是 Pane ui.render 的 requestId；只有一个面板时引擎不画标题 */
 export const PANE = { id: 'anvil', title: 'anvil', columns: 70 } as const
 
-export const PANEL_SUBCOMMAND: Subcommand = { name: 'panel', args: ['hide', 'show'], summary: '在当前会话隐藏或显示 anvil 面板' }
+export const PANEL_SUBCOMMAND: Subcommand = { name: 'panel', summary: '显示或隐藏 anvil 面板' }
 
-/** 用户手动关掉面板等同 `/anvil panel hide`；anvil 自己关的、卸载时引擎收掉的不算 */
+/** 用户手动关掉面板等同用 `/anvil panel` 隐藏；anvil 自己关的、卸载时引擎收掉的不算 */
 export const hidesPanel = (origin: PaneCloseOrigin) => origin.kind === 'person'
 
 /**

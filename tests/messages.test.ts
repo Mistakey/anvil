@@ -62,7 +62,7 @@ test('用户提交的消息按顺序进入我的消息：序号 + 内容；斜�
   await $.session.start(SESSION)
   await send($, transcript, '候选功能有问题，有很多应该常驻的吧？')
   await send($, transcript, '继续')
-  await $.session.append(appended('/anvil panel hide', { door: 'command' }))
+  await $.session.append(appended('/anvil panel', { door: 'command' }))
   await $.session.append(appended('插件送来的', { origin: { kind: 'plugin', plugin: 'other' } as never }))
   await $.session.append(appended('子 agent 的任务', { agentId: 'ag1' }))
   await send($, transcript, '不对，你没理解')

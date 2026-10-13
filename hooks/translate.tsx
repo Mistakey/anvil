@@ -9,7 +9,7 @@ import { TITLE_IN_BORDER, bordered } from './panel'
 import { COLOR, ICON } from './style'
 import { cells, wrap } from './text'
 
-export const TRANSLATE_SUBCOMMAND: Subcommand = { name: 'translate', args: ['hide', 'show'], summary: '在当前会话隐藏或显示翻译框' }
+export const TRANSLATE_SUBCOMMAND: Subcommand = { name: 'translate', summary: '显示或隐藏翻译框' }
 
 export const EMPTY_BOX: TranslateBox = { phase: 'idle', text: '', words: 0, reason: '', field: 0, seed: '' }
 

@@ -289,28 +289,29 @@ test('api：接口出错时显示状态码和它给的原因；连不上时显�
   expect(await statusText(ui)).toContain('接口返回的内容里没有译文')
 })
 
-test('/anvil translate hide 后 band 不画翻译框，show 恢复', async ($, on) => {
-  engine(on)
+test('/anvil translate 切换：隐藏后 band 不画翻译框，再敲一次恢复；新会话回到显示', async ($, on) => {
+  const { state } = engine(on)
   await $.session.start(SESSION)
+  expect(state.get('anvil.translateHidden'), '新会话不带隐藏').toBe(undefined)
 
-  const hidden = await $.command.run(anvil('translate hide'))
-  expect(hidden.text).toBe('已隐藏翻译框（本会话）。/anvil translate show 重新显示。')
+  const hidden = await $.command.run(anvil('translate'))
+  expect(hidden.text).toBe('翻译框已隐藏（本会话）')
   const off = await band($)
   expect(await off.find({ type: 'Input' })).toBeUndefined()
   await off.unmount()
 
-  const shown = await $.command.run(anvil(' translate  show '))
-  expect(shown.text).toBe('已显示翻译框。')
+  const shown = await $.command.run(anvil(' translate '))
+  expect(shown.text).toBe('翻译框已显示')
   const on2 = await band($)
   expect(await on2.find({ type: 'Input' })).toBeDefined()
 })
 
-test('/anvil 列出 translate 子命令；词不对时给出用法', async ($, on) => {
+test('/anvil 列出 translate 子命令；旧写法 hide|show 按未知子命令处理', async ($, on) => {
   engine(on)
   await $.session.start(SESSION)
 
-  expect((await $.command.run(anvil(''))).text).toContain('/anvil translate hide|show')
-  expect((await $.command.run(anvil('translate'))).text).toBe('用法：/anvil translate hide|show')
+  expect((await $.command.run(anvil(''))).text).toContain('/anvil translate  显示或隐藏翻译框（现在：显示）')
+  expect((await $.command.run(anvil('translate hide'))).text).toStartWith('没有子命令 translate hide。')
 })
 
 test('有问卷占着那一栏时让出来', async ($, on) => {

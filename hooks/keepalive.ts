@@ -24,7 +24,7 @@ export const IDLE_LIMIT_MS = 12 * 60 * 60 * 1000
 /** 只读一遍缓存，回复越短越好：fork 不能设输出上限（cache-tax 的提示词） */
 export const PING_PROMPT = 'Reply with the single word: warm'
 
-export const KEEPALIVE_SUBCOMMAND: Subcommand = { name: 'keepalive', args: ['off', 'on'], summary: '在当前会话关闭或重新启用缓存保活' }
+export const KEEPALIVE_SUBCOMMAND: Subcommand = { name: 'keepalive', summary: '开启或关闭缓存保活' }
 
 /** 保活循环，只在 register.ts 的闭包里，随模块加载新建 */
 export type Loop = {
@@ -55,12 +55,15 @@ export function startStretch(loop: Loop) {
 
 export const loopView = (loop: Loop): KeepaliveView => ({ stopped: loop.stopped, renewing: loop.inFlight || loop.renewals > 0 })
 
+/** 默认：`/config` 开着自动开启、上下文达到阈值（D3，阈值与守卫共用）。cache-tax 要用户 `/keepwarm` 手动开，这里按阈值自动开 */
+const isAutomatic = (settings: Settings, context: number) => settings.autoKeepalive && context >= settings.threshold
+
 /**
- * 这个会话现在该不该保活：`/config` 开着自动开启、本会话没关、上下文达到阈值（D3，阈值与守卫共用）。
- * cache-tax 要用户 `/keepwarm` 手动开，这里按阈值自动开。
+ * 这个会话现在该不该保活：本会话用 `/anvil keepalive` 切换过（override 有值）就照它，不看自动开启和阈值；
+ * 没切换过按默认。
  */
-export function isEnabled(settings: Settings, off: boolean, context: number): boolean {
-  return settings.autoKeepalive && !off && context >= settings.threshold
+export function isEnabled(settings: Settings, override: boolean | null, context: number): boolean {
+  return override ?? isAutomatic(settings, context)
 }
 
 /** 这一段空闲的截止时刻：最后一次主会话请求 + 12 小时（续期不算请求，不推后它） */
@@ -129,16 +132,18 @@ export function renew(cache: Cache, requestedAt: number) {
 
 // ---------------------------------------------------------------- 缓存框里的保活状态（D3、D10）
 
-export type StatusInput = { settings: Settings; off: boolean; context: number; loop: KeepaliveView }
+export type StatusInput = { settings: Settings; override: boolean | null; context: number; loop: KeepaliveView }
 
 /**
- * 五种状态：已启用、进行中（这段空闲里续期过或正在续期）、已关闭（本会话）、未启用、已停止（原因）。
+ * 按默认的五种：已启用、进行中（这段空闲里续期过或正在续期）、未启用（自动开启已关闭 / 上下文低于阈值）、已停止（原因）。
+ * 本会话切换过的：已关闭（本会话）；开着时已启用、进行中带"（本会话）"，停下照样写已停止（原因）。
  * 已停止：空闲到上限为灰，读数不达标和出错为红；其余开着为绿，没开为灰。
  */
-export function keepaliveStatus({ settings, off, context, loop }: StatusInput): Segment {
-  if (off) return { text: '已关闭（本会话）', color: COLOR.muted }
+export function keepaliveStatus({ settings, override, context, loop }: StatusInput): Segment {
+  if (override === false) return { text: '已关闭（本会话）', color: COLOR.muted }
   if (loop.stopped) return { text: `已停止（${loop.stopped.reason}）`, color: loop.stopped.kind === 'limit' ? COLOR.muted : COLOR.danger }
-  if (!settings.autoKeepalive) return { text: '未启用（自动开启已关闭）', color: COLOR.muted }
-  if (context < settings.threshold) return { text: `未启用（上下文低于 ${formatTokens(settings.threshold)}）`, color: COLOR.muted }
-  return { text: loop.renewing ? '进行中' : '已启用', color: COLOR.ok }
+  if (override === null && !settings.autoKeepalive) return { text: '未启用（自动开启已关闭）', color: COLOR.muted }
+  if (override === null && context < settings.threshold) return { text: `未启用（上下文低于 ${formatTokens(settings.threshold)}）`, color: COLOR.muted }
+  const mark = override ? '（本会话）' : ''
+  return { text: `${loop.renewing ? '进行中' : '已启用'}${mark}`, color: COLOR.ok }
 }
