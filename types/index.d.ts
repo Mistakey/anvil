@@ -65,6 +65,8 @@ export type KeepaliveView = {
   stopped: KeepaliveStop | null
   /** 这一段空闲里已经续期过，或续期请求正在路上 */
   renewing: boolean
+  /** 续期请求正在路上：缓存框的"进行中"后面接一个转动的图标 */
+  inFlight: boolean
 }
 
 /** 子 agent 的四种状态（spec D8）：运行中、已完成、出错、输出被截断 */
@@ -301,6 +303,12 @@ declare module 'claude-code' {
       translateHidden: boolean
       /** 翻译框的状态 */
       translate: TranslateBox
+      /** 主会话正在回复（这一轮的第一次请求到这一轮结束）：面板的分隔线上有亮光扫过 */
+      replying: boolean
+      /** 面板里焦点所在元素的 key（ui.focus 的 element）；面板没有焦点时不看它 */
+      focusKey: string | null
+      /** 出过错（ui.fault）的 Client 模块文件名，如 `rail.tsx`；之后不再用它，退回静止 */
+      clientFaults: string[]
     }
   }
 }

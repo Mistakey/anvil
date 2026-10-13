@@ -39,6 +39,15 @@
 - 标题嵌进上边框：`position="absolute"`、`top={-1}` 的 Box 放在带边框的 Box 里面，真实终端不画；放在带边框的 Box 之后、同一个外层 Box 里（`top={0}`）才画在边框行上（anvil-k0t.17，见 `panel.tsx` 的 `bordered`）。plugin test 只看元素树、不经过 Ink 的绘制，测不出画没画。
 - 不开交互会话也能看真实终端的画面：Windows 上用 pywinpty 起 `claude --plugin-dir <dir>`（180 列、`CLAUDE_CODE_NO_FLICKER=1`、在已信任的目录里），pyte 把输出还原成屏幕文字；Nerd Font 图标还原成空白（anvil-k0t.17）。开着别的面板（如 Flightdeck）时 anvil 在页签后面：往伪终端写 SGR 鼠标点击 `[<0;列;行M` 加 `…m` 点页签切过去；从 Git Bash 起脚本时传给 claude 的 `/命令` 会被 MSYS 改成 Windows 路径、当普通消息发出，先设 `MSYS_NO_PATHCONV=1`（anvil-k0t.31）。停靠宽度沿用用户拖过的宽度（跨会话保留，关掉 Flightdeck 也不变）：要看别的宽度，往伪终端写 SGR 鼠标拖动面板左边界（`[<0;列;行M` 按下、`[<32;列;行M` 逐列移动、`[<0;列;行m` 松开），截完拖回原宽度；只在这次关掉 Flightdeck 用 `--settings <文件>`，文件里写 `{"enabledPlugins":{"flightdeck@claude-flightdeck":false}}`（anvil-k0t.32）。
 - 渲染点里没有 statusLine：`$.ui.status` 是插件自己的一行，mod 读不到、也改不了用户 statusLine 脚本的输出。
+- `Client`（面板里自己在帧时钟上重画的一小块，anvil 的分隔线扫光、转动图标、耗时；anvil-k0t.39 实测）：
+  - `$.ui.resolve(e)` 在 VS Code 上也给 `Client`（`'Client' in els` 为真），画出来是空的 Box；元素表里有 `Client` 的只有终端和桌面，按 `e.surface` 判断。
+  - `props` 里有 `undefined` 时整个 `ui.render` 被拒（"props holds undefined"），可选项不给就不带这个键。
+  - `<Client module="./x.tsx">` 写在功能文件（非入口）里也认，validate 列在 surface modules；Client 模块可以 import 插件里别的文件（`rail.tsx` 用 `motion.ts`）。plugin test 里 `find` 到的 `props.module` 是插件目录下的路径（`hooks/rail.tsx`），`ui.drawn({ in: key })` 读它画的树，`ui.advance(ms)` 走它的帧时钟。
+  - Button 里放不了 `Client`：绝对定位的 Box 放在 Button 之后能压在它的格子上，但焦点反白只反 Button 自己的字，压上去的 Client 不反白；用 `ui.focus` 钩子（`e.element` 是焦点落到的 key）记下焦点，让 Client 自己 `inverse`。
+  - flightdeck 的计时（`surface.every` 只在第一次起）配上每次重画给的新 now，耗时会先多走一秒、下次重画再退回（8s → 7s）；新 now 时把 `every` 停掉重起（`motion.ts` 的 `follow`）。
+  - 主题色名 `claude` 能用（画成 #d77757）；`Text` 的 `dimColor` 画成灰色 #999999，不是调暗原来的颜色。
+  - plugin test 的 `$` 没有 `ui.fault`，造不出 Client 出错，退路只能测纯逻辑。
+  - Agent 工具默认在后台跑子 agent：主会话那一轮在子 agent 运行时就结束了。
 
 ### 事件、状态与工具链
 

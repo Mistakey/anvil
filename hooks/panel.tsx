@@ -10,6 +10,8 @@ import type { ListId, PanelFold } from '../types'
 import type { Subcommand } from './command'
 import { earlierText, fitCount, fitRows } from './list'
 import type { Fit } from './list'
+import { rule, still } from './live'
+import type { Live } from './live'
 import { COLOR, GRID, ICON, fitSegments, valueWidth } from './style'
 import type { Segment } from './style'
 import { cells, fit, padStart } from './text'
@@ -29,7 +31,7 @@ export const hidesPanel = (origin: PaneCloseOrigin) => origin.kind === 'person'
  */
 export const TITLE_IN_BORDER = true
 
-type Els = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
+type Els = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'> & Partial<Pick<Elements['terminal'], 'Client'>>
 
 /**
  * 带边框的框，标题和右上角状态压在上边框那一行上。压的是带边框 Box 之后的兄弟节点：
@@ -65,13 +67,16 @@ export type SectionId = ListId | 'usage' | 'cache'
 /** hotkey：列表的展开键（spec D9 的 a / d / m），只有三个列表有 */
 type Section = { id: SectionId; icon: string; title: string; color: string; border: string; hotkey?: string }
 
-/** 自上而下的固定顺序，框与框之间空一行；我的消息占满剩余高度，最下面还有三行身份栏（不带框），占原 statusline 的位置 */
+/**
+ * 自上而下的固定顺序，框与框之间一条分隔线；我的消息占满剩余高度，最下面还有三行身份栏（不带框），占原 statusline 的位置。
+ * 缓存、用量、子 agent、拒绝的边框和标题同色（标题加粗）；我的消息是中性的，边框用 muted
+ */
 export const SECTIONS: readonly Section[] = [
-  { id: 'cache', icon: ICON.cache, title: '缓存', color: COLOR.cache, border: COLOR.cacheBorder },
-  { id: 'usage', icon: ICON.usage, title: '用量', color: COLOR.usage, border: COLOR.usageBorder },
-  { id: 'agents', icon: ICON.agents, title: '子 agent', color: COLOR.agents, border: COLOR.agentsBorder, hotkey: 'a' },
-  { id: 'denials', icon: ICON.denials, title: '自动模式拒绝', color: COLOR.denials, border: COLOR.denialsBorder, hotkey: 'd' },
-  { id: 'messages', icon: ICON.messages, title: '我的消息', color: COLOR.text, border: COLOR.faint, hotkey: 'm' },
+  { id: 'cache', icon: ICON.cache, title: '缓存', color: COLOR.cache, border: COLOR.cache },
+  { id: 'usage', icon: ICON.usage, title: '用量', color: COLOR.usage, border: COLOR.usage },
+  { id: 'agents', icon: ICON.agents, title: '子 agent', color: COLOR.agents, border: COLOR.agents, hotkey: 'a' },
+  { id: 'denials', icon: ICON.denials, title: '自动模式拒绝', color: COLOR.denials, border: COLOR.denials, hotkey: 'd' },
+  { id: 'messages', icon: ICON.messages, title: '我的消息', color: COLOR.text, border: COLOR.muted, hotkey: 'm' },
 ]
 
 /** 框的边框和左右内边距各占 1 格 */
@@ -117,8 +122,12 @@ export type PanelView = {
   /** 三个列表的内容；没给的子 agent、自动模式拒绝按没有内容处理（不画） */
   lists: Partial<Record<ListId, ListBody>>
   fold: PanelFold
-  /** 身份栏的三行，接在最后一个区块下面（不带框、不空行），贴着面板底边 */
+  /** 身份栏的三行，接在最后一个区块下面（不带框、不加分隔线），贴着面板底边 */
   identity?: RenderElement[]
+  /** 动效怎么画（live.tsx）；不给时一律静止 */
+  live?: Live
+  /** 主会话正在回复：分隔线上有亮光扫过 */
+  isReplying?: boolean
   /** 按了列表的展开键，或焦点在标题、"更早的"那行上按了 Enter */
   onToggle: (id: ListId) => void
 }
@@ -285,8 +294,9 @@ const fitFixed = (body: ListBody, limit: number): Fit => fitCount(body.items.len
 /**
  * 用量框、缓存框的两列的一项：名称定宽，值从同一列起。第二行起（细节、放不下折下去的块）
  * 各画成一行，名称那一列空着；一行一个元素，框的高度按元素数算（fitLists）。
+ * tail：接在第一行字后面的元素（保活续期请求在路上时转动的图标）。
  */
-export function gridRow(els: Els, row: GridRow, inner: number): RenderElement[] {
+export function gridRow(els: Els, row: GridRow, inner: number, tail?: RenderElement): RenderElement[] {
   const { Box, Text } = els
   const width = valueWidth(inner, row.labelWidth)
   return row.lines.map((line, index) => (
@@ -296,6 +306,7 @@ export function gridRow(els: Els, row: GridRow, inner: number): RenderElement[] 
       </Box>
       <Box width={width} flexShrink={0}>
         <Text wrap="truncate">{segments(els, line)}</Text>
+        {index === 0 && tail ? tail : null}
       </Box>
     </Box>
   ))
@@ -312,7 +323,7 @@ export function spacedGridRows(els: Els, rows: readonly GridRow[], inner: number
 
 /**
  * 每个列表这次画出哪几项。占满剩余高度的只有一个：展开的列表；没有展开时是我的消息。
- * 其余区块的高度先算出来（没画的占 0 行，收成一行的占 1 行，框占内容加 2 行边框，区块之间各空 1 行），剩下的给它。
+ * 其余区块的高度先算出来（没画的占 0 行，收成一行的占 1 行，框占内容加 2 行边框，区块之间的分隔线各占 1 行），剩下的给它。
  */
 function fitLists(view: PanelView, expanded: ListId | null, fillId: SectionId): Map<ListId, Fit> {
   const fits = new Map<ListId, Fit>()
@@ -373,11 +384,12 @@ export function drawPanel(els: Els, view: PanelView): RenderElement {
     return frame(els, section, body, columns, isFill, title, toggle)
   })
 
-  // 框与框之间空一行；没画的区块不留空行
+  // 框与框之间一条分隔线，占原来空的那一行；没画的区块不留线
+  const live = view.live ?? still(0)
   const spaced = drawn.flatMap((element, index) => {
     if (element === null) return []
-    const gap = <Box key={`gap:${SECTIONS[index]?.id}`} width={columns} height={1} flexShrink={0} />
-    return [gap, element]
+    const line = rule(els, live, { key: `rule:${SECTIONS[index]?.id}`, width: columns, active: view.isReplying === true, rest: COLOR.faint })
+    return [line, element]
   })
   return (
     <Box flexDirection="column" width={columns} minHeight={view.rows}>

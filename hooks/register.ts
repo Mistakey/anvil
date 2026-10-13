@@ -7,6 +7,7 @@ import type {
   Register,
   ClassicEventOf,
   RenderInput,
+  RenderSurface,
   SessionAppendMessage,
   ToolCallInput,
   ToolCallResult,
@@ -14,6 +15,7 @@ import type {
   TurnStepInput,
   TurnStepResult,
   TurnUsage,
+  UiFaultInput,
   UiScrollInput,
 } from 'claude-code'
 
@@ -48,6 +50,7 @@ import {
 } from './keepalive'
 import type { Loop } from './keepalive'
 import { CLOSED, isClosed, scrollList, toggleDetail, toggleList } from './list'
+import { faultedModule, liveOf, spinAfter } from './live'
 import { NO_MESSAGES, addMessage, contentText, isMyMessage, messageList, reconcile, settleMessages, userTexts } from './messages'
 import { PANE, PANEL_SUBCOMMAND, drawPanel, gridRow, hidesPanel, innerWidth, spacedGridRows } from './panel'
 import { readSettings } from './settings'
@@ -71,7 +74,7 @@ import {
 } from './translate'
 import type { Translation } from './translate'
 import { EMPTY_USAGE, HISTORY_KEYS, applyReading, parseHistory, parseResetsAt, recordSample, usageRows } from './usage'
-import type { GridRow, Histories, Reading } from './usage'
+import type { Histories, Reading } from './usage'
 import type { Denial, GitView, Identity, KeepaliveStop, ListId, Scrolled, Settings, SubAgent } from '../types'
 
 // 模块结构（照 flightdeck 的 register.tsx / core.ts），引擎扫描源码的规则见 AGENTS.md Pitfalls「模块结构」：
@@ -86,6 +89,8 @@ import type { Denial, GitView, Identity, KeepaliveStop, ListId, Scrolled, Settin
 //   放进 bodies；三个列表（我的消息、自动模式拒绝、子 agent）交 ListBody 放进 lists，按上限截、
 //   "更早的"那行、展开和收成一行由 panel.tsx 按共同规则做（list.ts）。身份栏的三行交 identity，接在区块之后。
 // - 主输入框上方的 band（AbovePrompt）只画翻译框（translate.tsx），不放别的功能。
+// - 动效（分隔线的扫光、进行中图标、运行中的耗时）用 live.tsx 的 rule / spin / clock 画：有 Client 时交给
+//   rail.tsx 等 Client 模块，没有或出过错时退回静止；画的时候用 liveFor 取这次怎么画。
 
 // ---------------------------------------------------------------- 设置
 
@@ -527,6 +532,37 @@ async function foldForDrawing($: EngineInterface, isFocused: boolean) {
   return CLOSED
 }
 
+// ---------------------------------------------------------------- 动效（spec D10）：分隔线的扫光、进行中图标、运行中的耗时
+
+/** 主会话正在回复：从这一轮的第一次请求到这一轮结束，分隔线上有亮光扫过 */
+const replying = atom({ plugin: 'anvil', key: 'replying' } as const, false)
+
+/** 出过错的 Client 模块（文件名）：之后画面板、翻译框时不再用它，退回静止 */
+const faults = atom({ plugin: 'anvil', key: 'clientFaults' } as const, [] as string[])
+
+async function setReplying($: EngineInterface, isReplying: boolean) {
+  if ((await read($, replying)) !== isReplying) await update($, replying, () => isReplying)
+}
+
+/** 引擎报某个 Client 出错：记下模块，引擎接着重画那一处，这次就不用它了 */
+async function noteFault($: EngineInterface, e: UiFaultInput) {
+  const name = faultedModule(e.module)
+  if (name === null) return
+  await update($, faults, list => (list.includes(name) ? list : [...list, name]))
+}
+
+/** 面板里焦点所在元素的 key（ui.focus）；面板失去焦点后不看它 */
+const focusKey = atom({ plugin: 'anvil', key: 'focusKey' } as const, null as string | null)
+
+async function noteFocus($: EngineInterface, element: string | null) {
+  if ((await read($, focusKey)) !== element) await update($, focusKey, () => element)
+}
+
+/** 这次绘制里动效怎么画 */
+async function liveFor($: EngineInterface, els: object, surface: RenderSurface, now: number) {
+  return liveOf(els, surface, now, await read($, faults))
+}
+
 // ---------------------------------------------------------------- anvil 面板
 
 const panelHidden = atom({ plugin: 'anvil', key: 'panelHidden' } as const, false)
@@ -579,25 +615,36 @@ async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderI
     $.clock.now(),
     read($, identity),
   ])
-  const [cached, keepalive, histories] = await Promise.all([read($, cacheView), keepaliveNow($, settings), readHistories($)])
+  const [cached, keepalive, loop, live, isReplying, focused, histories] = await Promise.all([
+    read($, cacheView),
+    keepaliveNow($, settings),
+    read($, keepaliveLoop),
+    liveFor($, els, e.surface, now),
+    read($, replying),
+    read($, focusKey),
+    readHistories($),
+  ])
   // 用户进了面板要按 Enter 时，列表里不该有已撤回的消息：画完核对一遍，有变化会再画
   if (e.props.isFocused) $.clock.after(0, () => void syncMessages($).catch(() => undefined))
   const inner = innerWidth(e.props.bodyColumns)
-  const grid = (rows: GridRow[]) => rows.flatMap(row => gridRow(els, row, inner))
+  // 保活的续期请求在路上：接在"进行中"后面转动的图标
+  const renewing = loop.inFlight ? spinAfter(els, live, { key: 'spin:keepalive', color: keepalive.color }) : undefined
   return drawPanel(els, {
     columns: e.props.bodyColumns,
     rows: e.props.scroll.bodyRows,
     bodies: {
       usage: { rows: spacedGridRows(els, usageRows(current, now, inner, histories), inner) },
-      cache: { rows: grid(cacheRows(cached, keepalive, now, inner)) },
+      cache: { rows: cacheRows(cached, keepalive, now, inner).flatMap(row => gridRow(els, row, inner, row.key === 'keepalive' ? renewing : undefined)) },
     },
     lists: {
       messages: messageList(els, mine, { inner, onPress: id => void scrollToMessage($, id) }),
       denials: denialList(els, denied, { detail: folding.detail, inner, onPress: id => void pressDetail($, id) }),
-      agents: agentList(els, list, { detail: folding.detail, now, inner, onPress: id => void pressDetail($, id) }),
+      agents: agentList(els, list, { detail: folding.detail, now, inner, live, focused: e.props.isFocused ? focused : null, onPress: id => void pressDetail($, id) }),
     },
     fold: folding,
     identity: identityRows(els, who, e.props.bodyColumns),
+    live,
+    isReplying,
     onToggle: id => void pressList($, id),
   })
 }
@@ -660,10 +707,11 @@ async function drawTranslate($: EngineInterface, settings: Settings, e: RenderIn
   // 先排除 mobile，resolve 出来的元素才有 Input
   if (e.surface === 'mobile' || e.props.hasSurvey || (await read($, translateHidden))) return null
   const els = $.ui.resolve(e)
-  const box = await read($, translateBox)
+  const [box, now] = await Promise.all([read($, translateBox), $.clock.now()])
   return drawTranslateBox(els, {
     columns: e.props.bodyColumns,
     box,
+    live: await liveFor($, els, e.surface, now),
     onSubmit: value => void submitChinese($, settings, e.requestId, value),
     onInput: value => void typeChinese($, value),
   })
@@ -734,6 +782,7 @@ export const register: Register = (on, options) => {
       return result
     }
     await stepStarted($, cache)
+    await setReplying($, true).catch(() => undefined)
     // 用户回来了：这一段空闲结束，一轮结束时再定时（cache-tax 也是一轮结束才定时）
     startStretch(loop)
     await publishLoop($, loop)
@@ -767,6 +816,7 @@ export const register: Register = (on, options) => {
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
     if (!e.agentId) {
+      await setReplying($, false).catch(() => undefined)
       await turnCompleted($, cache, e)
       await cacheChanged($, cache, loop, redraw, settings)
       // 本会话花费在一轮结束时重新读
@@ -841,6 +891,19 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: 'anvil' }, async ($, e) => drawAnvilPanel($, settings, e))
+
+  // 焦点在面板里移动：记下落在哪个元素上，压在子 agent 那一行上的 Client 跟着反白
+  on('ui.focus', { component: 'Pane', requestId: 'anvil' }, async ($, e, next) => {
+    const moved = await next(e)
+    if (moved.deny === undefined) await noteFocus($, e.element ?? null).catch(() => undefined)
+    return moved
+  })
+
+  // 面板、翻译框里的 Client 出错：记下后引擎重画那一处，退回静止
+  on('ui.fault', async ($, e, next) => {
+    await noteFault($, e).catch(() => undefined)
+    return next(e)
+  })
 
   // 翻译框常驻在主输入框上方
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => (await drawTranslate($, settings, e)) ?? next(e))
