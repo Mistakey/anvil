@@ -51,3 +51,48 @@ export function padEnd(text: string, width: number): string {
 export function padStart(text: string, width: number): string {
   return ' '.repeat(Math.max(0, width - cells(text))) + text
 }
+
+/**
+ * 按格子折成至多 maxLines 行，空白压成一个空格；放不下时最后一行末尾换成 `…`。
+ * 中文逐字折，英文单词尽量不拆开（单词比一行还长时照样拆）。
+ */
+export function wrap(text: string, width: number, maxLines: number): string[] {
+  const one = text.replace(/\s+/g, ' ').trim()
+  if (width <= 0 || maxLines <= 0 || one === '') return []
+  const lines: string[] = []
+  let rest = one
+  while (rest !== '' && lines.length < maxLines) {
+    if (cells(rest) <= width) {
+      lines.push(rest)
+      rest = ''
+      break
+    }
+    let line = ''
+    let used = 0
+    let index = 0
+    const chars = [...rest]
+    while (index < chars.length) {
+      const char = chars[index] ?? ''
+      const size = cellsOf(char.codePointAt(0) ?? 0)
+      if (used + size > width) break
+      line += char
+      used += size
+      index += 1
+    }
+    // 断在英文单词中间时退回到上一个空格
+    const next = chars[index] ?? ''
+    const breaksWord = /\S/.test(next) && /[\x21-\x7e]$/.test(line) && /[\x21-\x7e]/.test(next)
+    const space = line.lastIndexOf(' ')
+    if (breaksWord && space > 0) {
+      index = [...line.slice(0, space)].length + 1
+      line = line.slice(0, space)
+    }
+    lines.push(line.trimEnd())
+    rest = chars.slice(index).join('').trimStart()
+  }
+  if (rest !== '' && lines.length > 0) {
+    const last = lines.length - 1
+    lines[last] = fit(`${lines[last]}${' '.repeat(width)}`, width).replace(/\s+…$/, '…')
+  }
+  return lines
+}

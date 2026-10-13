@@ -32,6 +32,8 @@
 - 面板停靠要求全屏渲染（`viewport.isFullscreen`，会话内固定）且终端至少 110 列；mod 自己打开（定时器、`turn.start`）的面板要至少 144 列，用户亲手开过同一个 id 后降到 110 列（跨会话保留，用户手动关掉后回到 144 列）。不满足时面板内联在提示框上方。
 - `Input`：回车即 `submit`；类型写的是单行，但实测 Shift+Enter 能换行、中文输入法可用（anvil-k0t.4）。没有清空方法：`value` 只在 hook 画出不同值时覆盖，清空要换 `key` 重建，再 `$.ui.focus({ requestId, key })`。
 - `$.prompt.fill` 在有界面占着按键时以 `dialog` 拒绝；结果里的 `text`、`cursor` 只有模块调用过 `$.prompt.read` 才有内容；没有 `refusal` 时原因未知（多半是 hook 拦下）。
+- 面板按键只有 `Button` 的 `hotkey`（一位数字或一个小写字母）：`plain` 带 `hotkey` 时引擎在前面画出"1: "，不带 `plain` 画成 `[ label ]`。面板获得焦点后 ↑↓ 在 Button 间移动焦点、Enter 按下；Esc 不经过 mod，只把焦点交回主输入框，面板以 `isFocused: false` 重画（anvil-k0t.18）。
+- 画面板的 `ui.render` 钩子里不能写 `$.state`（引擎拒绝）；要在画的时候顺手改状态，用 `$.clock.after(0, …)` 推到画完之后（anvil-k0t.18）。
 - render hook 要先排除 `e.surface === 'mobile'`，再解构 `Input`。
 - 渲染点里没有 statusLine：`$.ui.status` 是插件自己的一行，mod 读不到、也改不了用户 statusLine 脚本的输出。
 

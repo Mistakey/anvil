@@ -209,7 +209,7 @@ test('终端上，约 70 列和拖宽、拖窄后：六个区块按顺序、用�
     const ui = await $.ui.mount(pane(columns))
     const titles = (await ui.findAll({ key: undefined, type: 'Text' }))
       .map(one => one.text.trim())
-      .filter(one => /我的消息|自动模式拒绝|子 agent|用量|缓存/.test(one))
+      .filter(one => /^\S+ (我的消息|自动模式拒绝|子 agent|用量|缓存)$/.test(one))
     expect(titles.map(one => one.replace(/^\S+ /, ''))).toEqual(['我的消息', '自动模式拒绝', '子 agent', '用量', '缓存'])
 
     const inner = columns - 4

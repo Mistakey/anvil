@@ -1,16 +1,34 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, PaneCloseInput, PromptSubmitInput, Register, RenderInput, TurnCompleteInput, TurnUsage } from 'claude-code'
+import type {
+  AgentSpawnInput,
+  EngineInterface,
+  PaneCloseInput,
+  PromptSubmitInput,
+  Register,
+  RenderInput,
+  ToolCallInput,
+  ToolCallResult,
+  TurnCompleteInput,
+  TurnStepInput,
+  TurnStepResult,
+  TurnUsage,
+  UiScrollInput,
+} from 'claude-code'
+
+import { agentList, callAgent, completeAgent, spawnAgent, stepAgent } from './agents'
 
 import * as cacheState from './cache'
 import type { Cache, ResumeFields, Submission } from './cache'
 
 import { COMMAND, answer } from './command'
 import type { Subcommand } from './command'
+import { describeInput } from './describe'
+import { CLOSED, isClosed, scrollList, toggleDetail, toggleList } from './list'
 import { PANE, PANEL_SUBCOMMAND, drawPanel, gridRow, hidesPanel, innerWidth } from './panel'
 import { readSettings } from './settings'
 import { EMPTY_USAGE, applyReading, compacted as addCompaction, completeTurn, startTurn, usageRows } from './usage'
 import type { Reading } from './usage'
-import type { Settings } from '../types'
+import type { ListId, Settings, SubAgent } from '../types'
 
 // 模块结构（照 flightdeck 的 register.tsx / core.ts），引擎扫描源码的规则见 AGENTS.md Pitfalls「模块结构」：
 // - 所有 on(...) 都写在下面的 register 里；用到 `$` 的辅助函数写在本文件顶层（`$` 不能跨文件传）。
@@ -21,7 +39,8 @@ import type { Settings } from '../types'
 //   不用 `{}` 空匹配器。新功能的子命令说明加进 SUBCOMMANDS，执行写成带 args 匹配器的 command.run，
 //   注册在兜底的 command.run 之前。
 // - 面板的区块（panel.tsx 的 SECTIONS）由各功能填内容：在 drawAnvilPanel 里把该区块的 SectionBody
-//   放进 bodies；身份栏接在 drawPanel 的区块之后。
+//   放进 bodies；三个列表（我的消息、自动模式拒绝、子 agent）交 ListBody 放进 lists，按上限截、
+//   "更早的"那行、展开和收成一行由 panel.tsx 按共同规则做（list.ts）。身份栏接在 drawPanel 的区块之后。
 
 // ---------------------------------------------------------------- 设置
 
@@ -138,6 +157,66 @@ async function noteCompaction($: EngineInterface) {
   await update($, usage, current => addCompaction(current))
 }
 
+// ---------------------------------------------------------------- 子 agent 列表（数据来源照 flightdeck）
+
+const agents = atom({ plugin: 'anvil', key: 'agents' } as const, [] as SubAgent[])
+
+async function noteSpawn($: EngineInterface, e: AgentSpawnInput, agentId: string, model: string) {
+  const at = await $.clock.now()
+  await update($, agents, list => spawnAgent(list, { id: agentId, description: e.description, prompt: e.prompt, model, at }))
+}
+
+/** 子 agent 的一次请求结束；不在列表里的 id（引擎自己的 fork、工作流里没登记的）不管 */
+async function noteAgentStep($: EngineInterface, e: TurnStepInput, agentId: string, result: TurnStepResult) {
+  if (!(await read($, agents)).some(agent => agent.id === agentId)) return
+  await update($, agents, list => stepAgent(list, agentId, { model: e.model, usage: result.usage, stopReason: result.stopReason ?? null }))
+}
+
+async function noteAgentCall($: EngineInterface, e: ToolCallInput, agentId: string, ran: ToolCallResult) {
+  if (!(await read($, agents)).some(agent => agent.id === agentId)) return
+  const isError = ran.deny !== undefined || ran.isError === true
+  await update($, agents, list => callAgent(list, agentId, { tool: String(e.tool), text: describeInput(e), isError }))
+}
+
+async function noteAgentEnd($: EngineInterface, e: TurnCompleteInput, agentId: string) {
+  if (!(await read($, agents)).some(agent => agent.id === agentId)) return
+  const at = await $.clock.now()
+  await update($, agents, list => completeAgent(list, agentId, { reason: e.reason, answer: e.answer, at }))
+}
+
+// ---------------------------------------------------------------- 面板按键：列表展开、详情、滚动（spec D9）
+
+const fold = atom({ plugin: 'anvil', key: 'fold' } as const, CLOSED)
+
+async function pressList($: EngineInterface, id: ListId) {
+  await update($, fold, current => toggleList(current, id))
+}
+
+async function pressAgent($: EngineInterface, agentId: string) {
+  await update($, fold, current => toggleDetail(current, agentId))
+}
+
+/** 展开的列表放不下时，滚轮滚的是列表自己（面板本身放得下，不需要引擎滚）；其余照引擎的 */
+async function scrollPanel($: EngineInterface, e: UiScrollInput): Promise<boolean> {
+  const current = await read($, fold)
+  if (current.expanded === null || e.contentRows > e.bodyRows) return false
+  const total = current.expanded === 'agents' ? (await read($, agents)).length : 0
+  await update($, fold, () => scrollList(current, e.by, total))
+  return true
+}
+
+/**
+ * Esc 把焦点交回主输入框（引擎的固定键位，不经过 mod）：面板失去焦点后重画时按全收起画，
+ * 并把展开状态清掉，下次再进面板也是收起的。
+ */
+async function foldForDrawing($: EngineInterface, isFocused: boolean) {
+  const current = await read($, fold)
+  if (isFocused || isClosed(current)) return current
+  // 画的钩子里不能写 `$.state`：画完再清
+  $.clock.after(0, () => void update($, fold, () => CLOSED).catch(() => undefined))
+  return CLOSED
+}
+
 // ---------------------------------------------------------------- anvil 面板
 
 const panelHidden = atom({ plugin: 'anvil', key: 'panelHidden' } as const, false)
@@ -181,12 +260,15 @@ async function notePanelClosed($: EngineInterface, e: PaneCloseInput) {
 
 async function drawAnvilPanel($: EngineInterface, e: RenderInput<'Pane'>) {
   const els = $.ui.resolve(e)
-  const [current, now] = await Promise.all([read($, usage), $.clock.now()])
+  const [current, list, folding, now] = await Promise.all([read($, usage), read($, agents), foldForDrawing($, e.props.isFocused), $.clock.now()])
   const inner = innerWidth(e.props.bodyColumns)
   return drawPanel(els, {
     columns: e.props.bodyColumns,
     rows: e.props.scroll.bodyRows,
     bodies: { usage: { rows: usageRows(current, now, inner).map(row => gridRow(els, row, inner)) } },
+    lists: { agents: agentList(els, list, { detail: folding.detail, now, inner, onPress: id => void pressAgent($, id) }) },
+    fold: folding,
+    onToggle: id => void pressList($, id),
   })
 }
 
@@ -228,7 +310,12 @@ export const register: Register = (on, options) => {
   })
 
   on('turn.step', async function* ($, e, next) {
-    if (e.agentId) return yield* next(e)
+    if (e.agentId) {
+      const agentId = e.agentId
+      const result = yield* next(e)
+      await noteAgentStep($, e, agentId, result).catch(() => undefined)
+      return result
+    }
     await stepStarted($, cache)
     const result = yield* next(e)
     if (result.usage) await stepAnswered($, cache, result.usage)
@@ -240,8 +327,22 @@ export const register: Register = (on, options) => {
     if (!e.agentId) {
       await turnCompleted($, cache, e)
       await completeUsageTurn($)
+    } else {
+      await noteAgentEnd($, e, e.agentId).catch(() => undefined)
     }
     return result
+  })
+
+  on('agent.spawn', async ($, e, next) => {
+    const started = await next(e)
+    if (started.deny === undefined && started.agentId) await noteSpawn($, e, started.agentId, started.model).catch(() => undefined)
+    return started
+  })
+
+  on('tool.call', async ($, e, next) => {
+    const ran = await next(e)
+    if (e.agentId) await noteAgentCall($, e, e.agentId, ran).catch(() => undefined)
+    return ran
   })
 
   on('session.measure', async ($, e, next) => {
@@ -275,6 +376,12 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: 'anvil' }, async ($, e) => drawAnvilPanel($, e))
+
+  on('ui.scroll', { component: 'Pane', requestId: 'anvil' }, async ($, e, next) => {
+    // 改了展开状态，引擎自己会重画
+    if (await scrollPanel($, e).catch(() => false)) return {}
+    return next(e)
+  })
 
   // 功能自己的子命令在这里接入（带 args 匹配器），兜底的放最后
   on('command.run', { command: 'anvil', args: /^\s*panel\s+hide\s*$/ }, async $ => ({ text: await hidePanel($) }))
