@@ -251,6 +251,11 @@ export type TranslateBox = {
   field: number
   /** 新一代输入框起始的文字：开始写下一句时已经敲下的字 */
   seed: string
+  /**
+   * 输入框里没有字。只有空框画按键提示、提示才放在输入框右侧；有字时输入框独占一行，
+   * 引擎才把长句折行（anvil-k0t.30 实测）
+   */
+  empty: boolean
 }
 
 declare module 'claude-code' {

@@ -5,13 +5,12 @@ import type { Elements, ModelCompleteRequest, ModelCompleteResult, PromptFilled,
 
 import type { TranslateBox } from '../types'
 import type { Subcommand } from './command'
-import { TITLE_IN_BORDER, bordered } from './panel'
 import { COLOR, ICON } from './style'
 import { cells, wrap } from './text'
 
 export const TRANSLATE_SUBCOMMAND: Subcommand = { name: 'translate', summary: '显示或隐藏翻译框' }
 
-export const EMPTY_BOX: TranslateBox = { phase: 'idle', text: '', words: 0, reason: '', field: 0, seed: '' }
+export const EMPTY_BOX: TranslateBox = { phase: 'idle', text: '', words: 0, reason: '', field: 0, seed: '', empty: true }
 
 // ---------------------------------------------------------------- 翻译后端
 
@@ -126,7 +125,7 @@ export function fillRefusal(filled: Pick<PromptFilled, 'refusal'>): string {
 
 // ---------------------------------------------------------------- 框的状态
 
-export const startTranslating = (box: TranslateBox, text: string): TranslateBox => ({ ...box, phase: 'working', text, reason: '' })
+export const startTranslating = (box: TranslateBox, text: string): TranslateBox => ({ ...box, phase: 'working', text, reason: '', empty: false })
 
 export const translated = (box: TranslateBox, words: number): TranslateBox => ({ ...box, phase: 'done', words, reason: '' })
 
@@ -142,18 +141,19 @@ export function shouldTranslate(box: TranslateBox, value: string): boolean {
 }
 
 /**
- * 译文追加后，用户在框里改字：接着中文往后写（不只是空白）就是开始写下一句，
- * 换一代输入框、只留下新敲的字；改的是原来那句，就回到提示状态，中文照旧。
- * 不需要变时返回 null。
+ * 用户在框里改字。译文追加后：接着中文往后写（不只是空白）就是开始写下一句，
+ * 换一代输入框、只留下新敲的字；改的是原来那句，就去掉"已追加"，中文照旧。
+ * 其余时候只记下框空没空。不需要变时返回 null。
  */
 export function typed(box: TranslateBox, value: string): TranslateBox | null {
-  if (box.phase !== 'done' || value === box.text) return null
-  if (value.startsWith(box.text)) {
+  const empty = value === ''
+  if (box.phase === 'done' && value !== box.text) {
+    if (!value.startsWith(box.text)) return { ...box, phase: 'idle', empty }
     const added = value.slice(box.text.length)
     if (added.trim() === '') return null
-    return { ...EMPTY_BOX, field: box.field + 1, seed: added.trimStart() }
+    return { ...EMPTY_BOX, field: box.field + 1, seed: added.trimStart(), empty: false }
   }
-  return { ...box, phase: 'idle' }
+  return empty === box.empty ? null : { ...box, empty }
 }
 
 export const inputKey = (box: TranslateBox) => `translate:${box.field}`
@@ -172,14 +172,21 @@ export type BandView = {
 
 const TITLE = `${ICON.translate} 中→英`
 
-/** 输入框右侧至少留这么多格；状态放不下时挪到输入框下面一行 */
-const MIN_FIELD = 16
+const PLACEHOLDER = '例如：把函数改成异步的'
+const SUBMIT = '翻译'
 
-function status(box: TranslateBox): { text: string; color: string } {
+/** 空框时提示放在输入框右侧，输入框至少要放得下示例和引擎在它后面画的「⏎ 翻译」 */
+const MIN_FIELD = cells(PLACEHOLDER) + cells(` ⏎ ${SUBMIT}`) + 1
+
+/**
+ * 框下面（或空框时右侧）那行状态；框里有字、没有状态可说时为 null。
+ * 按键提示只在空框时画：框里有字时引擎已经在输入框后面画了「⏎ 翻译」，两处提示会挤在一起（anvil-k0t.30）。
+ */
+function status(box: TranslateBox): { text: string; color: string } | null {
   if (box.phase === 'working') return { text: '◐ 正在翻译', color: COLOR.muted }
   if (box.phase === 'done') return { text: `${ICON.done} 已追加 ${box.words} 个词`, color: COLOR.ok }
   if (box.phase === 'failed') return { text: `${ICON.failed} ${box.reason}，按 Enter 重试`, color: COLOR.danger }
-  return { text: 'Enter 翻译 · Shift+Enter 换行', color: COLOR.dim }
+  return box.empty ? { text: 'Enter 翻译 · Shift+Enter 换行', color: COLOR.dim } : null
 }
 
 function border(box: TranslateBox): string {
@@ -187,38 +194,58 @@ function border(box: TranslateBox): string {
   return box.phase === 'idle' ? COLOR.faint : COLOR.dim
 }
 
+/** 上边框：标题嵌在里面，和面板各框的标题对齐（`╭─ 标题 ─…`） */
+function topRule(els: Pick<Els, 'Box' | 'Text'>, columns: number, color: string): RenderElement {
+  const { Box, Text } = els
+  const lead = '── '
+  const rest = Math.max(0, columns - cells(lead) - cells(TITLE) - 1)
+  return (
+    <Box key="title:translate" width={columns} flexShrink={0}>
+      <Text color={color}>
+        {lead}
+        <Text bold color={COLOR.text}>
+          {TITLE}
+        </Text>
+        {` ${'─'.repeat(rest)}`}
+      </Text>
+    </Box>
+  )
+}
+
+/**
+ * 翻译框只画上下两条边框，不画左右：引擎画 Input 时按整个 band 宽（bodyColumns）给文字排版、折行，
+ * 左右边框和内边距占掉的 4 格会让一行放不下，长句被截成一行加"…"、提交标签折成两行、
+ * 光标落到别处（anvil-k0t.30 伪终端实测）。和主输入框一样只有上下两条线。
+ */
 export function drawTranslateBox(els: Els, view: BandView): RenderElement {
   const { Box, Input, Text } = els
   const columns = Math.max(1, view.columns)
-  // 边框和左右内边距各 1 格；输入框和状态之间空 2 格
-  const inner = Math.max(0, columns - 4)
   const shown = status(view.box)
-  // 面板停靠时 band 只有对话那一栏宽，失败原因常常放不进输入框右侧：挪到下面，折成至多三行
-  const beside = cells(shown.text) <= inner - 2 - MIN_FIELD
-  const lines = beside ? [shown.text] : wrap(shown.text, inner, 3)
-  const line = (
-    <Box key="status:translate" flexDirection="column" flexShrink={0} width={Math.max(0, ...lines.map(cells))}>
-      {lines.map((text, index) => (
-        <Text key={`status:${index}`} color={shown.color}>
-          {text}
-        </Text>
-      ))}
-    </Box>
-  )
-  const head = (
-    <Text bold color={COLOR.text}>
-      {TITLE_IN_BORDER ? ` ${TITLE} ` : TITLE}
-    </Text>
-  )
-  const box = (
-    <Box key="box:translate" flexDirection="column" borderStyle="round" borderColor={border(view.box)} paddingX={1} width={columns} flexShrink={0}>
-      {TITLE_IN_BORDER ? null : head}
-      <Box key="row:translate" columnGap={2} width={inner}>
-        <Box flexGrow={1} flexShrink={1} minWidth={0}>
+  // 只有空框时状态放在输入框右侧（中间空 2 格）；框里有字时输入框独占一行、占满 band，状态挪到下面。
+  // 面板停靠时 band 只有对话那一栏宽，右侧放不下也挪到下面，折成至多三行
+  const beside = shown !== null && view.box.empty && cells(shown.text) <= columns - 2 - MIN_FIELD
+  const lines = shown === null ? [] : beside ? [shown.text] : wrap(shown.text, columns, 3)
+  const line =
+    shown === null ? null : (
+      <Box key="status:translate" flexDirection="column" flexShrink={0} width={Math.max(0, ...lines.map(cells))}>
+        {lines.map((text, index) => (
+          <Text key={`status:${index}`} color={shown.color}>
+            {text}
+          </Text>
+        ))}
+      </Box>
+    )
+  const fieldWidth = beside ? columns - 2 - cells(shown.text) : columns
+  const color = border(view.box)
+  return (
+    <Box key="translate" flexDirection="column" width={columns} flexShrink={0}>
+      {topRule(els, columns, color)}
+      <Box key="row:translate" columnGap={2} width={columns}>
+        <Box key="field:translate" width={fieldWidth} flexShrink={0}>
           <Input
             key={inputKey(view.box)}
-            placeholder="例如：把函数改成异步的"
-            submitLabel="翻译"
+            placeholder={PLACEHOLDER}
+            submitLabel={SUBMIT}
             {...(view.box.seed === '' ? {} : { value: view.box.seed })}
             onSubmit={value => view.onSubmit(value)}
             onInput={value => view.onInput(value)}
@@ -227,7 +254,9 @@ export function drawTranslateBox(els: Els, view: BandView): RenderElement {
         {beside ? line : null}
       </Box>
       {beside ? null : line}
+      <Box key="rule:translate" width={columns} flexShrink={0}>
+        <Text color={color}>{'─'.repeat(columns)}</Text>
+      </Box>
     </Box>
   )
-  return bordered(els, { key: 'translate', columns, box, head: TITLE_IN_BORDER ? head : null })
 }
