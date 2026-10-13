@@ -21,6 +21,8 @@ export type WorldOptions = {
   live?: { tokens?: number }
   /** 主输入框里的草稿，测试中途可改；`$.prompt.fill` 写进这里 */
   box?: { text: string }
+  /** `refuse` 时主输入框不收 `$.prompt.fill`（引擎自己的拒绝原因测试里造不出，测试的钩子给的会被剥掉） */
+  fill?: { refuse: boolean }
   /** 下一次请求的回复带的 usage，测试中途可改；null 表示没有回复 */
   reply?: { usage: TurnUsage | null }
   /** `$.session.usage()` 的整份读数（用量框用），测试中途可改；给了它就不看 `live` */
@@ -67,12 +69,15 @@ export function world(on: On, options: WorldOptions = {}) {
   on('agent.spawn', ($, e) => ({ model: e.model ?? 'claude-sonnet-5-5', agentId: `ag${++agents}` }))
   on('tool.call', () => ({ result: 'ok' as never }))
   on('prompt.read', () => ({ value: { text: box.text, cursor: box.text.length } }))
+  const fillModes: { text: string; mode: string }[] = []
   on('prompt.fill', ($, e) => {
+    if (options.fill?.refuse) return { isFilled: false }
     fills.push(e.text)
+    fillModes.push({ text: e.text, mode: e.mode })
     box.text = e.mode === 'replace' ? e.text : box.text + e.text
     return { isFilled: true }
   })
-  return { commands, state, entered, fills, box }
+  return { commands, state, entered, fills, fillModes, box }
 }
 
 /**

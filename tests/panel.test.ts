@@ -86,9 +86,10 @@ test('/anvil 列出 panel 子命令；panel 后面的词不对时给出用法', 
   engine(on)
   await $.session.start(SESSION)
 
-  expect((await $.command.run(anvil(''))).text).toBe(
-    ['用法：/anvil <子命令>', '  /anvil panel hide|show  在当前会话隐藏或显示 anvil 面板'].join('\n'),
-  )
+  // 其余功能的子命令也在列表里，这里只看 panel 那一行
+  const list = (await $.command.run(anvil(''))).text ?? ''
+  expect(list).toStartWith('用法：/anvil <子命令>\n')
+  expect(list).toMatch(/^ {2}\/anvil panel hide\|show +在当前会话隐藏或显示 anvil 面板$/m)
   expect((await $.command.run(anvil('panel up'))).text).toBe('用法：/anvil panel hide|show')
 })
 
