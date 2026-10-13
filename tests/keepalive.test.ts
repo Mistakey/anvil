@@ -430,12 +430,12 @@ describe('缓存框', () => {
     expect(rows.every(row => row.labelWidth === GRID.label)).toBe(true)
   })
 
-  test('有效：● 绿，值"有效 · HH:MM 过期"绿；明天的写"明天"', () => {
+  test('有效：● 绿，值"有效 · HH:MM 过期"绿；不是当天的写 MM-DD HH:MM', () => {
     const [, state] = cacheRows(sample(), ENABLED, at(13, 20), 66)
     expect(state?.label).toEqual([{ text: '●', color: COLOR.ok }])
     expect(lineOf(state)).toBe('有效 · 21:40 过期')
     expect(state?.lines[0]?.every(one => one.color === COLOR.ok)).toBe(true)
-    expect(valueOf(cacheRows(sample({ expiresAt: at(14, 0, 30) }), ENABLED, at(13, 23), 66), 'state')).toBe('有效 · 明天 00:30 过期')
+    expect(valueOf(cacheRows(sample({ expiresAt: at(14, 0, 30) }), ENABLED, at(13, 23), 66), 'state')).toBe('有效 · 10-14 00:30 过期')
   })
 
   test('已过期：● 红，值"已过期 N 分钟"红，1 小时起写 N 小时 M 分钟', () => {
