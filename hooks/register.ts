@@ -22,6 +22,8 @@ import type { Cache, ResumeFields, Submission } from './cache'
 import { cacheRows, cacheStatus } from './cachebox'
 
 import { COMMAND, answer } from './command'
+import { EMPTY_IDENTITY, GIT, NUMSTAT, REV_PARSE, STATUS, baseName, gitView, identityRows, operationOf, parseNumstat, parseRepo, parseStatus, tokensPerSecond } from './identity'
+import type { RebaseFiles } from './identity'
 import type { Subcommand } from './command'
 import { describeInput } from './describe'
 import {
@@ -64,7 +66,7 @@ import {
 import type { Translation } from './translate'
 import { EMPTY_USAGE, applyReading, compacted as addCompaction, completeTurn, startTurn, usageRows } from './usage'
 import type { GridRow, Reading } from './usage'
-import type { KeepaliveStop, ListId, Settings, SubAgent } from '../types'
+import type { GitView, KeepaliveStop, ListId, Settings, SubAgent } from '../types'
 
 // 模块结构（照 flightdeck 的 register.tsx / core.ts），引擎扫描源码的规则见 AGENTS.md Pitfalls「模块结构」：
 // - 所有 on(...) 都写在下面的 register 里；用到 `$` 的辅助函数写在本文件顶层（`$` 不能跨文件传）。
@@ -76,7 +78,7 @@ import type { KeepaliveStop, ListId, Settings, SubAgent } from '../types'
 //   注册在兜底的 command.run 之前。
 // - 面板的区块（panel.tsx 的 SECTIONS）由各功能填内容：在 drawAnvilPanel 里把该区块的 SectionBody
 //   放进 bodies；三个列表（我的消息、自动模式拒绝、子 agent）交 ListBody 放进 lists，按上限截、
-//   "更早的"那行、展开和收成一行由 panel.tsx 按共同规则做（list.ts）。身份栏接在 drawPanel 的区块之后。
+//   "更早的"那行、展开和收成一行由 panel.tsx 按共同规则做（list.ts）。身份栏的两行交 identity，接在区块之后。
 // - 主输入框上方的 band（AbovePrompt）只画翻译框（translate.tsx），不放别的功能。
 
 // ---------------------------------------------------------------- 设置
@@ -320,6 +322,92 @@ async function noteAgentEnd($: EngineInterface, e: TurnCompleteInput, agentId: s
   await update($, agents, list => completeAgent(list, agentId, { reason: e.reason, answer: e.answer, at }))
 }
 
+// ---------------------------------------------------------------- 身份栏（D8）
+
+const identity = atom({ plugin: 'anvil', key: 'identity' } as const, EMPTY_IDENTITY)
+
+/** 正在读 git 时又要读：读完再读一次，不并发 */
+type GitRefresh = { isRunning: boolean; isWanted: boolean }
+
+/** 运行一条 git 命令；不在 git 里、git 不在、超时都当没有输出 */
+async function git($: EngineInterface, args: readonly string[]): Promise<string | null> {
+  const ran = await $.process.run([...GIT, ...args], { timeoutMs: 5000 }).catch(() => null)
+  return ran !== null && ran.exitCode === 0 ? ran.stdout : null
+}
+
+async function readText($: EngineInterface, path: string): Promise<string | undefined> {
+  const text = await $.fs.read(path).catch(() => undefined)
+  return typeof text === 'string' ? text.trim() : undefined
+}
+
+/** rebase 停下时的进度和原分支 */
+async function readRebase($: EngineInterface, gitDir: string, names: ReadonlySet<string>): Promise<RebaseFiles | null> {
+  if (names.has('rebase-merge')) {
+    const dir = `${gitDir}/rebase-merge`
+    const [step, total, headName] = await Promise.all([readText($, `${dir}/msgnum`), readText($, `${dir}/end`), readText($, `${dir}/head-name`)])
+    return { dir: 'rebase-merge', step, total, headName, isAm: false }
+  }
+  if (names.has('rebase-apply')) {
+    const dir = `${gitDir}/rebase-apply`
+    const [step, total, headName, isAm] = await Promise.all([
+      readText($, `${dir}/next`),
+      readText($, `${dir}/last`),
+      readText($, `${dir}/head-name`),
+      $.fs.exists(`${dir}/applying`).catch(() => false),
+    ])
+    return { dir: 'rebase-apply', step, total, headName, isAm }
+  }
+  return null
+}
+
+/** 不在 git 里时为 null */
+async function readGit($: EngineInterface): Promise<GitView | null> {
+  const repo = await git($, REV_PARSE)
+  const paths = repo === null ? null : parseRepo(repo)
+  if (!paths) return null
+  const [status, numstat, entries] = await Promise.all([git($, STATUS), git($, NUMSTAT), $.fs.list(paths.gitDir).catch(() => [])])
+  const names = new Set(entries.map(entry => entry.name))
+  const rebase = await readRebase($, paths.gitDir, names)
+  return gitView(paths, parseStatus(status ?? ''), numstat === null ? null : parseNumstat(numstat), operationOf(names, rebase), rebase)
+}
+
+async function refreshGit($: EngineInterface, refresh: GitRefresh) {
+  if (refresh.isRunning) {
+    refresh.isWanted = true
+    return
+  }
+  refresh.isRunning = true
+  try {
+    do {
+      refresh.isWanted = false
+      const [cwd, view] = await Promise.all([$.session.cwd(), readGit($)])
+      await update($, identity, current => ({ ...current, dir: baseName(cwd), git: view }))
+    } while (refresh.isWanted)
+  } finally {
+    refresh.isRunning = false
+  }
+}
+
+/** 会话开始时还没有请求：模型先取会话的，effort 等第一次请求 */
+async function startIdentity($: EngineInterface, refresh: GitRefresh) {
+  const model = await $.session.model().catch(() => null)
+  await update($, identity, current => ({ ...current, model: current.model ?? model }))
+  await refreshGit($, refresh)
+}
+
+/** 会改文件或运行命令的工具：调用完 git 状态可能变了 */
+const CHANGES_FILES = new Set(['Bash', 'PowerShell', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit'])
+
+/** 主会话一次请求的模型、effort 和输出速度；算不出速度时留着上一次的 */
+async function noteSpeed($: EngineInterface, e: TurnStepInput, speed: number | null) {
+  await update($, identity, current => ({
+    ...current,
+    model: e.model,
+    effort: e.effort ?? null,
+    tokensPerSecond: speed ?? current.tokensPerSecond,
+  }))
+}
+
 // ---------------------------------------------------------------- 面板按键：列表展开、详情、滚动（spec D9）
 
 const fold = atom({ plugin: 'anvil', key: 'fold' } as const, CLOSED)
@@ -396,7 +484,13 @@ async function notePanelClosed($: EngineInterface, e: PaneCloseInput) {
 
 async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderInput<'Pane'>) {
   const els = $.ui.resolve(e)
-  const [current, list, folding, now] = await Promise.all([read($, usage), read($, agents), foldForDrawing($, e.props.isFocused), $.clock.now()])
+  const [current, list, folding, now, who] = await Promise.all([
+    read($, usage),
+    read($, agents),
+    foldForDrawing($, e.props.isFocused),
+    $.clock.now(),
+    read($, identity),
+  ])
   const [cached, off, loop] = await Promise.all([read($, cacheView), read($, keepaliveOff), read($, keepaliveLoop)])
   const keepalive = keepaliveStatus({ settings, off, context: cached.context, loop })
   const inner = innerWidth(e.props.bodyColumns)
@@ -410,6 +504,7 @@ async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderI
     },
     lists: { agents: agentList(els, list, { detail: folding.detail, now, inner, onPress: id => void pressAgent($, id) }) },
     fold: folding,
+    identity: identityRows(els, who, e.props.bodyColumns),
     onToggle: id => void pressList($, id),
   })
 }
@@ -505,6 +600,7 @@ export const register: Register = (on, options) => {
   const cache = cacheState.freshCache()
   const loop = freshLoop()
   const redraw: Redraw = { timer: null }
+  const gitRefresh: GitRefresh = { isRunning: false, isWanted: false }
 
   on('session.start', async ($, e, next) => {
     await publishSettings($, settings)
@@ -513,6 +609,7 @@ export const register: Register = (on, options) => {
     // 重新加载模块时循环是新的：换掉上一次加载留下的读数
     await publishLoop($, loop)
     await startUsage($)
+    await startIdentity($, gitRefresh).catch(() => undefined)
     await startPanel($)
     await registerAnvil($)
     return next(e)
@@ -525,6 +622,7 @@ export const register: Register = (on, options) => {
     // `/clear` 是新的对话，上一段空闲的停下不再算；恢复的会话按起步的缓存状态定时（冷了不发）
     if (e.source === 'clear') startStretch(loop)
     await cacheChanged($, cache, loop, redraw, settings)
+    await refreshGit($, gitRefresh).catch(() => undefined)
     return result
   })
 
@@ -545,8 +643,23 @@ export const register: Register = (on, options) => {
     startStretch(loop)
     await publishLoop($, loop)
     await scheduleRedraw($, cache, redraw)
-    const result = yield* next(e)
+    // tok/s 从首字算起（D11 实测）：首字是第一块不是 engine 的，结束是 stop 那块
+    let firstAt: number | null = null
+    let stopAt: number | null = null
+    let output: number | undefined
+    const stream = next(e)
+    for await (const chunk of stream) {
+      if (chunk.kind === 'stop') {
+        stopAt = await $.clock.now()
+        output = chunk.usage?.output_tokens
+      } else if (firstAt === null && chunk.kind !== 'engine') {
+        firstAt = await $.clock.now()
+      }
+      yield chunk
+    }
+    const result = await stream.result
     if (result.usage) await stepAnswered($, cache, result.usage)
+    await noteSpeed($, e, tokensPerSecond(output ?? result.usage?.output_tokens, firstAt, stopAt)).catch(() => undefined)
     return result
   })
 
@@ -556,6 +669,7 @@ export const register: Register = (on, options) => {
       await turnCompleted($, cache, e)
       await cacheChanged($, cache, loop, redraw, settings)
       await completeUsageTurn($)
+      await refreshGit($, gitRefresh).catch(() => undefined)
     } else {
       await noteAgentEnd($, e, e.agentId).catch(() => undefined)
     }
@@ -571,6 +685,8 @@ export const register: Register = (on, options) => {
   on('tool.call', async ($, e, next) => {
     const ran = await next(e)
     if (e.agentId) await noteAgentCall($, e, e.agentId, ran).catch(() => undefined)
+    // 不等它读完，工具结果先交回去；子 agent 改的文件也算
+    if (CHANGES_FILES.has(String(e.tool))) void refreshGit($, gitRefresh).catch(() => undefined)
     return ran
   })
 
@@ -593,6 +709,8 @@ export const register: Register = (on, options) => {
   on('prompt.submit', async ($, e, next) => {
     // 先补开面板，再过守卫：用户按了 Enter 就算用户请求，守卫拦下这条时面板照样打开（缓存框正好说明为什么拦）
     await reopenPanel($, e).catch(() => undefined)
+    // 用户可能在别处运行过 git；不等它读完
+    void refreshGit($, gitRefresh).catch(() => undefined)
     if (settings.guard) {
       const drop = await guardSubmission($, cache, e, settings.threshold)
       if (drop !== null) return { drop }

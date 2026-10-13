@@ -35,6 +35,8 @@
 - 面板按键只有 `Button` 的 `hotkey`（一位数字或一个小写字母）：`plain` 带 `hotkey` 时引擎在前面画出"1: "，不带 `plain` 画成 `[ label ]`。面板获得焦点后 ↑↓ 在 Button 间移动焦点、Enter 按下；Esc 不经过 mod，只把焦点交回主输入框，面板以 `isFocused: false` 重画（anvil-k0t.18）。
 - 画面板的 `ui.render` 钩子里不能写 `$.state`（引擎拒绝）；要在画的时候顺手改状态，用 `$.clock.after(0, …)` 推到画完之后（anvil-k0t.18）。
 - render hook 要先排除 `e.surface === 'mobile'`，再解构 `Input`。
+- 标题嵌进上边框：`position="absolute"`、`top={-1}` 的 Box 放在带边框的 Box 里面，真实终端不画；放在带边框的 Box 之后、同一个外层 Box 里（`top={0}`）才画在边框行上（anvil-k0t.17，见 `panel.tsx` 的 `bordered`）。plugin test 只看元素树、不经过 Ink 的绘制，测不出画没画。
+- 不开交互会话也能看真实终端的画面：Windows 上用 pywinpty 起 `claude --plugin-dir <dir>`（180 列、`CLAUDE_CODE_NO_FLICKER=1`、在已信任的目录里），pyte 把输出还原成屏幕文字；Nerd Font 图标还原成空白（anvil-k0t.17）。
 - 渲染点里没有 statusLine：`$.ui.status` 是插件自己的一行，mod 读不到、也改不了用户 statusLine 脚本的输出。
 
 ### 事件、状态与工具链
@@ -60,5 +62,6 @@
 - `on` 可以交给本模块自己具名的函数（可以跨文件），但不能经对象属性或数组里的函数传，也不能用这类函数的返回值。
 - 同一事件在整个模块里（跨文件合计）只能不带匹配器注册一次；带匹配器的不限，`{}` 也算匹配器、匹配全部，重复注册同一个匹配器也能过。anvil 不用 `{}` 和重复匹配器：几个功能都要的事件（`session.start` 等）在 `register.ts` 里只注册一次、不带匹配器，处理函数里按顺序调用各功能（见「开发」的结构说明）。同一模块里先注册的钩子在外层先跑。
 - `command.run` 的匹配器可以用正则匹配 `args`，如 `{ command: 'anvil', args: /^\s*panel\s+(hide|show)\s*$/ }`，仍算 answers its own command。
+- plugin test 里插件传给 `$.fs.*` 的路径会被引擎按本机写法规范化（Windows 上 `/` 变 `\`），测试挂的 `fs.*` 钩子比路径前先统一分隔符（anvil-k0t.17）。
 - plugin test 里测试拿到的 `$` 没有 `state`，读不到插件写的 `$.state`；在测试自己的 `on('state.set')` 里记下 `e.value` 再 `next(e)`。
 - `claude plugin validate` 会校验 `userConfig` 各项的 `type`，但不列出各项设置；要列出来用 `claude --plugin-dir <dir> plugin configure anvil@inline`（不带 `--values-stdin` 时只读），默认值靠 plugin test 核对。

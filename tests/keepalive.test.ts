@@ -368,7 +368,7 @@ describe('缓存框', () => {
     await turn($)
     for (const columns of [70, 110, 52, 40]) {
       const ui = await $.ui.mount(pane(columns))
-      expect(flat(await ui.find({ key: 'status:cache' })).trim()).toBe('● 有效 · 21:00 过期')
+      expect(flat(await ui.find({ key: 'status:section:cache' })).trim()).toBe('● 有效 · 21:00 过期')
       for (const key of ['cache-hit', 'cache-cost', 'cache-rebuilt', 'keepalive']) {
         const row = await ui.find({ key: `row:${key}` })
         expect(row, `${columns} 列 ${key}`).toBeDefined()
@@ -381,7 +381,7 @@ describe('缓存框', () => {
     // 过期后（保活在 50 分钟那次停下了）：上边框改写已过期时长，重建量变红
     await w.clock.advance(2 * HOUR + 10 * MIN)
     const ui = await $.ui.mount(pane(70))
-    expect(flat(await ui.find({ key: 'status:cache' })).trim()).toBe('○ 已过期 1h10m')
+    expect(flat(await ui.find({ key: 'status:section:cache' })).trim()).toBe('○ 已过期 1h10m')
     expect(await colorOf(ui, '○ 已过期')).toBe(COLOR.danger)
     expect(await colorOf(ui, ' 152k tokens')).toBe(COLOR.danger)
     await ui.unmount()

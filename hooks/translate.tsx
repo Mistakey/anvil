@@ -5,7 +5,7 @@ import type { Elements, ModelCompleteRequest, ModelCompleteResult, PromptFilled,
 
 import type { TranslateBox } from '../types'
 import type { Subcommand } from './command'
-import { TITLE_IN_BORDER } from './panel'
+import { TITLE_IN_BORDER, bordered } from './panel'
 import { COLOR, ICON } from './style'
 import { cells, wrap } from './text'
 
@@ -201,15 +201,9 @@ export function drawTranslateBox(els: Els, view: BandView): RenderElement {
       {TITLE_IN_BORDER ? ` ${TITLE} ` : TITLE}
     </Text>
   )
-  return (
-    <Box key="translate" flexDirection="column" borderStyle="round" borderColor={border(view.box)} paddingX={1} width={columns} flexShrink={0}>
-      {TITLE_IN_BORDER ? (
-        <Box key="title:translate" position="absolute" top={-1} left={1}>
-          {head}
-        </Box>
-      ) : (
-        head
-      )}
+  const box = (
+    <Box key="box:translate" flexDirection="column" borderStyle="round" borderColor={border(view.box)} paddingX={1} width={columns} flexShrink={0}>
+      {TITLE_IN_BORDER ? null : head}
       <Box key="row:translate" columnGap={2} width={inner}>
         <Box flexGrow={1} flexShrink={1} minWidth={0}>
           <Input
@@ -226,4 +220,5 @@ export function drawTranslateBox(els: Els, view: BandView): RenderElement {
       {beside ? null : line}
     </Box>
   )
+  return bordered(els, { key: 'translate', columns, box, head: TITLE_IN_BORDER ? head : null })
 }
