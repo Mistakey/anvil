@@ -1,7 +1,7 @@
 import type { On, SessionUsage } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
-import { COLOR, GRID, levelColor, restWidth, spanWidth } from '../hooks/style'
+import { COLOR, GRID, levelColor, valueWidth } from '../hooks/style'
 import type { Segment } from '../hooks/style'
 import { cells } from '../hooks/text'
 import { EMPTY_USAGE, exhaustAt, formatTokens, formatUsd, formatWhen, usageRows } from '../hooks/usage'
@@ -27,7 +27,10 @@ const WORKING: Usage = {
 }
 
 const text = (segments: readonly Segment[]) => segments.map(segment => segment.text).join('')
-const restOf = (rows: GridRow[], key: string) => text(rows.find(row => row.key === key)?.rest ?? [])
+/** 一行的值，连同折下去的几行用 " / " 连起来 */
+const valueOf = (rows: GridRow[], key: string) => (rows.find(row => row.key === key)?.lines ?? []).map(text).join(' / ')
+/** 进度条：已用 filled 格，其余是底 */
+const barText = (filled: number) => `${'━'.repeat(filled)}${'─'.repeat(GRID.bar - filled)}`
 
 // ---------------------------------------------------------------- 纯逻辑
 
@@ -35,45 +38,65 @@ test('四行固定顺序：5h、7d、上下文、花费', () => {
   expect(usageRows(WORKING, NOW, 66).map(row => row.label)).toEqual(['5h', '7d', '上下文', '花费'])
 })
 
-test('5h：进度条、百分比、重置时刻；按当前速度会在重置前用尽时写预计用尽时刻', () => {
+test('5h：进度条、百分比 · 重置时刻；按当前速度会在重置前用尽时写预计用尽时刻', () => {
   const rows = usageRows(WORKING, NOW, 66)
   // 窗口 17:00 开始，3 小时用了 62%，剩下 38% 约 1h50m 用完
-  expect(restOf(rows, 'five_hour')).toBe(' 62% 22:00 重置 · 预计 21:50 用尽')
-  const projected = rows[0]?.rest.at(-1)
+  expect(valueOf(rows, 'five_hour')).toBe(`${barText(9)}  62% · 22:00 重置 · 预计 21:50 用尽`)
+  const projected = rows[0]?.lines[0]?.at(-1)
   expect(projected?.color).toBe(COLOR.high)
 })
 
 test('5h：照这个速度到重置也用不完时，不写预计用尽', () => {
   const slow: Usage = { ...WORKING, rateLimits: [{ kind: 'five_hour', percentUsed: 30, resetsAt: iso(at(13, 22)) }] }
-  expect(restOf(usageRows(slow, NOW, 66), 'five_hour')).toBe(' 30% 22:00 重置')
+  expect(valueOf(usageRows(slow, NOW, 66), 'five_hour')).toBe(`${barText(5)}  30% · 22:00 重置`)
   expect(exhaustAt(0, at(13, 22), 5 * 3_600_000, NOW)).toBe(null)
 })
 
 test('7d：重置时刻明天写"明天"，更远写星期；7d 不写预计用尽', () => {
-  expect(restOf(usageRows(WORKING, NOW, 66), 'seven_day')).toBe(' 18% 周四 09:00 重置')
+  expect(valueOf(usageRows(WORKING, NOW, 66), 'seven_day')).toBe(`${barText(3)}  18% · 周四 09:00 重置`)
   const tomorrow: Usage = { ...WORKING, rateLimits: [{ kind: 'seven_day', percentUsed: 95, resetsAt: iso(at(14, 9)) }] }
-  expect(restOf(usageRows(tomorrow, NOW, 66), 'seven_day')).toBe(' 95% 明天 09:00 重置')
+  expect(valueOf(usageRows(tomorrow, NOW, 66), 'seven_day')).toBe(`${barText(14)}  95% · 明天 09:00 重置`)
 })
 
 test('窗口还没开始（没有读数，或已过重置时刻）：0% 加"发送消息后开始计时"', () => {
   const cold: Usage = { ...WORKING, rateLimits: [{ kind: 'seven_day', percentUsed: 24, resetsAt: iso(at(13, 19)) }] }
   const rows = usageRows(cold, NOW, 66)
-  expect(restOf(rows, 'five_hour')).toBe('  0% 发送消息后开始计时')
-  expect(restOf(rows, 'seven_day')).toBe('  0% 发送消息后开始计时')
-  expect(text(rows[0]?.middle ?? [])).toBe('─'.repeat(GRID.middle))
+  expect(valueOf(rows, 'five_hour')).toBe(`${barText(0)}   0% · 发送消息后开始计时`)
+  expect(valueOf(rows, 'seven_day')).toBe(`${barText(0)}   0% · 发送消息后开始计时`)
 })
 
-test('上下文：百分比、已用 / 上限、已压缩次数；还没有读数时写 —', () => {
-  expect(restOf(usageRows(WORKING, NOW, 66), 'context')).toBe(' 76% 152k / 200k · 已压缩 1 次')
-  expect(restOf(usageRows(EMPTY_USAGE, NOW, 66), 'context')).toBe('   — — · 已压缩 0 次')
+test('上下文：已用 / 上限 (百分比) · 已压缩次数；还没有读数时写 —', () => {
+  expect(valueOf(usageRows(WORKING, NOW, 66), 'context')).toBe('152k / 200k  (76%) · 已压缩 1 次')
+  const small: Usage = { ...WORKING, context: { tokens: 49_000, window: 1_000_000, percent: 5 }, compactions: 0 }
+  expect(valueOf(usageRows(small, NOW, 66), 'context')).toBe(' 49k / 1M   (5%) · 已压缩 0 次')
+  expect(valueOf(usageRows(EMPTY_USAGE, NOW, 66), 'context')).toBe('   — · 已压缩 0 次')
+  const windowOnly: Usage = { ...EMPTY_USAGE, context: { window: 1_000_000 } }
+  expect(valueOf(usageRows(windowOnly, NOW, 66), 'context')).toBe('   — / 1M · 已压缩 0 次')
 })
 
-test('花费：上一条消息 · 本会话', () => {
-  const row = usageRows(WORKING, NOW, 66).find(one => one.key === 'cost')
-  expect(text(row?.middle ?? [])).toBe('上一条消息 $0.31')
-  expect(text(row?.rest ?? [])).toBe('本会话 $4.21')
-  const fresh = usageRows(EMPTY_USAGE, NOW, 66).find(one => one.key === 'cost')
-  expect(text(fresh?.middle ?? [])).toBe('上一条消息 —')
+test('花费：本会话在前、上一条在后', () => {
+  expect(valueOf(usageRows(WORKING, NOW, 66), 'cost')).toBe('本会话  $4.21 · 上一条 $0.31')
+  expect(valueOf(usageRows(EMPTY_USAGE, NOW, 66), 'cost')).toBe('本会话      — · 上一条 —')
+})
+
+test('数值定宽：百分比 9% 到 100%、金额 $0.02 到 $12.34、tokens 9k 到 152k，同一行后面的字不挪位置', () => {
+  const after = (usage: Usage, key: string, marker: string) => valueOf(usageRows(usage, NOW, 66), key).indexOf(marker)
+  const limits = (percent: number): Usage => ({
+    ...WORKING,
+    rateLimits: [
+      { kind: 'five_hour', percentUsed: percent, resetsAt: iso(at(13, 22)) },
+      { kind: 'seven_day', percentUsed: percent, resetsAt: iso(at(15, 9)) },
+    ],
+  })
+  expect(after(limits(9), 'five_hour', '重置')).toBe(after(limits(100), 'five_hour', '重置'))
+  expect(after(limits(9), 'seven_day', '重置')).toBe(after(limits(100), 'seven_day', '重置'))
+  const context = (tokens: number, percent: number): Usage => ({ ...WORKING, context: { tokens, window: 1_000_000, percent } })
+  expect(after(context(9_000, 9), 'context', '已压缩')).toBe(after(context(152_000, 100), 'context', '已压缩'))
+  expect(after(context(9_000, 1), 'context', '已压缩')).toBe(after(context(1_000_000, 100), 'context', '已压缩'))
+  const cost = (usd: number): Usage => ({ ...WORKING, costUsd: usd, lastMessageCostUsd: 0.02 })
+  expect(after(cost(0.02), 'cost', '上一条')).toBe(after(cost(12.34), 'cost', '上一条'))
+  expect(after(cost(0.02), 'cost', '上一条')).toBe(after(cost(1234.5), 'cost', '上一条'))
+  expect(after({ ...WORKING, costUsd: null }, 'cost', '上一条')).toBe(after(cost(0.02), 'cost', '上一条'))
 })
 
 test('进度条四档颜色：低于 60% 绿，60–80% 黄，80–90% 橙，90% 以上红', () => {
@@ -88,38 +111,40 @@ test('进度条四档颜色：低于 60% 绿，60–80% 黄，80–90% 橙，90%
     COLOR.danger,
   ])
   const rows = usageRows(WORKING, NOW, 66)
-  // 5h 62% 黄，7d 18% 绿，上下文 76% 黄；进度条和百分比同色
-  expect(rows.map(row => row.middle[0]?.color).slice(0, 3)).toEqual([COLOR.warn, COLOR.ok, COLOR.warn])
-  expect(rows.map(row => row.rest[0]?.color).slice(0, 3)).toEqual([COLOR.warn, COLOR.ok, COLOR.warn])
+  // 5h 62% 黄，7d 18% 绿：进度条和百分比同色；上下文 76% 的百分比黄
+  const colorOf = (key: string, part: string) => rows.find(row => row.key === key)?.lines[0]?.find(one => one.text.includes(part))?.color
+  expect([colorOf('five_hour', '━'), colorOf('five_hour', '%'), colorOf('seven_day', '━'), colorOf('seven_day', '%')]).toEqual([
+    COLOR.warn,
+    COLOR.warn,
+    COLOR.ok,
+    COLOR.ok,
+  ])
+  expect(colorOf('context', '%')).toBe(COLOR.warn)
 })
 
-test('进度条占满中间 18 格，已用部分按比例', () => {
+test('进度条定宽 15 格，已用部分按比例', () => {
   const [five] = usageRows(WORKING, NOW, 66)
-  expect(cells(text(five?.middle ?? []))).toBe(18)
-  expect(five?.middle[0]?.text).toBe('━'.repeat(11))
+  const bar = (five?.lines[0] ?? []).filter(one => /^[━─]+$/.test(one.text))
+  expect(cells(text(bar))).toBe(GRID.bar)
+  expect(bar[0]?.text).toBe('━'.repeat(9))
 })
-
-/** 一行连同折下去的几行，每行的字 */
-const linesOf = (row: GridRow | undefined) => (row ? [text(row.rest), ...row.more.map(text)] : [])
 
 // 面板可能停靠的宽度：请求的 70 列，开着别的面板（带页签）时更窄，拖宽后更宽
-const WIDTHS = [40, 44, 48, 52, 56, 60, 66, 70, 90, 120]
+const WIDTHS = [40, 44, 48, 50, 52, 56, 60, 66, 70, 90, 120]
 
-test('各种宽度下每列都不超出自己的格数，放不下的整块折到下一行，不出现 …', () => {
+test('各种宽度下每行都不超出值那一列，放不下的整块折到下一行，不出现 …', () => {
   const busy: Usage = { ...WORKING, costUsd: 1234.5, lastMessageCostUsd: 123.4, compactions: 12 }
   for (const columns of [30, ...WIDTHS]) {
     const inner = columns - 4
     for (const row of usageRows(busy, NOW, inner)) {
-      expect(cells(row.label) <= GRID.label, `${columns} 列 ${row.key} 标签`).toBe(true)
-      expect(cells(text(row.middle)) <= GRID.middle, `${columns} 列 ${row.key} 中间`).toBe(true)
-      expect(cells(text(row.rest)) <= restWidth(inner), `${columns} 列 ${row.key} 其余`).toBe(true)
-      for (const line of row.more) expect(cells(text(line)) <= spanWidth(inner), `${columns} 列 ${row.key} 折行`).toBe(true)
-      if (columns >= 40) expect(linesOf(row).join(' / '), `${columns} 列 ${row.key}`).not.toContain('…')
+      expect(cells(row.label) <= GRID.label, `${columns} 列 ${row.key} 名称`).toBe(true)
+      for (const line of row.lines) expect(cells(text(line)) <= valueWidth(inner), `${columns} 列 ${row.key}`).toBe(true)
+      if (columns >= 40) expect(valueOf([row], row.key), `${columns} 列 ${row.key}`).not.toContain('…')
     }
   }
 })
 
-test('窄到放不下时 7d 带星期的重置时刻、已压缩次数、预计用尽、本会话花费都完整折到下一行', () => {
+test('窄到放不下时 7d 带星期的重置时刻、已压缩次数、预计用尽、上一条花费都完整折到下一行', () => {
   // 用户实测（.22）：7d 写成"周一 17:00 重…"，上下文写成"5% 48k / 1M · 已…"
   const narrow: Usage = {
     ...WORKING,
@@ -128,22 +153,29 @@ test('窄到放不下时 7d 带星期的重置时刻、已压缩次数、预计�
   }
   for (const columns of WIDTHS) {
     const rows = usageRows(narrow, NOW, columns - 4)
-    const joined = (key: string) => linesOf(rows.find(row => row.key === key)).join(' ')
+    const joined = (key: string) => valueOf(rows, key)
     expect(joined('seven_day'), `${columns} 列`).toContain('周一 17:00 重置')
     expect(joined('five_hour'), `${columns} 列`).toContain('预计 21:50 用尽')
-    expect(joined('context'), `${columns} 列`).toContain('48k / 1M')
+    expect(joined('context'), `${columns} 列`).toContain(' 48k / 1M   (5%)')
     expect(joined('context'), `${columns} 列`).toContain('已压缩 1 次')
-    expect(joined('cost'), `${columns} 列`).toContain('本会话 $4.21')
+    expect(joined('cost'), `${columns} 列`).toContain('上一条 $0.31')
   }
-  // 放得下时一行排完，不折
-  expect(usageRows(narrow, NOW, 66).every(row => row.more.length === 0)).toBe(true)
-  // 52 列（框内 48 格，第三列 20 格）：上下文折一次，折下去的那行不带行首的 " · "
-  const context = usageRows(narrow, NOW, 48).find(row => row.key === 'context')
-  expect(linesOf(context)).toEqual(['  5% 48k / 1M', '已压缩 1 次'])
+  // 约 51 列停靠（框内 47 格，值那一列 38 格）：带星期的重置时刻也排在同一行，只有预计用尽折下去
+  const docked = usageRows(narrow, NOW, 47)
+  expect(docked.find(row => row.key === 'seven_day')?.lines).toHaveLength(1)
+  expect(valueOf(docked, 'five_hour')).toBe(`${barText(9)}  62% · 22:00 重置 / 预计 21:50 用尽`)
+  // 70 列：一行排完，不折
+  expect(usageRows(narrow, NOW, 66).every(row => row.lines.length === 1)).toBe(true)
 })
 
 test('格式：token、金额、时刻', () => {
-  expect([formatTokens(999), formatTokens(152_000), formatTokens(1_000_000), formatTokens(1_250_000)]).toEqual(['999', '152k', '1M', '1.3M'])
+  expect([formatTokens(999), formatTokens(152_000), formatTokens(999_600), formatTokens(1_000_000), formatTokens(1_250_000)]).toEqual([
+    '999',
+    '152k',
+    '1M',
+    '1M',
+    '1.3M',
+  ])
   expect([formatUsd(0.314), formatUsd(4.2), formatUsd(123.4)]).toEqual(['$0.31', '$4.20', '$123'])
   expect(formatWhen(at(13, 21, 5), NOW)).toBe('21:05')
 })
@@ -211,7 +243,7 @@ test('一轮的花费是开始和结束两次读数之差；压缩次数只数�
   await $.session.compact({ trigger: 'auto', agentId: 'a1', messages: SUMMARY })
 
   const ui = await $.ui.mount(pane(70))
-  expect(flat(await ui.find({ key: 'row:cost' }))).toBe('花费上一条消息 $0.31本会话 $4.21')
+  expect(flat(await ui.find({ key: 'row:cost' }))).toBe('花费本会话  $4.21 · 上一条 $0.31')
   expect(flat(await ui.find({ key: 'row:context' }))).toContain('已压缩 1 次')
   await ui.unmount()
 })
@@ -227,26 +259,23 @@ test('session.measure 的新读数进用量框', async ($, on) => {
   })
 
   const ui = await $.ui.mount(pane(70))
-  expect(flat(await ui.find({ key: 'row:context' }))).toContain('92% 184k / 200k')
-  expect(flat(await ui.find({ key: 'row:cost' }))).toContain('本会话 $5.00')
+  expect(flat(await ui.find({ key: 'row:context' }))).toContain('184k / 200k  (92%)')
+  expect(flat(await ui.find({ key: 'row:cost' }))).toContain('本会话  $5.00')
   await ui.unmount()
 })
 
-test('终端上，约 70 列和拖宽、拖窄后：六个区块按顺序、用量框四行齐全且不超宽', async ($, on) => {
+test('终端上，约 70 列和拖宽、拖窄后：用量框四行齐全、名称一列定宽、不超宽', async ($, on) => {
   engine(on)
   await $.session.start(SESSION)
   for (const columns of [70, 110, 90, 52, 40]) {
     const ui = await $.ui.mount(pane(columns))
-    const titles = (await ui.findAll({ key: undefined, type: 'Text' }))
-      .map(one => one.text.trim())
-      .filter(one => /^\S+ (我的消息|自动模式拒绝|子 agent|用量|缓存)$/.test(one))
-    expect(titles.map(one => one.replace(/^\S+ /, ''))).toEqual(['我的消息', '自动模式拒绝', '子 agent', '用量', '缓存'])
-
     const inner = columns - 4
     for (const key of ['five_hour', 'seven_day', 'context', 'cost']) {
       const row = await ui.find({ key: `row:${key}` })
       expect(row, `${columns} 列 ${key}`).toBeDefined()
       expect(row?.props.width).toBe(inner)
+      // 名称一列定宽，值从同一列起
+      expect((row?.children[0] as { props?: { width?: number } } | undefined)?.props?.width, `${columns} 列 ${key}`).toBe(GRID.label)
     }
     const five = flat(await ui.find({ key: 'row:five_hour' }))
     if (columns >= 70) expect(five).toContain('预计 21:50 用尽')
@@ -263,7 +292,7 @@ test('终端上，比请求的 70 列窄时：用量框、缓存框不截断，�
   }
   await $.session.start(SESSION)
   await $.session.compact({ trigger: 'manual', messages: SUMMARY })
-  for (const columns of [40, 46, 52, 60, 70, 90]) {
+  for (const columns of [40, 46, 50, 52, 60, 70, 90]) {
     const ui = await $.ui.mount(pane(columns))
     for (const id of ['usage', 'cache']) {
       const section = flat(await ui.find({ key: `section:${id}` }))
@@ -298,6 +327,6 @@ test('窗口还没开始时用量框写"发送消息后开始计时"', async ($,
   await $.session.start(SESSION)
 
   const ui = await $.ui.mount(pane(70))
-  expect(flat(await ui.find({ key: 'row:five_hour' }))).toContain('0% 发送消息后开始计时')
+  expect(flat(await ui.find({ key: 'row:five_hour' }))).toContain('0% · 发送消息后开始计时')
   await ui.unmount()
 })

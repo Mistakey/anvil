@@ -3,10 +3,10 @@
 
 import type { CacheView } from '../types'
 import { formatDuration } from './cache'
-import { COLOR, SEPARATOR, piece, spanWidth } from './style'
+import { COLOR, FIELD, SEPARATOR, piece, valueWidth } from './style'
 import type { Segment } from './style'
 import { wrap } from './text'
-import { formatTokens, formatUsd, formatWhen, layoutRow } from './usage'
+import { field, formatTokens, formatUsd, formatWhen, layoutRow } from './usage'
 import type { GridRow, GridSpec } from './usage'
 
 const muted = (text: string): Segment => ({ text, color: COLOR.muted })
@@ -27,9 +27,10 @@ export function hitColor(rate: number): string | undefined {
   return undefined
 }
 
-function rate(label: string, value: number | null): Segment[] {
-  if (value === null) return [muted(label), { text: ' —' }]
-  return [muted(label), { text: ` ${Math.round(value * 100)}%`, color: hitColor(value) }]
+/** 命中率：定宽的百分比，没有读数写 — */
+function rate(value: number | null, width: number): Segment {
+  if (value === null) return { text: ` ${field('—', width)}` }
+  return { text: ` ${field(`${Math.round(value * 100)}%`, width)}`, color: hitColor(value) }
 }
 
 /** 缓存框的四行：命中率、过期代价、已重建、保活；按框内宽度 inner 排好（layoutRow） */
@@ -37,30 +38,35 @@ export function cacheRows(view: CacheView, keepalive: Segment, now: number, inne
   const { rebuild, coldWrites } = view
   // 还没有任何主会话请求：没有可算的，和命中率一样写 —，不写像算出来的 0
   const unseen = view.expiresAt === null
+  const tokens = unseen ? '—' : formatTokens(rebuild.tokens)
   const rows: GridSpec[] = [
-    { key: 'cache-hit', label: '命中率', middle: rate('上一条消息', view.hitRate.last), rest: [piece(rate('本会话', view.hitRate.session))] },
+    // 成对的值本会话在前、上一条在后；后面还有字的数值定宽，数字变长变短时不挪位置
+    {
+      key: 'cache-hit',
+      label: '命中率',
+      value: [piece([muted('本会话'), rate(view.hitRate.session, FIELD.percent)]), piece([muted('上一条'), rate(view.hitRate.last, 0)], SEPARATOR)],
+    },
     {
       key: 'cache-cost',
       label: '过期代价',
-      middle: [
-        muted('重建'),
-        { text: unseen ? ' —' : ` ${formatTokens(rebuild.tokens)} tokens`, color: isExpired(view, now) ? COLOR.danger : undefined },
+      value: [
+        piece([muted('重建 '), { text: `${field(tokens, FIELD.tokens)} tokens`, color: isExpired(view, now) ? COLOR.danger : undefined }]),
+        piece([muted('≈'), { text: ` ${unseen || rebuild.usd === null ? '—' : formatUsd(rebuild.usd)}` }], { text: ' ' }),
       ],
-      rest: [piece([muted('约'), { text: ` ${unseen || rebuild.usd === null ? '—' : formatUsd(rebuild.usd)}` }])],
     },
     {
       key: 'cache-rebuilt',
       label: '已重建',
-      middle: [muted('本会话'), { text: unseen ? ' —' : ` ${coldWrites.count} 次` }],
-      rest: coldWrites.count > 0 ? [piece([muted('共'), { text: ` ${formatUsd(coldWrites.usd)}` }])] : [],
+      value: [
+        piece([muted('本会话'), { text: unseen ? ' —' : ` ${coldWrites.count} 次` }]),
+        ...(coldWrites.count > 0 ? [piece([muted('共'), { text: ` ${formatUsd(coldWrites.usd)}` }], SEPARATOR)] : []),
+      ],
     },
-    // 状态字长，占满后两列（设计稿 grid-column: 2 / -1）；还放不下（如出错原因）就逐行折下去
+    // 状态字长（如出错原因）时逐行折下去，同一个颜色
     {
       key: 'keepalive',
       label: '保活',
-      middle: [],
-      rest: wrap(keepalive.text, spanWidth(inner), Number.MAX_SAFE_INTEGER).map(line => piece([{ ...keepalive, text: line }])),
-      span: true,
+      value: wrap(keepalive.text, valueWidth(inner), Number.MAX_SAFE_INTEGER).map(line => piece([{ ...keepalive, text: line }], { text: ' ' })),
     },
   ]
   return rows.map(row => layoutRow(row, inner))

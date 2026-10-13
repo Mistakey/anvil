@@ -151,7 +151,7 @@ test('子 agent 列表：四种状态各自的符号和文字，右上角计数�
   await ui.unmount()
 })
 
-test('按 a 展开子 agent 列表：全部显示，其余两个列表收成一行；再按 a 收起', async ($, on) => {
+test('按 a 展开子 agent 列表：全部显示，我的消息收成一行，没有内容的自动模式拒绝不画；再按 a 收起', async ($, on) => {
   const { clock, stop } = engine(on)
   await fiveAgents($, clock, stop)
 
@@ -162,12 +162,12 @@ test('按 a 展开子 agent 列表：全部显示，其余两个列表收成一�
   expect(flat(await ui.find({ key: 'agent:1' }))).toMatch(/核对面板拖动宽度 +Haiku +47s$/)
   expect(await ui.find({ key: 'row:earlier:agents' })).toBeUndefined()
   expect(flat(await ui.find({ key: 'section:agents' }))).toContain('按 a 收起')
-  // 我的消息、自动模式拒绝各收成一行（不再是框），用量、缓存不变
+  // 我的消息收成一行（不再是框），没有内容的自动模式拒绝照样不画，用量、缓存不变
   const messages = await ui.find({ key: 'section:messages' })
   expect(messages?.props.borderStyle).toBeUndefined()
   expect(await ui.find({ key: 'box:messages' })).toBeUndefined()
   expect(flat(messages)).toMatch(/^▸ \S+ 我的消息 ─+ 0 条$/)
-  expect(flat(await ui.find({ key: 'section:denials' }))).toMatch(/^▸ \S+ 自动模式拒绝 ─+ 0 条$/)
+  expect(await ui.find({ key: 'section:denials' })).toBeUndefined()
   expect((await ui.find({ key: 'box:usage' }))?.props.borderStyle).toBe('round')
 
   await ui.press({ key: 'list:agents' })
@@ -176,15 +176,14 @@ test('按 a 展开子 agent 列表：全部显示，其余两个列表收成一�
   await ui.unmount()
 })
 
-test('按 d / m 展开另外两个列表时，子 agent 列表收成一行，计数还在', async ($, on) => {
+test('按 m 展开我的消息时，子 agent 列表收成一行，计数还在', async ($, on) => {
   const { clock, stop } = engine(on)
   await fiveAgents($, clock, stop)
 
   const ui = await $.ui.mount(pane(true))
-  await ui.press({ key: 'list:denials' })
-  expect(flat(await ui.find({ key: 'section:agents' }))).toMatch(/^▸ \S+ 子 agent ─+ 1 运行中 · 3 已完成 · 1 出错$/)
   await ui.press({ key: 'list:messages' })
-  expect(flat(await ui.find({ key: 'section:denials' }))).toMatch(/^▸ \S+ 自动模式拒绝 ─+ 0 条$/)
+  expect(flat(await ui.find({ key: 'section:agents' }))).toMatch(/^▸ \S+ 子 agent ─+ 1 运行中 · 3 已完成 · 1 出错$/)
+  expect(await ui.find({ key: 'section:denials' })).toBeUndefined()
   expect(await ui.find({ key: 'agent:5' })).toBeUndefined()
   await ui.unmount()
 })
@@ -240,7 +239,7 @@ test('展开的列表放不下时顶部写更早的个数和"向上滚动查看"
   await fiveAgents($, clock, stop)
   for (let n = 0; n < 20; n += 1) await $.agent.spawn(spawnInput(`第 ${n + 6} 个`))
 
-  // 面板只有 20 行：两个收成一行的列表、用量 6 行、缓存 2 行，剩下的放不下 25 个
+  // 面板只有 20 行：缓存、用量两个框，收成一行的我的消息，身份栏两行，剩下的放不下 25 个
   const ui = await $.ui.mount(pane(true, 20))
   await ui.press({ key: 'list:agents' })
   const earlier = flat(await ui.find({ key: 'row:earlier:agents' }))
@@ -258,8 +257,8 @@ test('不在列表里的 agentId（引擎自己的 fork 等）的请求、调用
   await $.tool.call(call('fork-1', 'ls'))
   await $.turn.complete(turnInput({ agentId: 'fork-1' }))
 
+  // 列表还是空的：子 agent 框不画
   const ui = await $.ui.mount(pane(false))
-  expect(flat(await ui.find({ key: 'section:agents' }))).toContain('本会话还没有子 agent')
-  expect(flat(await ui.find({ key: 'section:agents' }))).toContain('0 个')
+  expect(await ui.find({ key: 'section:agents' })).toBeUndefined()
   await ui.unmount()
 })
