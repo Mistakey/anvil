@@ -3,6 +3,8 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { NO_MESSAGES, addMessage, reconcile, settleMessages } from '../hooks/messages'
+import { COLOR } from '../hooks/style'
+import { cells } from '../hooks/text'
 import { SESSION, flat, pane, turnInput, world } from './world'
 
 const NOW = 10 * 3_600_000
@@ -72,6 +74,39 @@ test('用户提交的消息按顺序进入我的消息：序号 + 内容；斜�
   expect(box).toContain('3 条')
   const shown = (await ui.findAll({})).filter(found => String(found.key ?? '').startsWith('message:')).map(found => flat(found))
   expect(shown).toEqual(['  1 候选功能有问题，有很多应该常驻的吧？', '  2 继续', '  3 不对，你没理解'])
+  await ui.unmount()
+})
+
+test('序号暗色、右对齐成一列；长消息最多两行，第二行和正文对齐，超出截断；条与条之间不空行', async ($, on) => {
+  const { transcript } = engine(on)
+  await $.session.start(SESSION)
+  const long = '把缓存框和用量框的排版改一下，'.repeat(10)
+  const ids = [await send($, transcript, '继续'), await send($, transcript, long)]
+  for (let n = 3; n <= 10; n += 1) ids.push(await send($, transcript, `第 ${n} 条`))
+
+  // 面板 70 列：框内 66 格，序号 3 格加 1 格空，正文 62 格
+  const ui = await $.ui.mount(pane(false))
+  const seqs = (await ui.findAll({ type: 'Text' })).filter(one => /^ *\d+ $/.test(one.text))
+  expect(seqs.map(one => one.text)).toEqual(['  1 ', '  2 ', '  3 ', '  4 ', '  5 ', '  6 ', '  7 ', '  8 ', '  9 ', ' 10 '])
+  expect(seqs.every(one => one.props.color === COLOR.label)).toBe(true)
+
+  expect(flat(await ui.find({ key: `message:${ids[0]}` }))).toBe('  1 继续')
+  expect((await ui.find({ key: `row:message:${ids[0]}` }))?.props.height).toBe(1)
+  const [first = '', second = '', ...more] = flat(await ui.find({ key: `message:${ids[1]}` })).split('\n')
+  expect(more).toEqual([])
+  expect(first).toBe(`  2 ${'把缓存框和用量框的排版改一下，'.repeat(3).slice(0, 31)}`)
+  expect(cells(first)).toBe(66)
+  // 第二行和正文对齐（悬挂缩进），放不下的截断
+  expect(second.startsWith('    ')).toBe(true)
+  expect(second.slice(4, 5)).not.toBe(' ')
+  expect(second.endsWith('…')).toBe(true)
+  expect(cells(second) <= 66).toBe(true)
+  expect((await ui.find({ key: `row:message:${ids[1]}` }))?.props.height).toBe(2)
+
+  // 条与条之间不空行：消息一条接一条，空行只在最后
+  const rows = ((await ui.find({ key: 'box:messages' }))?.children ?? []).map(one => String((one as { props?: { key?: string } }).props?.key ?? ''))
+  expect(rows.slice(0, 10)).toEqual(ids.map(id => `row:message:${id}`))
+  expect(rows.slice(10).every(key => key.startsWith('pad:'))).toBe(true)
   await ui.unmount()
 })
 

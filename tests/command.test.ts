@@ -23,7 +23,7 @@ test('/anvil 不带参数时列出三个子命令和本会话的当前状态', a
       '用法：/anvil <子命令>，敲一次切换一次，只作用于当前会话',
       '  /anvil panel      显示或隐藏 anvil 面板（现在：显示）',
       '  /anvil translate  显示或隐藏翻译框（现在：显示）',
-      '  /anvil keepalive  开启或关闭缓存保活（现在：未启用（上下文低于 50k））',
+      '  /anvil keepalive  开启或关闭缓存保活（现在：未启用（低于 50k））',
     ].join('\n'),
   )
 

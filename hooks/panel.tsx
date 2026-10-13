@@ -80,8 +80,13 @@ export const innerWidth = (columns: number) => Math.max(0, columns - 4)
 /** 一个区块交给框的内容：右上角的计数或状态，和框里的行 */
 export type SectionBody = { status?: Segment[]; rows: RenderElement[] }
 
-/** 列表的一项：第一行是它自己，展开详情时后面跟着详情的几行 */
-export type ListItem = { key: string; rows: RenderElement[] }
+/**
+ * 列表的一项：第一行是它自己，展开详情时后面跟着详情的几行。
+ * height：这一项占的行数，不给时是 rows 的个数（一个元素画成两行的消息给 2）。
+ */
+export type ListItem = { key: string; rows: RenderElement[]; height?: number }
+
+const heightOf = (item: ListItem) => Math.max(1, item.height ?? item.rows.length)
 
 /** 一个列表交给面板的内容；按上限截、展开、收成一行由面板按共同规则做（list.ts） */
 export type ListBody = {
@@ -253,9 +258,11 @@ function listRows(els: Els, section: Section, body: ListBody, fitted: Fit, inner
       </Text>,
     ]
   }
-  const shown = body.items.slice(fitted.start, fitted.end).flatMap(item => item.rows)
+  const items = body.items.slice(fitted.start, fitted.end)
+  const shown = items.flatMap(item => item.rows)
   const rows = fitted.start > 0 ? [earlierRow(els, section, body, fitted.start, inner, isExpanded, onPress), ...shown] : shown
-  const blank = Math.max(0, listHeight(body, fitted, isExpanded) - rows.length)
+  const drawn = items.reduce((sum, item) => sum + heightOf(item), 0) + (fitted.start > 0 ? 1 : 0)
+  const blank = Math.max(0, listHeight(body, fitted, isExpanded) - drawn)
   const pads = Array.from({ length: blank }, (_, index) => <Box key={`pad:${section.id}:${index}`} width={inner} height={1} flexShrink={0} />)
   return [...rows, ...pads]
 }
@@ -263,11 +270,11 @@ function listRows(els: Els, section: Section, body: ListBody, fitted: Fit, inner
 /** 列表框里的行数（不含边框）；固定高度的列表收起时至少是固定的行数 */
 function listHeight(body: ListBody, fitted: Fit, isExpanded: boolean): number {
   if (body.items.length === 0) return 1
-  const rows = body.items.slice(fitted.start, fitted.end).reduce((sum, item) => sum + item.rows.length, 0) + (fitted.start > 0 ? 1 : 0)
+  const rows = body.items.slice(fitted.start, fitted.end).reduce((sum, item) => sum + heightOf(item), 0) + (fitted.start > 0 ? 1 : 0)
   return typeof body.limit === 'number' && !isExpanded ? Math.max(rows, fixedRows(body.limit)) : rows
 }
 
-const itemHeights = (body: ListBody) => body.items.map(item => Math.max(1, item.rows.length))
+const itemHeights = (body: ListBody) => body.items.map(heightOf)
 
 /**
  * 固定高度的列表收起时画哪几项：最近 limit 条，更早的收进顶部一行。
@@ -285,7 +292,7 @@ export function gridRow(els: Els, row: GridRow, inner: number): RenderElement[] 
   return row.lines.map((line, index) => (
     <Box key={index === 0 ? `row:${row.key}` : `row:${row.key}:${index + 1}`} columnGap={GRID.gap} width={inner} flexShrink={0}>
       <Box width={GRID.label} flexShrink={0}>
-        {index === 0 ? <Text color={COLOR.muted}>{fit(row.label, GRID.label)}</Text> : null}
+        {index === 0 ? <Text color={COLOR.label}>{fit(row.label, GRID.label)}</Text> : null}
       </Box>
       <Box width={width} flexShrink={0}>
         <Text wrap="truncate">{segments(els, line)}</Text>
