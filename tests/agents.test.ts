@@ -6,7 +6,7 @@ import { agentCounts, completeAgent, modelName, spawnAgent, stepAgent } from '..
 import { describeInput, redact } from '../hooks/describe'
 import { CLOSED, earlierText, fitCount, fitRows, scrollList, toggleDetail, toggleList } from '../hooks/list'
 import { cells, wrap } from '../hooks/text'
-import { SESSION, drain, spawnInput, stepInput, turnInput, usage, world } from './world'
+import { SESSION, drain, flat, pane, spawnInput, stepInput, turnInput, usage, world } from './world'
 
 const NOW = 10 * 3_600_000
 
@@ -94,21 +94,6 @@ test('任务原文按格子折行，超出行数时末尾写省略号', () => {
 
 // ---------------------------------------------------------------- 事件接线与绘制
 
-const pane = (isFocused: boolean, bodyRows = 48) => ({
-  plugin: 'anvil',
-  surface: 'terminal' as const,
-  component: 'Pane' as const,
-  requestId: 'anvil',
-  props: {
-    title: 'anvil',
-    isFocused,
-    bodyColumns: 70,
-    placement: 'dock' as const,
-    scroll: { offset: 0, bodyRows },
-    view: {},
-  },
-})
-
 function engine(on: On) {
   const clock = mock.clock(on, { now: NOW })
   const stop = { reason: 'end_turn' }
@@ -116,17 +101,6 @@ function engine(on: On) {
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   return { clock, stop }
-}
-
-/** 画出来的一个元素里所有的字，按文档顺序 */
-function flat(node: unknown): string {
-  if (typeof node === 'string') return node
-  if (Array.isArray(node)) return node.map(flat).join('')
-  if (node !== null && typeof node === 'object') {
-    const { children, props } = node as { children?: unknown; props?: { children?: unknown } }
-    return flat(children ?? props?.children ?? [])
-  }
-  return ''
 }
 
 const call = (agentId: string, command: string): ToolCallInput => ({ tool: 'Bash', command, tool_use_id: `c-${command}`, agentId }) as ToolCallInput
@@ -191,8 +165,8 @@ test('按 a 展开子 agent 列表：全部显示，其余两个列表收成一�
   // 我的消息、自动模式拒绝各收成一行（不再是框），用量、缓存不变
   const messages = await ui.find({ key: 'section:messages' })
   expect(messages?.props.borderStyle).toBeUndefined()
-  expect(flat(messages)).toMatch(/^▸ \S+ 我的消息 ─+$/)
-  expect(flat(await ui.find({ key: 'section:denials' }))).toMatch(/^▸ \S+ 自动模式拒绝 ─+$/)
+  expect(flat(messages)).toMatch(/^▸ \S+ 我的消息 ─+ 0 条$/)
+  expect(flat(await ui.find({ key: 'section:denials' }))).toMatch(/^▸ \S+ 自动模式拒绝 ─+ 0 条$/)
   expect((await ui.find({ key: 'section:usage' }))?.props.borderStyle).toBe('round')
 
   await ui.press({ key: 'list:agents' })
@@ -209,7 +183,7 @@ test('按 d / m 展开另外两个列表时，子 agent 列表收成一行，计
   await ui.press({ key: 'list:denials' })
   expect(flat(await ui.find({ key: 'section:agents' }))).toMatch(/^▸ \S+ 子 agent ─+ 1 运行中 · 3 已完成 · 1 出错$/)
   await ui.press({ key: 'list:messages' })
-  expect(flat(await ui.find({ key: 'section:denials' }))).toMatch(/^▸ \S+ 自动模式拒绝 ─+$/)
+  expect(flat(await ui.find({ key: 'section:denials' }))).toMatch(/^▸ \S+ 自动模式拒绝 ─+ 0 条$/)
   expect(await ui.find({ key: 'agent:5' })).toBeUndefined()
   await ui.unmount()
 })

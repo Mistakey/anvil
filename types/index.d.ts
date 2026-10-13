@@ -100,6 +100,62 @@ export type SubAgent = {
   answer: string
 }
 
+/** 自动模式拒绝的来源：主会话，或子 agent 及它的第几步 */
+export type DenialSource =
+  | { kind: 'main' }
+  | {
+      kind: 'agent'
+      /** 子 agent 列表里的序号；不在列表里（引擎自己的 fork 等）时为 null */
+      seq: number | null
+      /** Agent 工具的 description；不在列表里时是引擎给的 agent_type，没有就是空 */
+      description: string
+      /** 拒绝发生在这个子 agent 的第几次请求；还没记到请求时为 null */
+      step: number | null
+    }
+
+/** 自动模式拒绝列表的一项（spec D8），取自 `classic.PermissionDenied` */
+export type Denial = {
+  /** tool_use_id */
+  id: string
+  /** `$.clock.now()` 的毫秒 */
+  at: number
+  tool: string
+  /** 完整内容是什么：命令、路径、网址，其余是工具参数 */
+  kind: 'command' | 'path' | 'url' | 'input'
+  /** 完整内容，密钥已遮掉 */
+  text: string
+  source: DenialSource
+}
+
+/** 我的消息的一项：主输入框发出、还在对话里的一条用户消息 */
+export type MyMessage = {
+  /** 对话里这条消息的 id（`session.append` 的 uuid），也是它那一行 UserMessage 的 requestId，滚动按它找 */
+  id: string
+  /** 消息的文字 */
+  text: string
+}
+
+/** 我的消息列表（spec D8） */
+export type MyMessages = {
+  /** 旧的在前 */
+  items: MyMessage[]
+  /** 存满后丢掉的条数：序号从 dropped + 1 起 */
+  dropped: number
+  /**
+   * 前几条在上一次压缩之前：压缩后对话里只剩摘要，读不到它们，不再拿对话核对，原样保留；
+   * 之后的每条都要还在对话里，撤回、回退掉的从列表去掉。
+   */
+  settled: number
+}
+
+/** 最近一次让对话滚到我的消息里某一条的请求 */
+export type Scrolled = {
+  /** 消息 id */
+  id: string
+  /** 引擎拒绝的原因；滚过去了为 null */
+  deny: string | null
+}
+
 /** 面板上的三个列表 */
 export type ListId = 'messages' | 'denials' | 'agents'
 
@@ -107,7 +163,7 @@ export type ListId = 'messages' | 'denials' | 'agents'
 export type PanelFold = {
   /** 展开的列表，其余收成一行；null 时都按上限显示 */
   expanded: ListId | null
-  /** 展开详情的子 agent id */
+  /** 展开详情的那一项：子 agent 的 id，或自动模式拒绝的 `denial:` 加 tool_use_id；同时只展开一项 */
   detail: string | null
   /** 展开的列表往上滚过的条数：0 时最新的一条在最下面 */
   scrolled: number
@@ -154,6 +210,15 @@ declare module 'claude-code' {
       cache: CacheView
       /** 子 agent 列表，按序号从旧到新 */
       agents: SubAgent[]
+      /** 自动模式拒绝列表，旧的在前 */
+      denials: Denial[]
+      /** 我的消息列表 */
+      messages: MyMessages
+      /**
+       * 最近一次在我的消息里按 Enter 的滚动请求和结果。功能本身不读它；
+       * 给测试核对（plugin test 里引擎没有 ui.scroll 的实现，测试的钩子接不到插件的这次调用）。
+       */
+      scrolled: Scrolled | null
       /** 面板的展开状态 */
       fold: PanelFold
       /** 翻译框在本会话被隐藏：`/anvil translate hide` 后为 true，`show` 改回 false */
