@@ -59,6 +59,60 @@ export type CacheView = {
   coldWrites: { count: number; usd: number }
 }
 
+/** 子 agent 的四种状态（spec D8）：运行中、已完成、出错、输出被截断 */
+export type AgentStatus = 'running' | 'done' | 'failed' | 'truncated'
+
+/** 子 agent 的一次工具调用，详情里的"最近调用" */
+export type AgentCall = {
+  tool: string
+  /** 命令、路径或模式的摘要，密钥已遮掉 */
+  text: string
+  isError: boolean
+}
+
+/** 子 agent 列表的一项，数据来源照 flightdeck：`agent.spawn` 和带 agentId 的 `turn.step`、`tool.call`、`turn.complete` */
+export type SubAgent = {
+  /** 引擎给的 agentId */
+  id: string
+  /** 序号：本会话第几个子 agent，从 1 起 */
+  seq: number
+  /** Agent 工具的 description，列表里的"任务" */
+  description: string
+  /** Agent 工具的 prompt，详情里的"任务" */
+  prompt: string
+  /** 模型 id */
+  model: string
+  status: AgentStatus
+  spawnedAt: number
+  /** 结束时刻；运行中为 null */
+  endedAt: number | null
+  /** 请求次数，详情里的"执行 N 步" */
+  steps: number
+  /** 最近一次请求的输入侧（含缓存读写），详情里的"上下文" */
+  context: number
+  /** 各次请求的输出之和 */
+  output: number
+  /** 最近一次请求的 stopReason；结束时是 max_tokens 就算输出被截断 */
+  lastStop: string | null
+  /** 最近三次工具调用，旧的在前 */
+  calls: AgentCall[]
+  /** `turn.complete` 的 answer */
+  answer: string
+}
+
+/** 面板上的三个列表 */
+export type ListId = 'messages' | 'denials' | 'agents'
+
+/** 面板的展开状态（spec D8、D9）；Esc 把焦点交回主输入框时回到全收起 */
+export type PanelFold = {
+  /** 展开的列表，其余收成一行；null 时都按上限显示 */
+  expanded: ListId | null
+  /** 展开详情的子 agent id */
+  detail: string | null
+  /** 展开的列表往上滚过的条数：0 时最新的一条在最下面 */
+  scrolled: number
+}
+
 declare module 'claude-code' {
   interface PluginState {
     anvil: {
@@ -77,6 +131,10 @@ declare module 'claude-code' {
       settings: Settings
       /** 缓存状态，每次变化时写入；`/clear` 后清零重写 */
       cache: CacheView
+      /** 子 agent 列表，按序号从旧到新 */
+      agents: SubAgent[]
+      /** 面板的展开状态 */
+      fold: PanelFold
     }
   }
 }

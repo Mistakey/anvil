@@ -1,4 +1,16 @@
-import type { CommandRunInput, HookStream, On, PaneOpenArgs, PromptSubmitInput, SessionStartInput, SessionUsage, TurnCompleteInput, TurnStepInput, TurnUsage } from 'claude-code'
+import type {
+  AgentSpawnInput,
+  CommandRunInput,
+  HookStream,
+  On,
+  PaneOpenArgs,
+  PromptSubmitInput,
+  SessionStartInput,
+  SessionUsage,
+  TurnCompleteInput,
+  TurnStepInput,
+  TurnUsage,
+} from 'claude-code'
 
 export const SESSION: SessionStartInput = { cwd: '/work', surface: null, isInteractive: true }
 
@@ -13,6 +25,8 @@ export type WorldOptions = {
   reply?: { usage: TurnUsage | null }
   /** `$.session.usage()` 的整份读数（用量框用），测试中途可改；给了它就不看 `live` */
   reading?: { current: SessionUsage }
+  /** 下一次请求停在哪（`turn.step` 结果的 stopReason），测试中途可改；默认 end_turn */
+  stop?: { reason: string }
 }
 
 // 插件之下的世界：替引擎回答插件用到的调用，并记下插件注册的命令、写进 `$.state` 的值、
@@ -39,7 +53,8 @@ export function world(on: On, options: WorldOptions = {}) {
   })
   on('classic.SessionStart', () => ({}))
   on('turn.step', async function* ($, e) {
-    return { turnId: e.turnId, index: e.index, answer: 'ok', toolUses: [], stopReason: 'end_turn' as const, usage: options.reply ? options.reply.usage : usage() }
+    const stopReason = (options.stop?.reason ?? 'end_turn') as 'end_turn'
+    return { turnId: e.turnId, index: e.index, answer: 'ok', toolUses: [], stopReason, usage: options.reply ? options.reply.usage : usage() }
   })
   on('turn.complete', ($, e) => ({ text: e.answer }))
   on('session.compact', ($, e) => ({ messages: e.messages }))
@@ -47,6 +62,10 @@ export function world(on: On, options: WorldOptions = {}) {
     entered.push(e.text)
     return { text: e.text }
   })
+  // 子 agent：按启动顺序给 ag1、ag2……，模型照 Agent 工具给的，没给就是 Sonnet
+  let agents = 0
+  on('agent.spawn', ($, e) => ({ model: e.model ?? 'claude-sonnet-5-5', agentId: `ag${++agents}` }))
+  on('tool.call', () => ({ result: 'ok' as never }))
   on('prompt.read', () => ({ value: { text: box.text, cursor: box.text.length } }))
   on('prompt.fill', ($, e) => {
     fills.push(e.text)
@@ -105,6 +124,20 @@ export const stepInput = (over: Partial<TurnStepInput> = {}): TurnStepInput => (
 type AnsweredTurn = Exclude<TurnCompleteInput, { reason: 'refusal' }>
 export const turnInput = (over: Partial<AnsweredTurn> = {}): TurnCompleteInput => ({
   answer: 'ok', durationMs: 1000, isAborted: false, turnId: `t${++steps}`, reason: 'answer', usage: usage(), ...over,
+})
+
+let spawns = 0
+/** Agent 工具启动一个子 agent */
+export const spawnInput = (description: string, over: Partial<AgentSpawnInput> = {}): AgentSpawnInput => ({
+  prompt: `${description}：详细说明`,
+  description,
+  subagentType: 'general-purpose',
+  tool_use_id: `tu${++spawns}`,
+  provider: { plugin: 'engine', tier: 'core' },
+  parentModel: 'claude-opus-5-5',
+  background: true,
+  fork: false,
+  ...over,
 })
 
 export const typed = (text: string): PromptSubmitInput => ({ text, wait: false, origin: { kind: 'composer' } })
