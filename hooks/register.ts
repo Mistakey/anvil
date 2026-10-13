@@ -5,7 +5,9 @@ import type {
   PaneCloseInput,
   PromptSubmitInput,
   Register,
+  ClassicEventOf,
   RenderInput,
+  SessionAppendMessage,
   ToolCallInput,
   ToolCallResult,
   TurnCompleteInput,
@@ -22,6 +24,7 @@ import type { Cache, ResumeFields, Submission } from './cache'
 import { cacheRows, cacheStatus } from './cachebox'
 
 import { COMMAND, answer } from './command'
+import { addDenial, denialContent, denialList, denialSource } from './denials'
 import { EMPTY_IDENTITY, GIT, NUMSTAT, REV_PARSE, STATUS, baseName, gitView, identityRows, operationOf, parseNumstat, parseRepo, parseStatus, tokensPerSecond } from './identity'
 import type { RebaseFiles } from './identity'
 import type { Subcommand } from './command'
@@ -44,6 +47,7 @@ import {
 } from './keepalive'
 import type { Loop } from './keepalive'
 import { CLOSED, isClosed, scrollList, toggleDetail, toggleList } from './list'
+import { NO_MESSAGES, addMessage, contentText, isMyMessage, messageList, reconcile, settleMessages, userTexts } from './messages'
 import { PANE, PANEL_SUBCOMMAND, drawPanel, gridRow, hidesPanel, innerWidth } from './panel'
 import { readSettings } from './settings'
 import {
@@ -66,7 +70,7 @@ import {
 import type { Translation } from './translate'
 import { EMPTY_USAGE, applyReading, compacted as addCompaction, completeTurn, startTurn, usageRows } from './usage'
 import type { GridRow, Reading } from './usage'
-import type { GitView, KeepaliveStop, ListId, Settings, SubAgent } from '../types'
+import type { Denial, GitView, KeepaliveStop, ListId, Scrolled, Settings, SubAgent } from '../types'
 
 // 模块结构（照 flightdeck 的 register.tsx / core.ts），引擎扫描源码的规则见 AGENTS.md Pitfalls「模块结构」：
 // - 所有 on(...) 都写在下面的 register 里；用到 `$` 的辅助函数写在本文件顶层（`$` 不能跨文件传）。
@@ -322,6 +326,61 @@ async function noteAgentEnd($: EngineInterface, e: TurnCompleteInput, agentId: s
   await update($, agents, list => completeAgent(list, agentId, { reason: e.reason, answer: e.answer, at }))
 }
 
+// ---------------------------------------------------------------- 自动模式拒绝（spec D8）
+
+const denials = atom({ plugin: 'anvil', key: 'denials' } as const, [] as Denial[])
+
+/** 自动模式的分类器拒绝了一次调用：记下时间、工具、完整内容（遮掉密钥）和来源 */
+async function noteDenial($: EngineInterface, e: ClassicEventOf['classic.PermissionDenied']) {
+  const at = await $.clock.now()
+  const source = denialSource(e.agent_id, e.agent_type, await read($, agents))
+  const denial: Denial = { id: e.tool_use_id, at, tool: e.tool_name, ...denialContent(e.tool_input), source }
+  await update($, denials, list => addDenial(list, denial))
+}
+
+// ---------------------------------------------------------------- 我的消息（spec D8）
+
+const messages = atom({ plugin: 'anvil', key: 'messages' } as const, NO_MESSAGES)
+const scrolled = atom({ plugin: 'anvil', key: 'scrolled' } as const, null as Scrolled | null)
+
+/** 对话里现存的用户消息；读不到（宿主不给）时为 null，这时不核对 */
+async function transcriptTexts($: EngineInterface): Promise<string[] | null> {
+  const transcript = await $.session.messages().catch(() => null)
+  return transcript ? userTexts(transcript) : null
+}
+
+/** 拿对话核对一遍，撤回、回退掉的去掉；没有变化时不写，免得面板白白重画 */
+async function syncMessages($: EngineInterface) {
+  const texts = await transcriptTexts($)
+  if (texts === null) return
+  const current = await read($, messages)
+  const next = reconcile(current, texts)
+  if (next !== current) await update($, messages, () => next)
+}
+
+/** 主输入框发出的消息进了主会话的对话：先核对此前的（回退后重发时旧的已不在），再记下这条 */
+async function noteMessage($: EngineInterface, uuid: string, content: SessionAppendMessage['content']) {
+  const text = contentText(content)
+  await syncMessages($)
+  await update($, messages, list => addMessage(list, { id: uuid, text }))
+}
+
+async function settleOnCompact($: EngineInterface) {
+  await update($, messages, list => settleMessages(list))
+}
+
+/**
+ * 我的消息里按 Enter：让对话滚到这条消息。滚动要在回应用户按键时调用才生效（引擎规定），所以先滚；
+ * 滚不过去（多半是消息已撤回）就核对一遍，把它从列表去掉。
+ */
+async function scrollToMessage($: EngineInterface, id: string) {
+  const moved = await $.ui.scroll({ to: { requestId: id }, block: 'start' }).catch((error: unknown) => ({
+    deny: error instanceof Error ? error.message : String(error),
+  }))
+  await update($, scrolled, () => ({ id, deny: moved.deny ?? null }))
+  if (moved.deny !== undefined) await syncMessages($)
+}
+
 // ---------------------------------------------------------------- 身份栏（D8）
 
 const identity = atom({ plugin: 'anvil', key: 'identity' } as const, EMPTY_IDENTITY)
@@ -416,17 +475,24 @@ async function pressList($: EngineInterface, id: ListId) {
   await update($, fold, current => toggleList(current, id))
 }
 
-async function pressAgent($: EngineInterface, agentId: string) {
-  await update($, fold, current => toggleDetail(current, agentId))
+/** 子 agent 的序号键、Enter，自动模式拒绝的 Enter：展开或收起这一项的详情 */
+async function pressDetail($: EngineInterface, detailId: string) {
+  await update($, fold, current => toggleDetail(current, detailId))
 }
 
 /** 展开的列表放不下时，滚轮滚的是列表自己（面板本身放得下，不需要引擎滚）；其余照引擎的 */
 async function scrollPanel($: EngineInterface, e: UiScrollInput): Promise<boolean> {
   const current = await read($, fold)
   if (current.expanded === null || e.contentRows > e.bodyRows) return false
-  const total = current.expanded === 'agents' ? (await read($, agents)).length : 0
+  const total = await listLength($, current.expanded)
   await update($, fold, () => scrollList(current, e.by, total))
   return true
+}
+
+async function listLength($: EngineInterface, id: ListId): Promise<number> {
+  if (id === 'agents') return (await read($, agents)).length
+  if (id === 'denials') return (await read($, denials)).length
+  return (await read($, messages)).items.length
 }
 
 /**
@@ -484,15 +550,19 @@ async function notePanelClosed($: EngineInterface, e: PaneCloseInput) {
 
 async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderInput<'Pane'>) {
   const els = $.ui.resolve(e)
-  const [current, list, folding, now, who] = await Promise.all([
+  const [current, list, denied, mine, folding, now, who] = await Promise.all([
     read($, usage),
     read($, agents),
+    read($, denials),
+    read($, messages),
     foldForDrawing($, e.props.isFocused),
     $.clock.now(),
     read($, identity),
   ])
   const [cached, off, loop] = await Promise.all([read($, cacheView), read($, keepaliveOff), read($, keepaliveLoop)])
   const keepalive = keepaliveStatus({ settings, off, context: cached.context, loop })
+  // 用户进了面板要按 Enter 时，列表里不该有已撤回的消息：画完核对一遍，有变化会再画
+  if (e.props.isFocused) $.clock.after(0, () => void syncMessages($).catch(() => undefined))
   const inner = innerWidth(e.props.bodyColumns)
   const grid = (rows: GridRow[]) => rows.map(row => gridRow(els, row, inner))
   return drawPanel(els, {
@@ -502,7 +572,11 @@ async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderI
       usage: { rows: grid(usageRows(current, now, inner)) },
       cache: { status: cacheStatus(cached, now), rows: grid(cacheRows(cached, keepalive, now, inner)) },
     },
-    lists: { agents: agentList(els, list, { detail: folding.detail, now, inner, onPress: id => void pressAgent($, id) }) },
+    lists: {
+      messages: messageList(els, mine, { inner, onPress: id => void scrollToMessage($, id) }),
+      denials: denialList(els, denied, { detail: folding.detail, inner, onPress: id => void pressDetail($, id) }),
+      agents: agentList(els, list, { detail: folding.detail, now, inner, onPress: id => void pressDetail($, id) }),
+    },
     fold: folding,
     identity: identityRows(els, who, e.props.bodyColumns),
     onToggle: id => void pressList($, id),
@@ -670,6 +744,8 @@ export const register: Register = (on, options) => {
       await cacheChanged($, cache, loop, redraw, settings)
       await completeUsageTurn($)
       await refreshGit($, gitRefresh).catch(() => undefined)
+      // 按 Esc 打断时引擎可能把刚发的消息撤回到主输入框
+      await syncMessages($).catch(() => undefined)
     } else {
       await noteAgentEnd($, e, e.agentId).catch(() => undefined)
     }
@@ -690,6 +766,19 @@ export const register: Register = (on, options) => {
     return ran
   })
 
+  on('classic.PermissionDenied', async ($, e, next) => {
+    const result = await next(e)
+    await noteDenial($, e).catch(() => undefined)
+    return result
+  })
+
+  // 我的消息：主输入框发出、进了主会话对话的消息
+  on('session.append', { door: 'prompt' }, async ($, e, next) => {
+    const stored = await next(e)
+    if (isMyMessage(e) && stored.uuid !== undefined) await noteMessage($, stored.uuid, stored.message.content).catch(() => undefined)
+    return stored
+  })
+
   on('session.measure', async ($, e, next) => {
     await noteReading($, e)
     return next(e)
@@ -702,6 +791,7 @@ export const register: Register = (on, options) => {
       await compacted($, cache)
       await cacheChanged($, cache, loop, redraw, settings)
       await noteCompaction($).catch(() => undefined)
+      await settleOnCompact($).catch(() => undefined)
     }
     return result
   })

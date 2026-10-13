@@ -6,6 +6,7 @@ import type {
   On,
   PaneOpenArgs,
   PromptSubmitInput,
+  SessionMessage,
   SessionStartInput,
   SessionUsage,
   TurnCompleteInput,
@@ -30,6 +31,8 @@ export type WorldOptions = {
   reading?: { current: SessionUsage }
   /** 下一次请求停在哪（`turn.step` 结果的 stopReason），测试中途可改；默认 end_turn */
   stop?: { reason: string }
+  /** `$.session.messages()` 读到的主会话对话，测试中途可改；不给时插件读不到对话 */
+  transcript?: { messages: SessionMessage[] }
   /**
    * `$.model.fork`（缓存保活）依次给出的回答，测试中途可往里加；用完后答 nothing-to-fork，
    * 保活随即停下，不碰保活的测试因此不受它影响。`throw` 表示这次调用直接抛错。
@@ -66,6 +69,11 @@ export function world(on: On, options: WorldOptions = {}) {
     return next(e)
   })
   on('classic.SessionStart', () => ({}))
+  on('classic.PermissionDenied', () => ({}))
+  if (options.transcript) {
+    const transcript = options.transcript
+    on('session.messages', () => ({ value: transcript.messages }))
+  }
   on('turn.step', async function* ($, e) {
     const stopReason = (options.stop?.reason ?? 'end_turn') as 'end_turn'
     return { turnId: e.turnId, index: e.index, answer: 'ok', toolUses: [], stopReason, usage: options.reply ? options.reply.usage : usage() }
@@ -177,4 +185,33 @@ export const typed = (text: string): PromptSubmitInput => ({ text, wait: false, 
 export async function drain<C, R>(stream: HookStream<C, R>): Promise<R> {
   for await (const chunk of stream) void chunk
   return stream.result
+}
+
+// ---------------------------------------------------------------- 面板
+
+/** 面板的一次绘制：是否有焦点、能放几行 */
+export const pane = (isFocused: boolean, bodyRows = 48) => ({
+  plugin: 'anvil',
+  surface: 'terminal' as const,
+  component: 'Pane' as const,
+  requestId: 'anvil',
+  props: {
+    title: 'anvil',
+    isFocused,
+    bodyColumns: 70,
+    placement: 'dock' as const,
+    scroll: { offset: 0, bodyRows },
+    view: {},
+  },
+})
+
+/** 画出来的一个元素里所有的字，按文档顺序 */
+export function flat(node: unknown): string {
+  if (typeof node === 'string') return node
+  if (Array.isArray(node)) return node.map(flat).join('')
+  if (node !== null && typeof node === 'object') {
+    const { children, props } = node as { children?: unknown; props?: { children?: unknown } }
+    return flat(children ?? props?.children ?? [])
+  }
+  return ''
 }

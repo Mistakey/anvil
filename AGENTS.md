@@ -47,7 +47,7 @@
 - advisor 这类服务端工具不走 `tool.check`/`tool.call`，只出现在 `turn.step` 结果的 `serverToolUses` 里；`tool.check` 带 `agentId`。
 - `$.command.register` 的 `name` 和 `command.run` 的匹配器要写字面量，否则 validate 会当成没有 `.catch` 的 gating hook。
 - 收 `$` 的辅助函数必须是文件顶层的函数声明（或绑定到函数的顶层 const）；写在 `register` 里的闭包会让模块加载失败（"$ is passed to …, which is not a function declared at the top of this file"）。状态作参数传进去（anvil-k0t.12）。
-- `claude plugin test` 里插件自己调 `$.ui.scroll`（比如在按键处理里）会以 "no implementation for ui.scroll" 拒绝，测试挂的 `ui.scroll` 钩子接不到；滚动只能在交互会话里验证，代码要接住这个拒绝（anvil-k0t.12）。`$.ui.focus` 一样（"no implementation for ui.focus"），测试挂的 `ui.focus` 钩子接不到（anvil-k0t.20）。
+- `claude plugin test` 里插件自己调 `$.ui.scroll`（比如在按键处理里）会以 "no implementation for ui.scroll" 拒绝，测试挂的 `ui.scroll` 钩子接不到；滚动只能在交互会话里验证，代码要接住这个拒绝（anvil-k0t.12）。`$.ui.focus` 一样（"no implementation for ui.focus"），测试挂的 `ui.focus` 钩子接不到（anvil-k0t.20）。滚到对话里的消息（`$.ui.scroll({ to: { requestId } })`）也一样接不到；测试自己调 `$.ui.scroll` 时，测试挂的 `ui.scroll` 钩子倒能收到参数（anvil-k0t.19）。
 - `claude plugin test` 的 `$` 没有 `ui.close`，测试里的插件改写 `ui.close` 的 `origin` 会被拒（"an origin other than the engine set"）：用户手动关面板（origin `person`）测不了，判断写成纯函数测，接线在交互会话里验证（anvil-k0t.15）。
 - auto mode 会拦截读取 `~/.claude.json`。
 - plugin test 里测试自己的钩子抛错时，引擎跳过它，插件收到的是 "no implementation for <事件>"，不是抛出的那条消息；要造调用失败，返回该事件的失败结果（如 fork 的 `isAnswered: false`），抛错只能核对插件接住了（anvil-k0t.16）。
@@ -63,5 +63,6 @@
 - 同一事件在整个模块里（跨文件合计）只能不带匹配器注册一次；带匹配器的不限，`{}` 也算匹配器、匹配全部，重复注册同一个匹配器也能过。anvil 不用 `{}` 和重复匹配器：几个功能都要的事件（`session.start` 等）在 `register.ts` 里只注册一次、不带匹配器，处理函数里按顺序调用各功能（见「开发」的结构说明）。同一模块里先注册的钩子在外层先跑。
 - `command.run` 的匹配器可以用正则匹配 `args`，如 `{ command: 'anvil', args: /^\s*panel\s+(hide|show)\s*$/ }`，仍算 answers its own command。
 - plugin test 里插件传给 `$.fs.*` 的路径会被引擎按本机写法规范化（Windows 上 `/` 变 `\`），测试挂的 `fs.*` 钩子比路径前先统一分隔符（anvil-k0t.17）。
+- plugin test 里测试拿到的 `$` 没有 `session.messages`，但测试挂的 `on('session.messages', () => ({ value: [...] }))` 能回答插件的 `$.session.messages()`；`$.session.append(...)` 可以直接模拟一行进对话（anvil-k0t.19）。
 - plugin test 里测试拿到的 `$` 没有 `state`，读不到插件写的 `$.state`；在测试自己的 `on('state.set')` 里记下 `e.value` 再 `next(e)`。
 - `claude plugin validate` 会校验 `userConfig` 各项的 `type`，但不列出各项设置；要列出来用 `claude --plugin-dir <dir> plugin configure anvil@inline`（不带 `--values-stdin` 时只读），默认值靠 plugin test 核对。
