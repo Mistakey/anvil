@@ -223,11 +223,12 @@ async function pingKeepalive($: EngineInterface, cache: Cache, loop: Loop, setti
 }
 
 /**
- * `/anvil keepalive`：本会话的开关设成现在实际状态的反面，之后不再看自动开启和阈值（D3）。
+ * `/anvil keepalive`：运行中（已启用、进行中）就关掉，没开或已停下就开启，之后不再看自动开启和阈值（D3）。
  * 开启时这一段空闲的停下也清掉，按缓存状态重新定时；关闭时 armKeepalive 只撤掉定时器。
  */
 async function toggleKeepalive($: EngineInterface, cache: Cache, loop: Loop, settings: Settings) {
-  const isOn = !isEnabled(settings, await read($, keepaliveOverride), cache.context)
+  const isRunning = isEnabled(settings, await read($, keepaliveOverride), cache.context) && loop.stopped === null
+  const isOn = !isRunning
   await update($, keepaliveOverride, () => isOn)
   if (isOn) loop.stopped = null
   await armKeepalive($, cache, loop, settings)

@@ -215,6 +215,23 @@ describe('/anvil keepalive', () => {
     expect(w.forks).toHaveLength(1)
   })
 
+  test('保活已停下时，切换一次就在本会话重新开始，而不是关掉；再切换一次才关掉', async ($, on) => {
+    const w = engine(on, { forks: [{ read: 0, write: 150000 }, WARM] })
+    await $.session.start(SESSION)
+    await turn($)
+    await w.clock.advance(50 * MIN)
+    expect((await keepaliveRow($)).text).toBe('已停止（续期时缓存已过期）')
+
+    expect((await $.command.run(anvil('keepalive'))).text).toBe('缓存保活已开启（本会话）')
+    expect(await keepaliveRow($)).toEqual({ text: '已启用（本会话）', color: COLOR.ok })
+    // 缓存还有效、已过发请求的时刻：马上补一次
+    await w.clock.advance(1 * SEC)
+    expect(w.forks).toHaveLength(2)
+    expect((await keepaliveRow($)).text).toBe('进行中（本会话）')
+
+    expect((await $.command.run(anvil('keepalive'))).text).toBe('缓存保活已关闭（本会话）')
+  })
+
   test('本会话的开关只记在 $.state 里：新会话（引擎重置 $.state）回到默认', async ($, on) => {
     const w = engine(on)
     await $.session.start(SESSION)
