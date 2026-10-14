@@ -72,6 +72,7 @@
 - 钩子自身执行上限 10 秒（`prompt.edit` 只有 50 毫秒）；等待 `$` 调用（模型、网络、`$.ui.ask`）的时间不计入。
 - `/clear`、`/resume`、`/branch` 会重置 `$.state`，而且不触发 `session.start`；要在 `classic.SessionStart`（source 为 clear/resume/fork）里从 `$.store` 重新载入。
 - 热重载（`--plugin-dir` 下保存插件文件；按类型，`/config` 改插件设置、插件更新也一样）在同一个会话里触发 `session.start`，不触发 `classic.SessionStart`：模块内存是新的，`$.clock.after`/`every` 的定时器被引擎撤掉，`$.state` 保留（伪终端里看到「● anvil: reloaded (…)」）。要跨重载接上的状态写进 `$.state`，在 `session.start` 里读回、重新定时；新会话的 `$.state` 是空的，读不到就冷启动（anvil 的 `anvil.cacheMemory`、`anvil.keepaliveMemory`，anvil-k0t.49）。重载时还在路上的 `$.model.fork` 结果会不会回到旧模块未证实，anvil 重载后按需补发。
+- 热重载不清 `$.state`，atom 里还是旧代码按旧形状写下的值：改了 atom 的形状（如 .52 把 identity 的速度字段换成 `speed`），新代码读到旧值，钩子抛错被跳过（「ui.render hook skipped: threw TypeError」），面板画不出来，直到开新会话（anvil-k0t.53）。对象、列表形状的 atom 读写都合并到默认值上（照 flightdeck 的 normalize，`hooks/shape.ts`），改形状时在那里改形状。`read` 的第二个参数要在调用处直接写 atom 常量，扫描才认：包一层 `readAtom($, x)` 整个模块不加载，写成 `normalized(x, await read($, x))`。plugin test 里用 `state.set` 钩子把插件写下的值换成旧形状来造（`tests/shape.test.ts`）。
 - `$.store` 由本机所有会话共享，先 get 再 set 不是原子操作，总量上限 4 MiB；连续 `cleanupPeriodDays`（默认 30 天）没有会话读写就会被清掉，长期设置放 `userConfig`（`docs/adr/0003-settings-in-config.md`）。
 - advisor 这类服务端工具不走 `tool.check`/`tool.call`，只出现在 `turn.step` 结果的 `serverToolUses` 里；`tool.check` 带 `agentId`。
 - `$.command.register` 的 `name` 和 `command.run` 的匹配器要写字面量，否则 validate 会当成没有 `.catch` 的 gating hook。
