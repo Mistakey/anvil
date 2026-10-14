@@ -1,4 +1,5 @@
-// 读 `$.state` 时合并到默认值上（照 flightdeck 的 normalize）：热重载不清 `$.state`，上一次加载按旧形状写下的值、
+// 读 `$.state` 时合并到默认值上（照 flightdeck 的 normalize，https://github.com/scasella/claude-flightdeck，
+// MIT License, Copyright (c) 2026 Stephen Casella）：热重载不清 `$.state`，上一次加载按旧形状写下的值、
 // 缺字段的值，读出来都补成现在的形状，钩子不因此抛错（anvil-k0t.53）。register.ts 读写 atom 时经 normalized / normalizing。
 //
 // 形状照默认值写：对象按字段合并（多出来的旧字段留着），数字、字符串、布尔类型不对就取默认，

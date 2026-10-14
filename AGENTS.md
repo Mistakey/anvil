@@ -6,10 +6,10 @@
 
 - 仓库本身就是一个插件：`.claude-plugin/plugin.json` 是清单，`hooks/hooks.json` 指向入口 `hooks/register.ts`。
 - 结构：设置在清单的 `userConfig`，`hooks/settings.ts` 收窄成 `Settings`；`$.state` 的类型契约在 `types/index.d.ts`。照 flightdeck 的 `register.tsx`/`core.ts`：所有 `on(...)` 和用到 `$` 的辅助函数都在 `hooks/register.ts`（辅助函数写在文件顶层）；功能文件只放不碰 `$` 的纯逻辑和界面组件，由 `register.ts` 调用（如 `settings.ts` 的 `readSettings`、`command.ts` 的 `answer`）。几个功能都要的事件（`session.start` 等）只注册一次、不带匹配器，处理函数里按行序依次调用各功能；只属于一个功能的事件用真匹配器（带 `args` 的 `command.run`、按 `requestId` 的 Pane `ui.render`），不用 `{}`。新功能怎么接入写在 `register.ts` 开头的注释里；`/anvil` 子命令的说明加进那里的 `SUBCOMMANDS`，兜底的 `command.run { command: 'anvil' }` 注册在最后。测试在 `tests/`，`tests/world.ts` 替引擎回答插件之下的调用。
-- 加载调试：`claude --plugin-dir C:\work\5.code\personal\anvil`，保存即热重载。
+- 加载调试：`claude --plugin-dir <本仓库目录>`，保存即热重载。
 - 检查：`claude plugin validate .` 列出挂的事件、调用的 API 和引擎会拒绝的内容；测试：`claude plugin test .` 跑 `*.test.ts`。
 - 类型：交互加载一次后，引擎在 `.claude-plugin/types/` 生成当前构建的声明（已忽略提交）；查 API 就 grep 其中的 `claude-code/index.d.ts`。类型检查：`npx -p typescript tsc -p .`。`plugin validate`、`plugin test` 和普通 `claude -p` 都不生成类型；不开交互会话时用 `CLAUDE_CODE_PLUGIN_DIR_WATCH=1 claude --plugin-dir <dir> -p "ok" --model haiku --max-turns 1`。新 worktree 里没有类型，先这样加载一次再跑 `tsc`。
-- 参考项目源码：`C:\work\5.code\external\cache-tax`、`C:\work\5.code\external\claude-flightdeck`。
+- 参考项目源码：[cache-tax](https://github.com/karanb192/cache-tax)、[claude-flightdeck](https://github.com/scasella/claude-flightdeck)，克隆到本地对照着读；借用的代码和许可见 `THIRD_PARTY_NOTICES.md`。
 
 ## Pitfalls
 
