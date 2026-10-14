@@ -11,8 +11,10 @@ import type { Elements, RenderElement } from 'claude-code'
 
 import type { GitOperation, GitView, Identity } from '../types'
 import { formatDuration } from './cache'
-import { spin, still } from './live'
-import type { Live } from './live'
+import { glowText, isLive, spin, still, toCells } from './live'
+import type { Live, Span } from './live'
+import { LIGHT } from './motion'
+import type { Cell } from './motion'
 import { COLOR, ICON, SEPARATOR, fitSegments } from './style'
 import type { Segment } from './style'
 import { cells, fitTail, padStart } from './text'
@@ -339,16 +341,61 @@ export function fittedGitLine(identity: Identity, columns: number): Segment[] {
   return gitLine(identity, Math.max(NAME_MIN, share(gap)), gap)
 }
 
+/** 几段字逐格拆开；values：正文色的字（读数）标 lit，落定时跟着从微光色落回来 */
+function cellsOf(segments: readonly Segment[], values = false): Cell[] {
+  return segments.flatMap(segment =>
+    toCells(segment.text, segment.color, segment.bold).map(cell => (values && segment.color === undefined && cell.ch.trim() ? { ...cell, lit: true } : cell)),
+  )
+}
+
 /**
- * 交给面板的三行。replying：主会话正在回复，速度行的图标换成转动的 ◐，上一次的读数退到次要色（spec D10 的回复中动效）
+ * 交给面板的三行（spec D10「流光」）。reply 是主会话这一次回复的起止：
+ * - 回复中：模型名从正文色渐变成 Claude 橙，波前到了一段亮光滚过；速度行的图标换成转动的 ◐，上一次的读数退到次要色；
+ * - 回复结束：模型名落回正文色，新的读数和闪电图标从 Claude 的微光色落回原色（720ms）。
+ * rows：面板的行数，身份栏贴着底边，光按它算出发的先后
  */
-export function identityRows(els: Els, identity: Identity, columns: number, view: { replying?: boolean; live?: Live } = {}): RenderElement[] {
-  const replying = view.replying === true
-  const { Text } = els
-  const icon = replying ? spin(els, view.live ?? still(0), { key: 'spin:speed', color: COLOR.active }) : <Text color={COLOR.icon}>{ICON.speed}</Text>
-  return [
-    line(els, 'identity:git', fittedGitLine(identity, columns), columns),
-    line(els, 'identity:model', modelLine(identity), columns),
-    line(els, 'identity:speed', speedLine(identity, replying), columns, icon),
-  ]
+export function identityRows(els: Els, identity: Identity, columns: number, view: { reply?: Span | null; live?: Live; rows?: number } = {}): RenderElement[] {
+  const { Box, Text } = els
+  const reply = view.reply ?? null
+  const live = view.live ?? still(0)
+  const replying = reply !== null && reply.until === null
+  const moving = isLive(reply, live.now)
+  const bottom = view.rows ?? 3
+  const place = (row: number, x: number) => ({ row: bottom - 3 + row, x, width: columns })
+  const git = line(els, 'identity:git', fittedGitLine(identity, columns), columns)
+
+  // 第二行：模型名回复中发光
+  const model = modelLine(identity)
+  const named = identity.model ? modelLabel(identity.model) : ''
+  const at = model.findIndex(segment => segment.text === named)
+  const second =
+    moving && named !== '' && at >= 0 ? (
+      <Box key="identity:model" width={columns} flexShrink={0} paddingLeft={PAD.left} paddingRight={PAD.right}>
+        <Text>{model.slice(0, at).map(segment => <Text color={segment.color} bold={segment.bold}>{segment.text}</Text>)}</Text>
+        {glowText(els, live, { key: 'glow:model', cells: toCells(named), place: place(1, PAD.left + widthOf(model.slice(0, at))), span: reply, mode: 'shimmer', shine: LIGHT.core, lit: LIGHT.body })}
+        <Text wrap="truncate">{model.slice(at + 1).map(segment => <Text color={segment.color} bold={segment.bold}>{segment.text}</Text>)}</Text>
+      </Box>
+    ) : (
+      line(els, 'identity:model', model, columns)
+    )
+
+  // 第三行：回复中图标转动、读数退后；结束后整行落定
+  const speed = fitSegments(speedLine(identity, replying), room(columns) - 2)
+  let third: RenderElement
+  if (replying) third = line(els, 'identity:speed', speed, columns, spin(els, live, { key: 'spin:speed', place: place(2, PAD.left) }))
+  else if (moving) {
+    third = (
+      <Box key="identity:speed" width={columns} flexShrink={0} paddingLeft={PAD.left} paddingRight={PAD.right}>
+        {glowText(els, live, {
+          key: 'glow:speed',
+          cells: [{ ch: ICON.speed, color: COLOR.icon, lit: true }, { ch: ' ' }, ...cellsOf(speed, true)],
+          place: place(2, PAD.left),
+          span: reply,
+          mode: 'flash',
+          shine: LIGHT.shine,
+        })}
+      </Box>
+    )
+  } else third = line(els, 'identity:speed', speed, columns, <Text color={COLOR.icon}>{ICON.speed}</Text>)
+  return [git, second, third]
 }

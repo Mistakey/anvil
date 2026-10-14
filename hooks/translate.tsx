@@ -5,9 +5,10 @@ import type { Elements, ModelCompleteRequest, ModelCompleteResult, PromptFilled,
 
 import type { TranslateBox } from '../types'
 import type { Subcommand } from './command'
-import { spin, still } from './live'
-import type { Live } from './live'
+import { glintLine, glowText, spin, still, toCells } from './live'
+import type { Live, Span } from './live'
 import { SPIN } from './motion'
+import type { Cell } from './motion'
 import { COLOR, ICON } from './style'
 import { cells, wrap } from './text'
 
@@ -174,7 +175,12 @@ export type BandView = {
   onInput: (value: string) => void
   /** 动效怎么画（live.tsx）；不给时静止 */
   live?: Live
+  /** 这一次翻译的起止：翻译中上边框扫过亮光、"正在翻译"上滚过微光 */
+  span?: Span | null
 }
+
+/** 翻译框的光：线亮一档（Claude Code 给主输入框的线也有这一档 promptBorderShimmer），字亮一档 */
+const SHINE = { line: '#bdbdbd', text: '#d5d9e0' } as const
 
 const TITLE = `${ICON.translate} 中→英`
 
@@ -220,17 +226,18 @@ function statusText(els: Pick<Els, 'Text'>, key: string, text: string, color: st
   ])
 }
 
-/** 上边框：标题嵌在里面，和面板各框的标题对齐（`╭─ 标题 ─…`） */
-function topRule(els: Pick<Els, 'Box' | 'Text'>, columns: number, color: string): RenderElement {
-  const { Box, Text } = els
+/**
+ * 上边框：标题嵌在里面，和面板各框的标题对齐（`── 标题 ─…`）。标题是正文色加粗，不放进带线色的 Text 里
+ * （嵌套的 Text 会沿用外层的颜色，标题就成了线色）；翻译中一点亮光扫过这条线（rail.tsx 的 glint）
+ */
+function topRule(els: Els, columns: number, color: string, live: Live, span: Span | null): RenderElement {
+  const { Box } = els
   const lead = '── '
   const rest = Math.max(0, columns - cells(lead) - cells(TITLE) - 1)
+  const line: Cell[] = [...toCells(lead, color), ...toCells(TITLE, undefined, true), ...toCells(` ${'─'.repeat(rest)}`, color)]
   return (
     <Box key="title:translate" width={columns} flexShrink={0}>
-      {/* 标题不放进带线色的 Text 里：嵌套的 Text 会沿用外层的颜色，标题就成了线色 */}
-      <Text color={color}>{lead}</Text>
-      <Text bold>{TITLE}</Text>
-      <Text color={color}>{` ${'─'.repeat(rest)}`}</Text>
+      {glintLine(els, live, { key: 'line:translate', cells: line, columns, span, tint: SHINE.line })}
     </Box>
   )
 }
@@ -261,18 +268,32 @@ export function drawTranslateBox(els: Els, view: BandView): RenderElement {
             )
           }
           // 开头的符号另上色；正在翻译的 ◐ 原地换成转动的，后面的字宽度不变
-          const icon =
-            view.box.phase === 'working' ? (
-              spin(els, view.live ?? still(0), { key: 'spin:translate', color: head.color })
-            ) : (
-              <Text key="head:translate" color={head.color}>
-                {head.text}
-              </Text>
-            )
+          const live = view.live ?? still(0)
+          const working = view.box.phase === 'working'
+          // 状态在输入框右侧时从这一列起，挪到下面时从行首起：光按 band 的格子走
+          const x = beside ? columns - cells(shown.text) : 0
+          const place = { row: beside ? 1 : 2, x, width: columns }
+          const icon = working ? (
+            spin(els, live, { key: 'spin:translate', place })
+          ) : (
+            <Text key="head:translate" color={head.color}>
+              {head.text}
+            </Text>
+          )
+          const rest = text.slice(head.text.length)
           return (
             <Box key={`status:${index}`} flexShrink={0}>
               {icon}
-              {statusText(els, `status:${index}`, text.slice(head.text.length), shown.color)}
+              {working
+                ? glowText(els, live, {
+                    key: 'glow:translate',
+                    cells: toCells(rest, shown.color),
+                    place: { ...place, x: x + cells(head.text) },
+                    span: view.span ?? null,
+                    mode: 'shimmer',
+                    shine: SHINE.text,
+                  })
+                : statusText(els, `status:${index}`, rest, shown.color)}
             </Box>
           )
         })}
@@ -282,7 +303,7 @@ export function drawTranslateBox(els: Els, view: BandView): RenderElement {
   const color = border(view.box)
   return (
     <Box key="translate" flexDirection="column" width={columns} flexShrink={0}>
-      {topRule(els, columns, color)}
+      {topRule(els, columns, color, view.live ?? still(0), view.box.phase === 'working' ? (view.span ?? null) : null)}
       <Box key="row:translate" columnGap={2} width={columns}>
         <Box key="field:translate" width={fieldWidth} flexShrink={0}>
           <Input

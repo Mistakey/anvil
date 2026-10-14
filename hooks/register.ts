@@ -50,11 +50,13 @@ import {
 } from './keepalive'
 import type { Loop } from './keepalive'
 import { CLOSED, isClosed, scrollList, toggleDetail, toggleList } from './list'
-import { faultedModule, liveOf, spinAfter } from './live'
+import { faultedModule, glowText, isLive, liveOf, spinAfter, toCells } from './live'
+import type { Span } from './live'
+import { LIGHT } from './motion'
 import { NO_MESSAGES, addMessage, contentText, isMyMessage, messageList, reconcile, settleMessages, userTexts } from './messages'
 import { PANE, PANEL_SUBCOMMAND, drawPanel, gridRow, hidesPanel, innerWidth, spacedGridRows } from './panel'
 import { readSettings } from './settings'
-import { COLOR } from './style'
+import { GRID } from './style'
 import {
   EMPTY_BOX,
   TRANSLATE_SUBCOMMAND,
@@ -75,7 +77,7 @@ import {
 } from './translate'
 import type { Translation } from './translate'
 import { EMPTY_USAGE, HISTORY_KEYS, applyReading, parseHistory, parseResetsAt, recordSample, usageRows } from './usage'
-import type { Histories, Reading } from './usage'
+import type { GridRow, Histories, Reading } from './usage'
 import type { Denial, GitView, Identity, KeepaliveStop, ListId, Scrolled, Settings, SubAgent } from '../types'
 
 // 模块结构（照 flightdeck 的 register.tsx / core.ts），引擎扫描源码的规则见 AGENTS.md Pitfalls「模块结构」：
@@ -213,6 +215,7 @@ async function pingKeepalive($: EngineInterface, cache: Cache, loop: Loop, setti
 
   const stretch = cache.lastRequestAt
   loop.inFlight = true
+  await markActivity($, 'keep', true).catch(() => undefined)
   await publishLoop($, loop)
   let stop: KeepaliveStop | null
   try {
@@ -221,6 +224,7 @@ async function pingKeepalive($: EngineInterface, cache: Cache, loop: Loop, setti
     stop = thrownStop(error)
   }
   loop.inFlight = false
+  await markActivity($, 'keep', false).catch(() => undefined)
   // 请求路上用户回来发了消息：这一段空闲已经结束，结果不再算到新的一段上（cache-tax 没有这层）
   if (cache.lastRequestAt !== stretch) return publishLoop($, loop)
   if (stop) return stopKeepalive($, loop, stop)
@@ -535,27 +539,36 @@ async function foldForDrawing($: EngineInterface, isFocused: boolean) {
 // ---------------------------------------------------------------- 动效（spec D10）：进行中图标、运行中的耗时
 
 /**
- * 主会话正在回复（从这一轮的第一次请求到这一轮结束）时，这一段从哪一刻起；没在回复时为 null。
- * 回复中身份栏速度行的图标换成转动的 ◐，读数退到次要色
+ * 正在发生的几件事各自的起止（spec D10「流光」）：主会话回复（这一轮的第一次请求到这一轮结束；子 agent 的不算）、
+ * 保活的续期请求、翻译。结束后留着结束的时刻：落定、暗下去要用；下一次开始时换掉
  */
-const replying = atom({ plugin: 'anvil', key: 'replying' } as const, null as number | null)
+type Activity = { reply: Span | null; keep: Span | null; translate: Span | null }
 
-/** 出过错的 Client 模块（文件名）：之后画面板、翻译框时不再用它，退回静止 */
-const faults = atom({ plugin: 'anvil', key: 'clientFaults' } as const, [] as string[])
+const activity = atom({ plugin: 'anvil', key: 'activity' } as const, { reply: null, keep: null, translate: null } as Activity)
 
-/** 回复从哪一刻起；热重载前存下的是布尔值（anvil-k0t.39 的写法），当作没在回复 */
-async function replyingSince($: EngineInterface): Promise<number | null> {
-  const since: unknown = await read($, replying)
-  return typeof since === 'number' ? since : null
+/** 热重载前存下的可能是别的形状（anvil-k0t.46 的 replying），当作什么都没在发生 */
+async function readActivity($: EngineInterface): Promise<Activity> {
+  const value: unknown = await read($, activity)
+  const span = (one: unknown): Span | null =>
+    typeof one === 'object' && one !== null && typeof (one as Span).since === 'number' ? { since: (one as Span).since, until: typeof (one as Span).until === 'number' ? (one as Span).until : null } : null
+  const all = (typeof value === 'object' && value !== null ? value : {}) as Partial<Record<keyof Activity, unknown>>
+  return { reply: span(all.reply), keep: span(all.keep), translate: span(all.translate) }
+}
+
+/** 一件事开始（还没在发生时记下开始的时刻）或结束（在发生时记下结束的时刻） */
+async function markActivity($: EngineInterface, name: keyof Activity, isOn: boolean) {
+  const current = (await readActivity($))[name]
+  const now = await $.clock.now()
+  if (isOn && (current === null || current.until !== null)) await update($, activity, all => ({ ...all, [name]: { since: now, until: null } }))
+  else if (!isOn && current !== null && current.until === null) await update($, activity, all => ({ ...all, [name]: { since: current.since, until: now } }))
 }
 
 async function setReplying($: EngineInterface, isReplying: boolean) {
-  const since = await replyingSince($)
-  if (isReplying && since === null) {
-    const now = await $.clock.now()
-    await update($, replying, () => now)
-  } else if (!isReplying && since !== null) await update($, replying, () => null)
+  await markActivity($, 'reply', isReplying)
 }
+
+/** 出过错的 Client 模块（文件名）：之后画面板、翻译框时不再用它，退回静止 */
+const faults = atom({ plugin: 'anvil', key: 'clientFaults' } as const, [] as string[])
 
 /** 引擎报某个 Client 出错：记下模块，引擎接着重画那一处，这次就不用它了 */
 async function noteFault($: EngineInterface, e: UiFaultInput) {
@@ -571,9 +584,16 @@ async function noteFocus($: EngineInterface, element: string | null) {
   if ((await read($, focusKey)) !== element) await update($, focusKey, () => element)
 }
 
-/** 这次绘制里动效怎么画 */
+/**
+ * 这次绘制里动效怎么画。相位的零点（epoch）：主会话回复优先，其次保活续期、翻译、最早还在运行的子 agent；
+ * 面板和翻译框用同一个，几处的光同相
+ */
 async function liveFor($: EngineInterface, els: object, surface: RenderSurface, now: number) {
-  return liveOf(els, surface, now, await read($, faults))
+  const [doing, list, faulted] = await Promise.all([readActivity($), read($, agents), read($, faults)])
+  const running = list.filter(agent => agent.status === 'running').map(agent => agent.spawnedAt)
+  const lead = [doing.reply, doing.keep, doing.translate].find(span => isLive(span, now)) ?? null
+  const epoch = lead?.since ?? (running.length > 0 ? Math.min(...running) : 0)
+  return liveOf(els, surface, now, faulted, epoch)
 }
 
 // ---------------------------------------------------------------- anvil 面板
@@ -628,34 +648,45 @@ async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderI
     $.clock.now(),
     read($, identity),
   ])
-  const [cached, keepalive, loop, live, since, focused, histories] = await Promise.all([
+  const [cached, keepalive, loop, live, doing, focused, histories] = await Promise.all([
     read($, cacheView),
     keepaliveNow($, settings),
     read($, keepaliveLoop),
     liveFor($, els, e.surface, now),
-    replyingSince($),
+    readActivity($),
     read($, focusKey),
     readHistories($),
   ])
   // 用户进了面板要按 Enter 时，列表里不该有已撤回的消息：画完核对一遍，有变化会再画
   if (e.props.isFocused) $.clock.after(0, () => void syncMessages($).catch(() => undefined))
-  const inner = innerWidth(e.props.bodyColumns)
-  // 保活的续期请求在路上：接在"进行中"后面转动的图标
-  const renewing = loop.inFlight ? spinAfter(els, live, { key: 'spin:keepalive', color: COLOR.active }) : undefined
+  const columns = e.props.bodyColumns
+  const inner = innerWidth(columns)
+  const usageBody = spacedGridRows(els, usageRows(current, now, inner, histories), inner)
+  // 保活的续期请求在路上："进行中"上滚过微光，后面接转动的图标（缓存框第三行：面板第 3 行，值从第 10 列起）
+  const keepRow = (row: GridRow) => {
+    if (row.key !== 'keepalive' || !loop.inFlight) return gridRow(els, row, inner)
+    const place = { row: 3, x: 2 + GRID.label + GRID.gap, width: columns }
+    const text = (row.lines[0] ?? []).flatMap(segment => toCells(segment.text, segment.color, segment.bold))
+    const first = glowText(els, live, { key: 'glow:keepalive', cells: text, place, span: doing.keep, mode: 'shimmer', shine: LIGHT.shine })
+    const tail = spinAfter(els, live, { key: 'spin:keepalive', place: { ...place, x: place.x + text.length + 1 } })
+    return gridRow(els, row, inner, tail, first)
+  }
   return drawPanel(els, {
-    columns: e.props.bodyColumns,
+    columns,
     rows: e.props.scroll.bodyRows,
     bodies: {
-      usage: { rows: spacedGridRows(els, usageRows(current, now, inner, histories), inner) },
-      cache: { rows: cacheRows(cached, keepalive, now, inner).flatMap(row => gridRow(els, row, inner, row.key === 'keepalive' ? renewing : undefined)) },
+      usage: { rows: usageBody },
+      cache: { rows: cacheRows(cached, keepalive, now, inner).flatMap(keepRow) },
     },
     lists: {
       messages: messageList(els, mine, { inner, onPress: id => void scrollToMessage($, id) }),
       denials: denialList(els, denied, { detail: folding.detail, inner, onPress: id => void pressDetail($, id) }),
-      agents: agentList(els, list, { detail: folding.detail, now, inner, live, focused: e.props.isFocused ? focused : null, onPress: id => void pressDetail($, id) }),
+      // 子 agent 的行大约从第几行起：缓存框 5 行、细槽、用量框、细槽、上边框
+      agents: agentList(els, list, { detail: folding.detail, now, inner, live, top: 5 + 1 + usageBody.length + 2 + 1 + 1, focused: e.props.isFocused ? focused : null, onPress: id => void pressDetail($, id) }),
     },
     fold: folding,
-    identity: identityRows(els, who, e.props.bodyColumns, { replying: since !== null, live }),
+    identity: identityRows(els, who, columns, { reply: doing.reply, live, rows: e.props.scroll.bodyRows }),
+    motion: { live, reply: doing.reply },
     onToggle: id => void pressList($, id),
   })
 }
@@ -696,7 +727,8 @@ async function appendToPrompt($: EngineInterface, translation: string): Promise<
 async function submitChinese($: EngineInterface, settings: Settings, band: string, value: string) {
   if (!shouldTranslate(await read($, translateBox), value)) return
   await update($, translateBox, box => startTranslating(box, value))
-  const translation = await translateText($, settings, value)
+  await markActivity($, 'translate', true).catch(() => undefined)
+  const translation = await translateText($, settings, value).finally(() => markActivity($, 'translate', false).catch(() => undefined))
   const refusal = 'error' in translation ? translation.error : await appendToPrompt($, translation.text)
   if (refusal === null && 'text' in translation) {
     await update($, translateBox, box => translated(box, countWords(translation.text)))
@@ -718,11 +750,12 @@ async function drawTranslate($: EngineInterface, settings: Settings, e: RenderIn
   // 先排除 mobile，resolve 出来的元素才有 Input
   if (e.surface === 'mobile' || e.props.hasSurvey || (await read($, translateHidden))) return null
   const els = $.ui.resolve(e)
-  const [box, now] = await Promise.all([read($, translateBox), $.clock.now()])
+  const [box, now, doing] = await Promise.all([read($, translateBox), $.clock.now(), readActivity($)])
   return drawTranslateBox(els, {
     columns: e.props.bodyColumns,
     box,
     live: await liveFor($, els, e.surface, now),
+    span: doing.translate,
     onSubmit: value => void submitChinese($, settings, e.requestId, value),
     onInput: value => void typeChinese($, value),
   })

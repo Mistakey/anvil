@@ -1,40 +1,49 @@
 // 面板共用的样式（spec D10）：颜色、图标、名称 | 值两列、定宽字段、进度条。
 
+import { gradient, mix } from './color'
+import { easeOut } from './motion'
 import { cells, fit } from './text'
 
 /** 一段同色文字；一行由几段拼成。color 不给时是终端的前景色（正文） */
 export type Segment = { text: string; color?: string; bold?: boolean }
 
 /**
- * 色板（spec D10，anvil-k0t.46）。正文不设颜色，用终端的前景色，和对话里的字同一种白；
- * 中性色只有三级：次要文字、图标与分隔符、线。对比度按面板的底色量：引擎给面板画的 #262626
+ * 色板（spec D10，anvil-k0t.47）。正文不设颜色，用终端的前景色，和对话里的字同一种白；
+ * 中性色三级：次要文字、图标与分隔符、线。对比度按面板的底色量：引擎给面板画的 #262626
  * （伪终端实测），和翻译框所在的终端底色（用户的 Dracula #282a36）：次要 6.0 / 5.6:1，图标 3.9 / 3.7:1，线 2.8 / 2.6:1。
- * 好状态只给符号（和状态词）上色，数据保持正文色；出问题时整句一个颜色。
+ * 框：侧边和下边是识别色调暗的一档（3.2–3.6:1），上边框从标题处的光（识别色七成）渐暗到侧边的颜色。
  */
 export const COLOR = {
   /** 次要文字：名称列、标签与单位、第二行的细节、计数、序号、提示、做完了的列表项 */
   secondary: '#9da3b0',
   /** 图标和分隔符 `·`：不是文字，比次要文字再暗一级 */
   icon: '#7a8194',
-  /** 线：我的消息的边框、进度条的底；和四个彩框调暗的边框同一亮度 */
+  /** 线：进度条之外不承载信息的细线 */
   line: '#666a71',
-  /** 正在发生：所有进行中的 ◐；Claude 橙（引擎画自己的 spinner 用的也是它，主题色 claude 画成这个值） */
+  /** 进度条的底：比线再暗，填上的那段热度渐变才显得出来 */
+  track: '#4a4d54',
+  /** 面板的底：引擎画的，mod 改不了；渐变从它起 */
+  pane: '#262626',
+  /** 正在发生：所有进行中的 ◐、流光、微光；Claude 橙（引擎画自己的 spinner 用的也是它，主题色 claude 画成这个值） */
   active: '#d77757',
-  // 状态色：进度条四档、命中率、缓存有效 / 过期、预测、git 计数；一种颜色一个意思
+  // 状态色：进度条热度、命中率、缓存有效 / 过期、预测、git 计数；一种颜色一个意思
   ok: '#8fbf7f',
   warn: '#d7bd6f',
   high: '#d79a6f',
   danger: '#e07a7a',
-  // 识别色：各框的标题（原色）和边框（同色相调暗到和线同一亮度，2.8:1）
+  // 识别色：各框的标题（原色）、上边框的光（从它起）和侧边（同色相调暗的一档）
   cache: '#6cc5c0',
-  cacheLine: '#47716e',
+  cacheLine: '#4e7f7c',
   usage: '#7aa7e0',
-  usageLine: '#536c8a',
+  usageLine: '#5a7699',
   agents: '#d78fc4',
-  agentsLine: '#845e7a',
+  agentsLine: '#926787',
   /** 拒绝就是"被拦下"，和状态色的红是同一个意思，用同一个值 */
   denials: '#e07a7a',
-  denialsLine: '#975959',
+  denialsLine: '#a45f5f',
+  /** 我的消息是中性的：标题正文色，光从浅灰起，侧边是中性灰 */
+  messages: '#c8ccd4',
+  messagesLine: '#777b82',
   /** 身份栏的分支（git 的识别色） */
   branch: '#b18bd0',
   /** 翻译框的上下两条线：和引擎画主输入框的线同色（伪终端实测），两条输入框看着是一家 */
@@ -91,7 +100,7 @@ export function barWidth(inner: number): number {
   return Math.max(1, Math.min(BAR_MAX, valueWidth(inner) - FIELD.percent - 2))
 }
 
-/** 进度条四档：低于 60% 绿，60–80% 黄，80–90% 橙，90% 以上红 */
+/** 进度条四档：低于 60% 绿，60–80% 黄，80–90% 橙，90% 以上红（百分比的颜色） */
 export function levelColor(percent: number): string {
   if (percent >= 90) return COLOR.danger
   if (percent >= 80) return COLOR.high
@@ -99,14 +108,52 @@ export function levelColor(percent: number): string {
   return COLOR.ok
 }
 
-/** 定长的进度条：已用部分按档着色，其余是线色的底 */
+/**
+ * 进度条的热度（学 btop）：每一格按它在条上的位置取色，45% 以前绿，往后依次过渡到黄、橙、红，
+ * 到 60%、80%、90% 正好是四档的颜色；填到哪，最后一格的颜色就和百分比的颜色一致
+ */
+export const HEAT = [
+  [0, COLOR.ok],
+  [45, COLOR.ok],
+  [60, COLOR.warn],
+  [80, COLOR.high],
+  [90, COLOR.danger],
+  [100, COLOR.danger],
+] as const
+
+/** 定长的进度条：已用部分 `━` 按位置取热度色，其余 `─` 是暗底；相邻同色的格子并成一段 */
 export function bar(percent: number, width: number): Segment[] {
   const clamped = Math.min(100, Math.max(0, percent))
   const filled = Math.round((clamped / 100) * width)
-  return [
-    { text: '━'.repeat(filled), color: levelColor(clamped) },
-    { text: '─'.repeat(width - filled), color: COLOR.line },
-  ].filter(segment => segment.text !== '')
+  const out: Segment[] = []
+  for (let i = 0; i < filled; i += 1) {
+    const color = gradient(HEAT, ((i + 0.5) / width) * 100)
+    const last = out[out.length - 1]
+    if (last && last.color === color) last.text += '━'
+    else out.push({ text: '━', color })
+  }
+  if (width > filled) out.push({ text: '─'.repeat(width - filled), color: COLOR.track })
+  return out
+}
+
+/**
+ * 框的上边框整行（`╭─ 标题 ───…╮`，标题和右上角计数另压在上面）：标题处有光，从标题后面起
+ * 由识别色七成的亮度渐暗（ease-out）到侧边的颜色，走到线长的一半多（至少 10 格）；标题前那格是三成半。
+ * titleEnd：标题（连同前后的空格和引擎画的"a: "）之后的第一格
+ */
+export function edgeLine(columns: number, titleEnd: number, ident: string, side: string): Segment[] {
+  const cellsOut: Segment[] = [{ text: '╭', color: side }]
+  const span = Math.max(1, columns - 1 - titleEnd)
+  const reach = Math.min(span, Math.max(10, Math.floor(span * 0.55)))
+  const lit = mix(side, ident, 0.7)
+  for (let x = 1; x < columns - 1; x += 1) {
+    const color = x === 1 ? mix(side, ident, 0.35) : x < titleEnd ? side : mix(lit, side, easeOut((x - titleEnd) / reach))
+    const last = cellsOut[cellsOut.length - 1]
+    if (last && last.color === color && last.text !== '╭') last.text += '─'
+    else cellsOut.push({ text: '─', color })
+  }
+  if (columns > 1) cellsOut.push({ text: '╮', color: side })
+  return cellsOut
 }
 
 export const SEPARATOR: Segment = { text: ' · ', color: COLOR.icon }

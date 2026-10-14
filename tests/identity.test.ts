@@ -356,8 +356,12 @@ async function step($: Engine, clock: { advance: (ms: number) => Promise<void> }
   })()
   await clock.advance(60_000)
   const result = await drained
-  // 主会话的这一轮结束：回复中速度行的图标是转动的 ◐，结束后才是闪电图标
-  if (input.agentId === undefined) await $.turn.complete(turnInput())
+  // 主会话的这一轮结束：回复中速度行的图标是转动的 ◐，结束后才是闪电图标；
+  // 结束后 720ms 里模型名和读数在落定（交给 Client 画），走过这一段再读
+  if (input.agentId === undefined) {
+    await $.turn.complete(turnInput())
+    await clock.advance(1000)
+  }
   return result
 }
 
