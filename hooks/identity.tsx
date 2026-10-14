@@ -349,19 +349,16 @@ function cellsOf(segments: readonly Segment[], values = false): Cell[] {
 }
 
 /**
- * 交给面板的三行（spec D10「流光」）。reply 是主会话这一次回复的起止：
- * - 回复中：模型名从正文色渐变成 Claude 橙，波前到了一段亮光滚过；速度行的图标换成转动的 ◐，上一次的读数退到次要色；
- * - 回复结束：模型名落回正文色，新的读数和闪电图标从 Claude 的微光色落回原色（720ms）。
- * rows：面板的行数，身份栏贴着底边，光按它算出发的先后
+ * 交给面板的三行（spec D10「呼吸」）。reply 是主会话这一次回复的起止：
+ * - 回复中：模型名从正文色渐变成 Claude 橙，跟着呼吸从中间亮到光芯再暗回；速度行的图标换成转动的 ◐，上一次的读数退到次要色；
+ * - 回复结束：模型名落回正文色，新的读数和闪电图标从 Claude 的微光色落回原色（660ms）。
  */
-export function identityRows(els: Els, identity: Identity, columns: number, view: { reply?: Span | null; live?: Live; rows?: number } = {}): RenderElement[] {
+export function identityRows(els: Els, identity: Identity, columns: number, view: { reply?: Span | null; live?: Live } = {}): RenderElement[] {
   const { Box, Text } = els
   const reply = view.reply ?? null
   const live = view.live ?? still(0)
   const replying = reply !== null && reply.until === null
   const moving = isLive(reply, live.now)
-  const bottom = view.rows ?? 3
-  const place = (row: number, x: number) => ({ row: bottom - 3 + row, x, width: columns })
   const git = line(els, 'identity:git', fittedGitLine(identity, columns), columns)
 
   // 第二行：模型名回复中发光
@@ -372,7 +369,7 @@ export function identityRows(els: Els, identity: Identity, columns: number, view
     moving && named !== '' && at >= 0 ? (
       <Box key="identity:model" width={columns} flexShrink={0} paddingLeft={PAD.left} paddingRight={PAD.right}>
         <Text>{model.slice(0, at).map(segment => <Text color={segment.color} bold={segment.bold}>{segment.text}</Text>)}</Text>
-        {glowText(els, live, { key: 'glow:model', cells: toCells(named), place: place(1, PAD.left + widthOf(model.slice(0, at))), span: reply, mode: 'shimmer', shine: LIGHT.core, lit: LIGHT.body })}
+        {glowText(els, live, { key: 'glow:model', cells: toCells(named), span: reply, mode: 'breathe', shine: LIGHT.core, lit: LIGHT.body })}
         <Text wrap="truncate">{model.slice(at + 1).map(segment => <Text color={segment.color} bold={segment.bold}>{segment.text}</Text>)}</Text>
       </Box>
     ) : (
@@ -382,14 +379,13 @@ export function identityRows(els: Els, identity: Identity, columns: number, view
   // 第三行：回复中图标转动、读数退后；结束后整行落定
   const speed = fitSegments(speedLine(identity, replying), room(columns) - 2)
   let third: RenderElement
-  if (replying) third = line(els, 'identity:speed', speed, columns, spin(els, live, { key: 'spin:speed', place: place(2, PAD.left) }))
+  if (replying) third = line(els, 'identity:speed', speed, columns, spin(els, live, { key: 'spin:speed' }))
   else if (moving) {
     third = (
       <Box key="identity:speed" width={columns} flexShrink={0} paddingLeft={PAD.left} paddingRight={PAD.right}>
         {glowText(els, live, {
           key: 'glow:speed',
           cells: [{ ch: ICON.speed, color: COLOR.icon, lit: true }, { ch: ' ' }, ...cellsOf(speed, true)],
-          place: place(2, PAD.left),
           span: reply,
           mode: 'flash',
           shine: LIGHT.shine,

@@ -134,7 +134,7 @@ export type PanelView = {
   identity?: RenderElement[]
   /** 按了列表的展开键，或焦点在标题、"更早的"那行上按了 Enter */
   onToggle: (id: ListId) => void
-  /** 动效：这次怎么画（live.tsx），和主会话回复的起止（细槽上的流光）；不给时静止 */
+  /** 动效：这次怎么画（live.tsx），和主会话回复的起止（细槽上的呼吸）；不给时静止 */
   motion?: { live: Live; reply: Span | null }
 }
 
@@ -318,7 +318,7 @@ const fitFixed = (body: ListBody, limit: number): Fit => fitCount(body.items.len
 /**
  * 用量框、缓存框的两列的一项：名称定宽，值从同一列起。第二行起（细节、放不下折下去的块）
  * 各画成一行，名称那一列空着；一行一个元素，框的高度按元素数算（fitLists）。
- * tail：接在第一行字后面的元素（保活续期请求在路上时转动的图标）；first：换掉第一行的字（续期中"进行中"上的微光）。
+ * tail：接在第一行字后面的元素（保活续期请求在路上时转动的图标）；first：换掉第一行的字（续期中"进行中"的呼吸）。
  */
 export function gridRow(els: Els, row: GridRow, inner: number, tail?: RenderElement, first?: RenderElement): RenderElement[] {
   const { Box, Text } = els
@@ -391,42 +391,40 @@ export function drawPanel(els: Els, view: PanelView): RenderElement {
   const fillId: SectionId = expanded ?? 'messages'
   const { fits, room } = fitLists(view, expanded, fillId)
 
-  // 每个区块画成什么、占几行（细槽的行号按它累加：波前从上往下依次扫过）
-  const drawn = SECTIONS.map((section): { element: RenderElement; height: number } | null => {
+  // 每个区块画成什么
+  const drawn = SECTIONS.map((section): RenderElement | null => {
     const id = section.id
     const isFill = id === fillId
     if (!isList(id)) {
       const body = view.bodies[id]
-      return { element: frame(els, section, body, columns, isFill, `${section.icon} ${section.title}`, null), height: (body?.rows.length ?? 0) + 2 }
+      return frame(els, section, body, columns, isFill, `${section.icon} ${section.title}`, null)
     }
     const toggle = () => view.onToggle(id)
     const list = view.lists[id]
     if (isHidden(id, list)) return null
-    if (expanded !== null && id !== expanded) return { element: folded(els, section, list, columns, toggle), height: 1 }
+    if (expanded !== null && id !== expanded) return folded(els, section, list, columns, toggle)
     const isExpanded = id === expanded
     const title = `${isExpanded ? '▾ ' : ''}${section.icon} ${section.title}`
-    if (!list) return { element: frame(els, section, undefined, columns, isFill, title, toggle), height: 3 }
+    if (!list) return frame(els, section, undefined, columns, isFill, title, toggle)
     const fitted = fits.get(id) ?? { start: 0, end: list.items.length }
     const status = isExpanded ? [...list.status, { text: ` · 按 ${section.hotkey} 收起` }] : list.status
     // 我的消息收起时占满剩余高度：按 room 收紧，不把身份栏挤出去
     const squeezed = isFill && !isExpanded && list.limit === 'fill' ? room : undefined
     const body = { status, rows: listRows(els, section, list, fitted, inner, isExpanded, toggle, squeezed) }
-    return { element: frame(els, section, body, columns, isFill, title, toggle), height: (isFill ? room : listHeight(list, fitted, isExpanded)) + 2 }
+    return frame(els, section, body, columns, isFill, title, toggle)
   })
 
-  // 框与框之间是一道细槽（中间略亮、两端隐去的刻痕，不是第三条横线，anvil-k0t.47）；主会话回复中细槽上走流光。
+  // 框与框之间是一道细槽（中间略亮、两端隐去的刻痕，不是第三条横线，anvil-k0t.47）；主会话回复中细槽跟着呼吸。
   // 没画的区块不留细槽
   const motion = view.motion ?? { live: still(0), reply: null }
-  let row = 0
   const spaced = drawn.flatMap((one, index) => {
     if (one === null) return []
-    const gap = rail(els, motion.live, { key: `rail:${SECTIONS[index]?.id}`, row: row - 1, columns, span: motion.reply })
-    row += one.height + 1
+    const gap = rail(els, motion.live, { key: `rail:${SECTIONS[index]?.id}`, columns, span: motion.reply })
     return [
       <Box key={`gap:${SECTIONS[index]?.id}`} width={columns} height={1} flexShrink={0}>
         {gap}
       </Box>,
-      one.element,
+      one,
     ]
   })
   return (
