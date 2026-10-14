@@ -9,6 +9,8 @@
 - 加载调试：`claude --plugin-dir <本仓库目录>`，保存即热重载。
 - 检查：`claude plugin validate .` 列出挂的事件、调用的 API 和引擎会拒绝的内容；测试：`claude plugin test .` 跑 `*.test.ts`。
 - 类型：交互加载一次后，引擎在 `.claude-plugin/types/` 生成当前构建的声明（已忽略提交）；查 API 就 grep 其中的 `claude-code/index.d.ts`。类型检查：`npx -p typescript tsc -p .`。`plugin validate`、`plugin test` 和普通 `claude -p` 都不生成类型；不开交互会话时用 `CLAUDE_CODE_PLUGIN_DIR_WATCH=1 claude --plugin-dir <dir> -p "ok" --model haiku --max-turns 1`。新 worktree 里没有类型，先这样加载一次再跑 `tsc`。
+- 显示的判断标准是好看、精致、有生气，不往极简上设计；动效是几处配合的整套，正在发生时按同一口气一起呼吸（用户裁定，anvil-k0t.46–.48）。色板、版式、动效的规则写在 `hooks/style.ts`、`hooks/motion.ts` 等文件的头注释和测试里。
+- 代码注释里的 `spec Dn`、`§n` 指 v1 spec，交付后已从仓库删除；查原文用 `git show d21c521:docs/specs/anvil-k0t/spec.md`。
 - 参考项目源码：[cache-tax](https://github.com/karanb192/cache-tax)、[claude-flightdeck](https://github.com/scasella/claude-flightdeck)，克隆到本地对照着读；借用的代码和许可见 `THIRD_PARTY_NOTICES.md`。
 
 ## Pitfalls
