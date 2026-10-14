@@ -63,7 +63,7 @@ import type { Span } from './live'
 import { LIGHT } from './motion'
 import { NO_MESSAGES, addMessage, contentText, isMyMessage, messageList, reconcile, settleMessages, userTexts } from './messages'
 import { PANE, PANEL_SUBCOMMAND, drawPanel, gridRow, hidesPanel, innerWidth, spacedGridRows } from './panel'
-import { readSettings } from './settings'
+import { isShown, readSettings, sessionHiddenFor, shownText } from './settings'
 import { normalized, normalizing } from './shape'
 import { GRID } from './style'
 import {
@@ -651,43 +651,52 @@ async function liveFor($: EngineInterface, els: object, surface: RenderSurface, 
 
 // ---------------------------------------------------------------- anvil 面板
 
-const panelHidden = atom({ plugin: 'anvil', key: 'panelHidden' } as const, false)
+const panelHidden = atom({ plugin: 'anvil', key: 'panelHidden' } as const, null as boolean | null)
+
+/** 面板在本会话显示不显示：本会话切换过就按切换的，没切换过按 `/config` */
+async function panelShown($: EngineInterface, settings: Settings) {
+  return isShown(settings.showPanel, await read($, panelHidden))
+}
 
 async function openPanel($: EngineInterface) {
   // 不设 closeOnEscape：Esc 只把按键交回主输入框，面板留着（spec D9）
   return $.ui.open({ id: PANE.id, title: PANE.title, columns: PANE.columns })
 }
 
-/** 会话开始时自己打开；终端不够宽时引擎先不放下，等用户下一次提交消息 */
-async function startPanel($: EngineInterface) {
-  if (await read($, panelHidden)) return
+/**
+ * 会话开始时自己打开；终端不够宽时引擎先不放下，等用户下一次提交消息。
+ * 不显示时收起：`/config` 关掉面板会重新加载模块、再走这里，已经开着的面板随之收掉
+ */
+async function startPanel($: EngineInterface, settings: Settings) {
+  if (!(await panelShown($, settings))) return void $.ui.close({ id: PANE.id }).catch(() => undefined)
   // 不等它画出来：会话开始的钩子还没返回，画不了
   void openPanel($).catch(() => undefined)
 }
 
 /** 用户提交消息时，面板该在却还没放下，就再开一次：这次算用户请求，110 列即可停靠 */
-async function reopenPanel($: EngineInterface, e: PromptSubmitInput) {
+async function reopenPanel($: EngineInterface, settings: Settings, e: PromptSubmitInput) {
   if (e.origin.kind !== 'composer') return
-  if (await read($, panelHidden)) return
+  if (!(await panelShown($, settings))) return
   const panes = await $.ui.panes().catch(() => [])
   if (panes.some(pane => pane.id === PANE.id && pane.isPlaced)) return
   await openPanel($).catch(() => undefined)
 }
 
-/** `/anvil panel`：显示着就隐藏（本会话不再自动打开），隐藏着就重新打开 */
-async function togglePanel($: EngineInterface) {
-  if (!(await read($, panelHidden))) {
-    await update($, panelHidden, () => true)
+/** `/anvil panel`：显示着就隐藏（本会话不再自动打开），隐藏着（含 `/config` 关掉的）就打开 */
+async function togglePanel($: EngineInterface, settings: Settings) {
+  if (await panelShown($, settings)) {
+    await update($, panelHidden, () => sessionHiddenFor(false, settings.showPanel))
     await $.ui.close({ id: PANE.id })
-    return '面板已隐藏（本会话）'
+    return shownText('面板', false, settings.showPanel)
   }
-  await update($, panelHidden, () => false)
+  await update($, panelHidden, () => sessionHiddenFor(true, settings.showPanel))
   const opened = await openPanel($)
-  return opened.isPlaced ? '面板已显示' : `面板已显示，但暂时放不下：${opened.reason}`
+  const text = shownText('面板', true, settings.showPanel)
+  return opened.isPlaced ? text : `${text}，但暂时放不下：${opened.reason}`
 }
 
-async function notePanelClosed($: EngineInterface, e: PaneCloseInput) {
-  if (hidesPanel(e.origin)) await update($, panelHidden, () => true)
+async function notePanelClosed($: EngineInterface, settings: Settings, e: PaneCloseInput) {
+  if (hidesPanel(e.origin)) await update($, panelHidden, () => sessionHiddenFor(false, settings.showPanel))
 }
 
 async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderInput<'Pane'>) {
@@ -746,7 +755,12 @@ async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderI
 // ---------------------------------------------------------------- 翻译输入框（D5）与翻译后端（D6）
 
 const translateBox = atom({ plugin: 'anvil', key: 'translate' } as const, EMPTY_BOX)
-const translateHidden = atom({ plugin: 'anvil', key: 'translateHidden' } as const, false)
+const translateHidden = atom({ plugin: 'anvil', key: 'translateHidden' } as const, null as boolean | null)
+
+/** 翻译框在本会话显示不显示：本会话切换过就按切换的，没切换过按 `/config` */
+async function translateShown($: EngineInterface, settings: Settings) {
+  return isShown(settings.showTranslate, await read($, translateHidden))
+}
 
 /** 按设置选的后端翻译一段中文 */
 async function translateText($: EngineInterface, settings: Settings, text: string): Promise<Translation> {
@@ -800,7 +814,7 @@ async function typeChinese($: EngineInterface, value: string) {
 /** 画翻译框；隐藏了、有问卷占着那一栏时返回 null，让出来 */
 async function drawTranslate($: EngineInterface, settings: Settings, e: RenderInput<'AbovePrompt'>) {
   // 先排除 mobile，resolve 出来的元素才有 Input
-  if (e.surface === 'mobile' || e.props.hasSurvey || (await read($, translateHidden))) return null
+  if (e.surface === 'mobile' || e.props.hasSurvey || !(await translateShown($, settings))) return null
   const els = $.ui.resolve(e)
   const [box, now, doing] = await Promise.all([read($, translateBox).then(value => normalized(translateBox, value)), $.clock.now(), readActivity($)])
   return drawTranslateBox(els, {
@@ -813,11 +827,11 @@ async function drawTranslate($: EngineInterface, settings: Settings, e: RenderIn
   })
 }
 
-/** `/anvil translate`：显示着就隐藏，隐藏着就恢复 */
-async function toggleTranslate($: EngineInterface) {
-  const isHidden = !(await read($, translateHidden))
-  await update($, translateHidden, () => isHidden)
-  return isHidden ? '翻译框已隐藏（本会话）' : '翻译框已显示'
+/** `/anvil translate`：显示着就隐藏，隐藏着（含 `/config` 关掉的）就显示 */
+async function toggleTranslate($: EngineInterface, settings: Settings) {
+  const shown = !(await translateShown($, settings))
+  await update($, translateHidden, () => sessionHiddenFor(shown, settings.showTranslate))
+  return shownText('翻译框', shown, settings.showTranslate)
 }
 
 // ---------------------------------------------------------------- /anvil 命令
@@ -827,8 +841,8 @@ const SUBCOMMANDS: readonly Subcommand[] = [PANEL_SUBCOMMAND, TRANSLATE_SUBCOMMA
 
 /** `/anvil` 不带参数时列出的各子命令在本会话现在的状态，和 SUBCOMMANDS 同序 */
 async function subcommandStates($: EngineInterface, settings: Settings): Promise<Listed[]> {
-  const [panel, translate, keepalive] = await Promise.all([read($, panelHidden), read($, translateHidden), keepaliveNow($, settings)])
-  const states = [panel ? '隐藏' : '显示', translate ? '隐藏' : '显示', keepalive.text]
+  const [panel, translate, keepalive] = await Promise.all([panelShown($, settings), translateShown($, settings), keepaliveNow($, settings)])
+  const states = [panel ? '显示' : '隐藏', translate ? '显示' : '隐藏', keepalive.text]
   return SUBCOMMANDS.map((subcommand, index) => ({ ...subcommand, state: states[index] ?? '' }))
 }
 
@@ -854,7 +868,7 @@ export const register: Register = (on, options) => {
     await cacheChanged($, cache, loop, redraw, settings)
     await readUsage($)
     await startIdentity($, gitRefresh).catch(() => undefined)
-    await startPanel($)
+    await startPanel($, settings)
     await registerAnvil($)
     return next(e)
   })
@@ -977,7 +991,7 @@ export const register: Register = (on, options) => {
 
   on('prompt.submit', async ($, e, next) => {
     // 先补开面板，再过守卫：用户按了 Enter 就算用户请求，守卫拦下这条时面板照样打开（缓存框正好说明为什么拦）
-    await reopenPanel($, e).catch(() => undefined)
+    await reopenPanel($, settings, e).catch(() => undefined)
     // 用户可能在别处运行过 git；不等它读完
     void refreshGit($, gitRefresh).catch(() => undefined)
     if (settings.guard) {
@@ -988,7 +1002,7 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.close', { id: 'anvil' }, async ($, e, next) => {
-    await notePanelClosed($, e).catch(() => undefined)
+    await notePanelClosed($, settings, e).catch(() => undefined)
     return next(e)
   })
 
@@ -1024,8 +1038,8 @@ export const register: Register = (on, options) => {
   })
 
   // 功能自己的子命令在这里接入（带 args 匹配器），兜底的放最后
-  on('command.run', { command: 'anvil', args: /^\s*panel\s*$/ }, async $ => ({ text: await togglePanel($) }))
-  on('command.run', { command: 'anvil', args: /^\s*translate\s*$/ }, async $ => ({ text: await toggleTranslate($) }))
+  on('command.run', { command: 'anvil', args: /^\s*panel\s*$/ }, async $ => ({ text: await togglePanel($, settings) }))
+  on('command.run', { command: 'anvil', args: /^\s*translate\s*$/ }, async $ => ({ text: await toggleTranslate($, settings) }))
   on('command.run', { command: 'anvil', args: /^\s*keepalive\s*$/ }, async $ => ({ text: await toggleKeepalive($, cache, loop, settings) }))
 
   // 兜底回答功能没接走的 /anvil

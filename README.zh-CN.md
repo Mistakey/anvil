@@ -112,7 +112,7 @@ claude --plugin-dir ./anvil
 
 ### 5. 命令
 
-子命令都是切换，只作用于当前会话；新会话回到默认。
+子命令都是切换，只作用于当前会话；新会话回到 `/config` 里定的默认。
 
 | 命令 | 作用 |
 | --- | --- |
@@ -143,6 +143,8 @@ claude --plugin-dir ./anvil
 
 | 设置项 | 默认值 | 含义 |
 | --- | --- | --- |
+| `showPanel` | `true` | 每个会话自动打开面板；`/anvil panel` 仍可按会话切换 |
+| `showTranslate` | `true` | 主输入框上方常驻翻译框；`/anvil translate` 仍可按会话切换 |
 | `threshold` | `50000` | 上下文阈值（token）：达到它的会话自动开启保活，守卫也只拦这类会话 |
 | `autoKeepalive` | `true` | 上下文达到阈值的会话自动开启保活；`/anvil keepalive` 仍可按会话切换 |
 | `guard` | `true` | 缓存过期后拦下第一条消息 |
@@ -167,7 +169,7 @@ API key 读环境变量 `ANVIL_TRANSLATE_API_KEY`，不写进设置。
 ## 常见问题
 
 **面板没有出现。**
-确认是全屏渲染、终端至少 110 列；不到 144 列时面板在你发第一条消息时才打开，不在会话开始时。隐藏过或手动关掉过的，敲 `/anvil panel`。还是没有的话，在对话里找 Claude Code 写的、指出 anvil 哪个钩子出错的那一行，带上它[提一个 issue](https://github.com/Mistakey/anvil/issues)。
+确认是全屏渲染、终端至少 110 列；不到 144 列时面板在你发第一条消息时才打开，不在会话开始时。隐藏过、手动关掉过或在 `/config` 里关了 `showPanel` 的，敲 `/anvil panel`。还是没有的话，在对话里找 Claude Code 写的、指出 anvil 哪个钩子出错的那一行，带上它[提一个 issue](https://github.com/Mistakey/anvil/issues)。
 
 **图标显示成方框或问号。**
 终端字体不是 Nerd Font。装一个，并在终端设置里选上它。

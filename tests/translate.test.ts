@@ -362,6 +362,24 @@ test('/anvil translate 切换：隐藏后 band 不画翻译框，再敲一次恢
   expect(await on2.find({ type: 'Input' })).toBeDefined()
 })
 
+test('/config 关掉翻译框：band 不画，/anvil translate 在本会话显示，再敲一次回到隐藏', { options: { showTranslate: false } }, async ($, on) => {
+  engine(on)
+  await $.session.start(SESSION)
+  const off = await band($)
+  expect(await off.find({ type: 'Input' })).toBeUndefined()
+  await off.unmount()
+  expect((await $.command.run(anvil(''))).text).toContain('/anvil translate  显示或隐藏翻译框（现在：隐藏）')
+
+  expect((await $.command.run(anvil('translate'))).text).toBe('翻译框已显示（本会话）')
+  const shown = await band($)
+  expect(await shown.find({ type: 'Input' })).toBeDefined()
+  await shown.unmount()
+
+  expect((await $.command.run(anvil('translate'))).text).toBe('翻译框已隐藏')
+  const again = await band($)
+  expect(await again.find({ type: 'Input' })).toBeUndefined()
+})
+
 test('/anvil 列出 translate 子命令；旧写法 hide|show 按未知子命令处理', async ($, on) => {
   engine(on)
   await $.session.start(SESSION)

@@ -112,7 +112,7 @@ Click the translation box or press `ctrl+x tab`, write in Chinese, and press Ent
 
 ### 5. Commands
 
-Each subcommand toggles something for the current session only. A new session starts from the defaults.
+Each subcommand toggles something for the current session only. A new session starts from the defaults you set in `/config`.
 
 | Command | Does |
 | --- | --- |
@@ -143,6 +143,8 @@ Run `/config` and open anvil's options:
 
 | Option | Default | Meaning |
 | --- | --- | --- |
+| `showPanel` | `true` | open the panel in every session; `/anvil panel` still toggles it per session |
+| `showTranslate` | `true` | keep the translation box above the prompt; `/anvil translate` still toggles it per session |
 | `threshold` | `50000` | context size in tokens at which the keepalive turns on by itself and the guard starts guarding |
 | `autoKeepalive` | `true` | turn the keepalive on by itself for sessions at or above the threshold; `/anvil keepalive` still toggles it per session |
 | `guard` | `true` | hold back the first message after the cache has expired |
@@ -167,7 +169,7 @@ Nothing else leaves your machine. `claude plugin validate .` prints every hook a
 ## FAQ
 
 **The panel doesn't appear.**
-Check that rendering is fullscreen and the terminal is at least 110 columns wide; below 144 columns the panel opens on your first message rather than at start. If you hid or closed it, run `/anvil panel`. If it still doesn't show, look in the transcript for a line from Claude Code that names a failed anvil hook, and [open an issue](https://github.com/Mistakey/anvil/issues) with it.
+Check that rendering is fullscreen and the terminal is at least 110 columns wide; below 144 columns the panel opens on your first message rather than at start. If you hid or closed it, or turned `showPanel` off, run `/anvil panel`. If it still doesn't show, look in the transcript for a line from Claude Code that names a failed anvil hook, and [open an issue](https://github.com/Mistakey/anvil/issues) with it.
 
 **The icons show as boxes or question marks.**
 Your terminal font isn't a Nerd Font. Install one and select it in the terminal's settings.

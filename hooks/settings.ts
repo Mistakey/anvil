@@ -31,6 +31,8 @@ function backend(options: PluginOptions): TranslateBackend {
 
 export function readSettings(options: PluginOptions): Settings {
   return {
+    showPanel: boolean(options, 'showPanel'),
+    showTranslate: boolean(options, 'showTranslate'),
     threshold: number(options, 'threshold'),
     autoKeepalive: boolean(options, 'autoKeepalive'),
     guard: boolean(options, 'guard'),
@@ -38,4 +40,22 @@ export function readSettings(options: PluginOptions): Settings {
     translateApiUrl: text(options, 'translateApiUrl'),
     translateApiModel: text(options, 'translateApiModel'),
   }
+}
+
+/**
+ * 面板、翻译框在本会话显示不显示（spec D3、D9 的分层）：`/config` 定默认，`/anvil panel`、`/anvil translate` 切本会话。
+ * sessionHidden 是本会话切换出的、和默认不同的状态；null 表示按默认（没切换过，或切回了默认）。
+ */
+export function isShown(byDefault: boolean, sessionHidden: boolean | null): boolean {
+  return sessionHidden === null ? byDefault : !sessionHidden
+}
+
+/** 切换到 shown 后要记下的 sessionHidden：和默认相同就记 null，本会话之后在 `/config` 改默认照样生效 */
+export function sessionHiddenFor(shown: boolean, byDefault: boolean): boolean | null {
+  return shown === byDefault ? null : !shown
+}
+
+/** 切换后回给用户的一行：和 `/config` 的默认不同时注明只在本会话 */
+export function shownText(name: string, shown: boolean, byDefault: boolean): string {
+  return `${name}已${shown ? '显示' : '隐藏'}${shown === byDefault ? '' : '（本会话）'}`
 }

@@ -7,6 +7,8 @@ test('没改设置时各项取清单里的默认值', async ($, on) => {
   await $.session.start(SESSION)
 
   expect(state.get('anvil.settings')).toEqual({
+    showPanel: true,
+    showTranslate: true,
     threshold: 50000,
     autoKeepalive: true,
     guard: true,
@@ -17,6 +19,8 @@ test('没改设置时各项取清单里的默认值', async ($, on) => {
 })
 
 const GIVEN = {
+  showPanel: false,
+  showTranslate: false,
   threshold: 80000,
   autoKeepalive: false,
   guard: false,
@@ -37,6 +41,8 @@ test('只给一部分设置时，其余取默认值', { options: { threshold: 12
   await $.session.start(SESSION)
 
   expect(state.get('anvil.settings')).toEqual({
+    showPanel: true,
+    showTranslate: true,
     threshold: 120000,
     autoKeepalive: true,
     guard: true,
