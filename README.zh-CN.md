@@ -10,7 +10,7 @@
 **一个让长会话更省、更好看的 Claude Code mod。** 离开时让 prompt 缓存不过期；缓存已经冷了时，拦下那条会整段重建缓存的消息；在对话右侧停靠一个面板，放下原来 statusline 上的全部信息和更多内容；再给你一个输入框，写中文、发英文。
 
 <p align="center">
-  <img src="docs/media/session.png" alt="全屏的 Claude Code，右侧停靠着 anvil 面板：缓存、用量、一个已完成的子 agent、用户发的消息和身份栏；主输入框上方是中→英翻译框" width="900">
+  <img src="docs/media/session.png" alt="全屏的 Claude Code，右侧停靠着 anvil 面板：缓存、用量、一个已完成的子 agent、用户发的消息和身份栏；左边是 Claude 的英文回复，主输入框上方是中→英翻译框" width="900">
 </p>
 
 <p align="center">
@@ -26,7 +26,7 @@
 
 | 面板 | 翻译框 |
 | --- | --- |
-| <img src="docs/media/panel.png" alt="anvil 面板：缓存命中率 94%、有效至 17:58、保活已启用；5h 和 7d 的用量条、重置时刻和预测；上下文 54k / 1M；花费 $0.02；一个已完成的子 agent；一条消息；身份栏" width="320"> | <img src="docs/media/translate.png" alt="一句中文翻译完之后的翻译框：显示已追加 21 个词，英文译文在主输入框里等着发送" width="520"><br><br>译文进的是主输入框；你在那里按 Enter 之前，什么都不会发出去。 |
+| <img src="docs/media/panel.png" alt="anvil 面板：缓存命中率 93%、有效至 18:17，上下文不到 50k、保活未启用；5h 和 7d 的用量条、重置时刻和预测；上下文 45k / 1M；花费 $0.01；一个已完成的子 agent；一条消息；身份栏" width="320"> | <img src="docs/media/translate.png" alt="一句中文翻译完之后的翻译框：显示已追加 21 个词，英文译文在主输入框里等着发送" width="520"><br><br>译文进的是主输入框；你在那里按 Enter 之前，什么都不会发出去。 |
 
 ## 前提条件
 
