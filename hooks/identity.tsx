@@ -3,7 +3,8 @@
 // git 取法照用户原来的 ~/.claude/statusline.mjs（`--no-optional-locks`、分离 HEAD 写 `@提交号`、
 // `@{u}` 领先落后、储藏数），改成一条 `status --porcelain=v2 --branch --show-stash` 取齐分支、上游、
 // 领先落后、各项计数和储藏数；目录名、改动行数、停在一半的命令是 statusline 没有的，按 D8 加。
-// token/s 照 .13 探针：首字是请求流里第一块不是 engine 的，结束是 stop 那块，只算主会话；
+// token/s 照 .51 探针：首字是响应的第一块（引擎的信封也算），结束是 stop 那块，只算主会话；
+// 思考不出正文，只隔一阵来一个空的 thinking 块，有时整段思考只在结尾来一个，跳过 engine 块会把思考的时间漏掉。
 // 首字等待从请求开始算到首字，整次用时从请求开始算到 stop 那块。
 // 只放不碰 `$` 的纯逻辑和界面组件；运行 git、读 git 目录和记请求时刻在 register.ts。
 
@@ -168,11 +169,22 @@ export function effortSegment(effort: string | number): Segment {
   }
 }
 
-/** 输出 token 数 ÷ 首字到结束的秒数；缺一个时刻、跨度不为正或没有输出时算不出 */
-export function tokensPerSecond(output: number | null | undefined, firstAt: number | null, stopAt: number | null): number | null {
-  if (output == null || output <= 0 || firstAt === null || stopAt === null) return null
-  const span = stopAt - firstAt
-  return span > 0 ? Math.round(output / (span / 1000)) : null
+/**
+ * 比这还快的不是流出来的，是整段一起到的：.51 探针里真流出来的 Opus 5.5 是 55–107、Haiku 5.5 是 189–247 token/s，
+ * 整段一起到的算出来是 1980–9229
+ */
+const STREAM_CEILING = 1000
+
+/**
+ * 输出 token 数（含思考）÷ 首字到结束的秒数；整段一起到（快过 STREAM_CEILING）或没有首字时退回 ÷ 整次用时，
+ * 只会偏低不会偏高。没有结束、跨度不为正或没有输出时算不出
+ */
+export function tokensPerSecond(output: number | null | undefined, startAt: number, firstAt: number | null, stopAt: number | null): number | null {
+  if (output == null || output <= 0 || stopAt === null) return null
+  const perSecond = (from: number) => (stopAt > from ? output / ((stopAt - from) / 1000) : null)
+  const streamed = firstAt === null ? null : perSecond(firstAt)
+  const speed = streamed !== null && streamed <= STREAM_CEILING ? streamed : perSecond(startAt)
+  return speed === null ? null : Math.round(speed)
 }
 
 /** 秒数：不到 60 秒一位小数（12.7s），60 秒起按 D10 的时长写法（1m35s） */

@@ -25,6 +25,7 @@
 - Claude Code 内置的 cache keepalive 由服务端开关控制，会和 anvil 的保活重叠；开没开用 `claude --debug` 开交互会话后 grep `[cache-keepalive]`（headless 下没有这些行）。
 - mod 在第一次请求前拿不到会话实际用的 effort：`--effort`、开局前的 `/effort` 不进 settings 也不进环境变量；模型默认值由服务端开关、组织默认和模型目录决定；`classic.*` 生命周期钩子不带 effort。唯一准确的来源是 `turn.step` 的 `effort`。另外 user settings 顶层的 `effortLevel` 只对一批旧模型（haiku-4-5、opus-5、fable-5 等硬编码名单）生效，Haiku 5.5、Opus 5.5 等新模型不吃它，走模型默认值；project/local/flag/policy 的顶层 `effortLevel` 对所有模型生效（anvil-k0t.45，逆向 2.1.296）。
 - `$.model.complete` 不流式，`maxTokens` 默认 1024。
+- `turn.step` 的块（anvil-k0t.51 探针，2.1.299）：思考不出正文，`thinking` 块的 `text` 都是空串，隔约 1 秒来一个，有时整段思考只在结尾来一个；`usage.output_tokens` 含思考。Haiku 5.5 也会思考。响应的第一块是 engine 块（信封），总在思考之前到，可当首字。Opus 5.5 有时整段回复（含信封）几十毫秒里一起到，从哪一块算起流速都是上千 token/s。plugin test 里测试造不出 engine 块（"a ref this link never pulled as an engine chunk"），只能 yield 别的块代替。
 - `$.http.fetch` 单次 30 秒，请求体和响应体各 4 MiB；接第三方大模型 API 就走它，key 放环境变量（`--plugin-dir` 加载时插件配置的敏感项能否写入未证实）。
 
 ### 界面与元素
