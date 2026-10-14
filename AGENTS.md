@@ -44,6 +44,7 @@
 - 引擎给 Pane 画固定底色 #262626（伪终端里每格的背景都是它，不跟终端主题）；AbovePrompt band 在终端自己的底色上。面板的对比度按 #262626 量（anvil-k0t.44）。
 - 嵌套的 `Text` 沿用外层的 `color`：要用终端前景色（不设 color）的字不能包在带颜色的 Text 里，写成兄弟节点（anvil-k0t.44，翻译框标题曾因此变成线色）。
 - 斜杠命令的补全菜单（2.1.299 伪终端实测）：敲 `/anvil` 时菜单那行只画命令名和 `description`，`argumentHint` 不画在菜单里；敲下 `/anvil `（带空格）后才在输入行的命令后面画成灰字。flightdeck 也一样（anvil-k0t.50）。
+- 原生收尾那行（`TurnDuration`，「✻ Baked for 1m 4s · done 15:43」）的 requestId 是对话记录里那条 `turn_duration` 的 uuid；这条记录经 `session.append`（door `notice`、`type: 'system'`、`name: 'turn_duration'`）进对话，在 `turn.complete` 之前，比它画出来早约 20 毫秒：在 `next` 之前按 uuid 记下要画的东西（anvil-k0t.52，2.1.299 伪终端实测）。`next(e)` 给回的原生元素是不透明的 `{ type: 'engine', ref }`，在引擎里是宽 100% 的一行：放进行方向的 Box、自己的字放后面会被挤到最右再折行，放进带 `width` 的 Box 被拒（"engine node under a Box with prop "width""）；要接在它后面，在它之后放 `position="absolute" bottom={0} left={N}` 的 Box，N 按原生的写法算（2 格图标 + `{word} for {时长} · done HH:MM`，时长照引擎的 formatDuration：不到 1 分钟往下取整秒，往上「1m 4s」；收尾时还有后台子 agent 在跑时整句换成「Waiting for N background agents to finish」；另有 token 预算、`/focus` 隐藏消息的变体，anvil 不管）。plugin test 里没有原生那行，测试自己挂 `ui.render { component: 'TurnDuration' }` 给一个替身。
 - 渲染点里没有 statusLine：`$.ui.status` 是插件自己的一行，mod 读不到、也改不了用户 statusLine 脚本的输出。
 - `Client`（面板里自己在帧时钟上重画的一小块，anvil 的转动图标、耗时；anvil-k0t.39 实测）：
   - `$.ui.resolve(e)` 在 VS Code 上也给 `Client`（`'Client' in els` 为真），画出来是空的 Box；元素表里有 `Client` 的只有终端和桌面，按 `e.surface` 判断。

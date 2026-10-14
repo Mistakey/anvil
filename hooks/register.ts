@@ -27,7 +27,7 @@ import { cacheRows } from './cachebox'
 
 import { answer, describe } from './command'
 import { addDenial, denialContent, denialList, denialSource } from './denials'
-import { EMPTY_IDENTITY, GIT, NUMSTAT, REV_PARSE, STATUS, baseName, gitView, identityRows, operationOf, parseNumstat, parseRepo, parseStatus, tokensPerSecond } from './identity'
+import { EMPTY_IDENTITY, EMPTY_TALLY, GIT, NUMSTAT, REV_PARSE, STATUS, addTally, baseName, gitView, identityRows, operationOf, parseNumstat, parseRepo, parseStatus, requestSpeed, turnDurationRow } from './identity'
 import type { RebaseFiles } from './identity'
 import type { Listed, Subcommand } from './command'
 import { describeInput } from './describe'
@@ -80,7 +80,7 @@ import {
 import type { Translation } from './translate'
 import { EMPTY_USAGE, HISTORY_KEYS, applyReading, parseHistory, parseResetsAt, recordSample, usageRows } from './usage'
 import type { GridRow, Histories, Reading } from './usage'
-import type { Denial, GitView, Identity, KeepaliveStop, ListId, Scrolled, Settings, SubAgent } from '../types'
+import type { Denial, GitView, KeepaliveStop, ListId, Scrolled, Settings, SpeedTally, SubAgent, TurnSpeeds } from '../types'
 
 // 模块结构（照 flightdeck 的 register.tsx / core.ts），引擎扫描源码的规则见 AGENTS.md Pitfalls「模块结构」：
 // - 所有 on(...) 都写在下面的 register 里；用到 `$` 的辅助函数写在本文件顶层（`$` 不能跨文件传）。
@@ -506,19 +506,49 @@ async function startIdentity($: EngineInterface, refresh: GitRefresh) {
 /** 会改文件或运行命令的工具：调用完 git 状态可能变了 */
 const CHANGES_FILES = new Set(['Bash', 'PowerShell', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit'])
 
-/** 一次请求的速度：输出速度、首字等待、整次用时；算不出的项为 null */
-type Speed = Pick<Identity, 'tokensPerSecond' | 'firstTokenMs' | 'requestMs'>
+const NO_TURN_SPEEDS: TurnSpeeds = { current: null, lines: {} }
+const turnSpeeds = atom({ plugin: 'anvil', key: 'turnSpeeds' } as const, NO_TURN_SPEEDS)
 
-/** 主会话一次请求的模型、effort 和速度；算不出的项留着上一次的 */
-async function noteSpeed($: EngineInterface, e: TurnStepInput, speed: Speed) {
-  await update($, identity, current => ({
-    ...current,
-    model: e.model,
-    effort: e.effort ?? null,
-    tokensPerSecond: speed.tokensPerSecond ?? current.tokensPerSecond,
-    firstTokenMs: speed.firstTokenMs ?? current.firstTokenMs,
-    requestMs: speed.requestMs ?? current.requestMs,
-  }))
+/** 记着的收尾行最多这么多段，多了丢最早的 */
+const TURN_LINES = 500
+
+/** 主会话一次请求的模型、effort 和速度：算得出就计入本会话的合计和这一段的读数 */
+async function noteSpeed($: EngineInterface, e: TurnStepInput, speed: SpeedTally | null) {
+  await update($, identity, current => ({ ...current, model: e.model, effort: e.effort ?? null, speed: speed ? addTally(current.speed, speed) : current.speed }))
+  if (!speed) return
+  await update($, turnSpeeds, current => {
+    const turn = current.current?.turnId === e.turnId ? current.current : null
+    return {
+      ...current,
+      current: turn ? { ...turn, tally: addTally(turn.tally, speed) } : { turnId: e.turnId, tally: speed, firstTokenMs: speed.firstTokenMs },
+    }
+  })
+}
+
+/**
+ * 主会话的收尾那行（对话记录里的 `turn_duration`）记进对话：这一段的读数记到它的 uuid 下，
+ * TurnDuration 的 requestId 就是这个 uuid（anvil-k0t.52 伪终端实测），画的时候按它取
+ */
+async function closeTurnSpeed($: EngineInterface, uuid: string) {
+  const [now, list] = await Promise.all([$.clock.now(), read($, agents)])
+  const waitingAgents = list.filter(agent => agent.status === 'running').length
+  await update($, turnSpeeds, current => {
+    if (!current.current) return current
+    const { tally, firstTokenMs } = current.current
+    const kept = Object.entries(current.lines).slice(-(TURN_LINES - 1))
+    return { current: null, lines: { ...Object.fromEntries(kept), [uuid]: { tally, firstTokenMs, doneAt: now, waitingAgents } } }
+  })
+}
+
+/** 换了对话（`/clear`、`/resume`、`/branch`）：平均从零算，旧的收尾行不再画在屏幕上 */
+async function resetSpeeds($: EngineInterface) {
+  await update($, identity, current => ({ ...current, speed: EMPTY_TALLY }))
+  await update($, turnSpeeds, () => NO_TURN_SPEEDS)
+}
+
+/** 这一段回复的读数；恢复前的、打断的没有 */
+async function turnSpeedOf($: EngineInterface, requestId: string) {
+  return (await read($, turnSpeeds)).lines[requestId]
 }
 
 // ---------------------------------------------------------------- 面板按键：列表展开、详情、滚动（spec D9）
@@ -830,7 +860,10 @@ export const register: Register = (on, options) => {
     await resumeCache($, cache, e)
     // `/clear`、会话内恢复别的会话（`/resume`、`/branch`）都换了对话：上一段空闲的停下不再算，
     // 按起步的缓存状态重新定时（冷了不发）
-    if (e.source === 'clear' || e.source === 'resume' || e.source === 'fork') startStretch(loop)
+    if (e.source === 'clear' || e.source === 'resume' || e.source === 'fork') {
+      startStretch(loop)
+      await resetSpeeds($).catch(() => undefined)
+    }
     await cacheChanged($, cache, loop, redraw, settings)
     await refreshGit($, gitRefresh).catch(() => undefined)
     return result
@@ -850,7 +883,7 @@ export const register: Register = (on, options) => {
     await publishLoop($, loop)
     await scheduleRedraw($, cache, redraw)
     // token/s 从首字算起（D8）：首字是响应的第一块（含 engine 块，.51 实测），结束是 stop 那块；
-    // 首字等待和整次用时从请求开始算
+    // 首字等待从请求开始算；整段一起到时生成用时退回整次用时
     const startAt = await $.clock.now()
     let firstAt: number | null = null
     let stopAt: number | null = null
@@ -867,11 +900,7 @@ export const register: Register = (on, options) => {
     }
     const result = await stream.result
     if (result.usage) await stepAnswered($, cache, result.usage)
-    await noteSpeed($, e, {
-      tokensPerSecond: tokensPerSecond(output ?? result.usage?.output_tokens, startAt, firstAt, stopAt),
-      firstTokenMs: firstAt === null ? null : firstAt - startAt,
-      requestMs: stopAt === null ? null : stopAt - startAt,
-    }).catch(() => undefined)
+    await noteSpeed($, e, requestSpeed(output ?? result.usage?.output_tokens, startAt, firstAt, stopAt)).catch(() => undefined)
     return result
   })
 
@@ -917,6 +946,12 @@ export const register: Register = (on, options) => {
     const stored = await next(e)
     if (isMyMessage(e) && stored.uuid !== undefined) await noteMessage($, stored.uuid, stored.message.content).catch(() => undefined)
     return stored
+  })
+
+  // 主会话一段回复的收尾那行：先记下这一段的读数再交下去，画它的时候已经有了
+  on('session.append', { door: 'notice' }, async ($, e, next) => {
+    if (!e.agentId && e.message.type === 'system' && e.message.name === 'turn_duration') await closeTurnSpeed($, e.uuid).catch(() => undefined)
+    return next(e)
   })
 
   on('session.measure', async ($, e, next) => {
@@ -965,6 +1000,13 @@ export const register: Register = (on, options) => {
   on('ui.fault', async ($, e, next) => {
     await noteFault($, e).catch(() => undefined)
     return next(e)
+  })
+
+  // 原生收尾那行后面接这一段的读数；没有读数时照原样
+  on('ui.render', { component: 'TurnDuration' }, async ($, e, next) => {
+    const turn = e.surface === 'terminal' ? await turnSpeedOf($, e.requestId) : undefined
+    if (!turn) return next(e)
+    return turnDurationRow($.ui.resolve(e), await next(e), e.props, turn)
   })
 
   // 翻译框常驻在主输入框上方
