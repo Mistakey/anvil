@@ -25,7 +25,7 @@ import * as cacheState from './cache'
 import type { Cache, ResumeFields, Submission } from './cache'
 import { cacheRows } from './cachebox'
 
-import { COMMAND, answer } from './command'
+import { answer, describe } from './command'
 import { addDenial, denialContent, denialList, denialSource } from './denials'
 import { EMPTY_IDENTITY, GIT, NUMSTAT, REV_PARSE, STATUS, baseName, gitView, identityRows, operationOf, parseNumstat, parseRepo, parseStatus, tokensPerSecond } from './identity'
 import type { RebaseFiles } from './identity'
@@ -88,7 +88,7 @@ import type { Denial, GitView, Identity, KeepaliveStop, ListId, Scrolled, Settin
 // - 几个功能都要的事件（session.start 等）只注册一次、不带匹配器：处理函数里按写下的顺序依次调用各功能，
 //   先后顺序就是处理函数里的行序。新功能往这类事件里加一行调用，放在它依赖的功能之后、`/anvil` 命令之前。
 // - 只属于一个功能的事件用真匹配器注册（带 args 的 command.run、按 requestId 的 Pane ui.render 等），
-//   不用 `{}` 空匹配器。新功能的子命令说明加进 SUBCOMMANDS、现在的状态加进 subcommandStates，
+//   不用 `{}` 空匹配器。新功能的子命令说明加进 SUBCOMMANDS（补全菜单的参数提示也由它列出）、现在的状态加进 subcommandStates，
 //   执行写成带 args 匹配器的 command.run（只认子命令本身，敲一次切换一次），注册在兜底的 command.run 之前。
 // - 面板的区块（panel.tsx 的 SECTIONS）由各功能填内容：在 drawAnvilPanel 里把该区块的 SectionBody
 //   放进 bodies；三个列表（我的消息、自动模式拒绝、子 agent）交 ListBody 放进 lists，按上限截、
@@ -806,7 +806,7 @@ async function subcommandStates($: EngineInterface, settings: Settings): Promise
 }
 
 async function registerAnvil($: EngineInterface) {
-  await $.command.register({ name: 'anvil', description: COMMAND.description, argumentHint: COMMAND.argumentHint })
+  await $.command.register({ name: 'anvil', ...describe(SUBCOMMANDS) })
 }
 
 // ---------------------------------------------------------------- hooks

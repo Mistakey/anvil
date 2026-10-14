@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { answer } from '../hooks/command'
+import { answer, describe } from '../hooks/command'
 import type { Listed } from '../hooks/command'
 import { SESSION, anvil, panes, world } from './world'
 
@@ -9,6 +9,19 @@ test('会话开始时注册 /anvil', async ($, on) => {
   await $.session.start(SESSION)
 
   expect(commands).toEqual(['anvil'])
+})
+
+test('补全菜单里 /anvil 的灰字：一句命令说明，参数提示列出全部子命令', async ($, on) => {
+  const { registered } = world(on)
+  await $.session.start(SESSION)
+
+  expect(registered).toEqual([
+    {
+      name: 'anvil',
+      argumentHint: '[panel|translate|keepalive]',
+      description: '在本会话切换 anvil 面板、翻译框或缓存保活；不带参数时列出现在的状态',
+    },
+  ])
 })
 
 test('/anvil 不带参数时列出三个子命令和本会话的当前状态', async ($, on) => {
@@ -75,4 +88,8 @@ test('未知子命令、已知子命令带多余的词，都先说明再列出',
   expect(answer(SAMPLES, 'nope')).toBe(`没有子命令 nope。\n${LIST}`)
   expect(answer(SAMPLES, ' nope hide ')).toBe(`没有子命令 nope hide。\n${LIST}`)
   expect(answer(SAMPLES, ' panel  hide now ')).toBe(`没有子命令 panel hide now。\n${LIST}`)
+})
+
+test('参数提示按 SUBCOMMANDS 的顺序列出子命令', () => {
+  expect(describe(SAMPLES).argumentHint).toBe('[panel|keepalive]')
 })

@@ -1,6 +1,7 @@
 import type {
   AgentSpawnInput,
   CommandRunInput,
+  CommandSpec,
   HookStream,
   ModelForkResult,
   On,
@@ -56,6 +57,7 @@ export const WARM: ForkAnswer = { read: 150000, write: 40 }
 // 进入会话的消息和放回主输入框的文本
 export function world(on: On, options: WorldOptions = {}) {
   const commands: string[] = []
+  const registered: CommandSpec[] = []
   const state = new Map<string, unknown>()
   const entered: string[] = []
   const fills: string[] = []
@@ -74,6 +76,7 @@ export function world(on: On, options: WorldOptions = {}) {
   }))
   on('command.register', ($, e) => {
     commands.push(e.name)
+    registered.push(e)
     return { value: { command: e.name } }
   })
   // 测试拿到的 `$` 没有 state 这个名词，只能在插件之下看它写了什么，再交给测试工具自带的 state
@@ -127,7 +130,7 @@ export function world(on: On, options: WorldOptions = {}) {
     }
     return { value }
   })
-  return { commands, state, entered, fills, fillModes, box, forks, store, rewrite }
+  return { commands, registered, state, entered, fills, fillModes, box, forks, store, rewrite }
 }
 
 /**
