@@ -23,6 +23,7 @@
 - mod 拿不到 Claude Code 自己的缓存追踪（过期时刻、本次写入的 TTL、失效原因），这些只在 statusline 的 stdin JSON（`prompt_cache`）里；mod 侧按最后一次请求时间加 TTL 估算，cache-tax 就是这么做的。例外：`classic.SessionStart`（resume/fork）带 `prompt_cache_likely_expired`，`classic.Pre/PostModelSwitch` 带 `prompt_cache_warm` 和 `cache_ttl`。
 - 在 `-p` 下实测，第一次 `$.model.fork` 只命中系统提示层、消息部分重新写入；fork 保活能否续上主会话缓存，要在交互会话里实测（cache-tax 有交互会话的正例）。statusline 只要 fork 读到缓存就顺延过期时刻，哪怕只命中了系统提示层。
 - Claude Code 内置的 cache keepalive 由服务端开关控制，会和 anvil 的保活重叠；开没开用 `claude --debug` 开交互会话后 grep `[cache-keepalive]`（headless 下没有这些行）。
+- mod 在第一次请求前拿不到会话实际用的 effort：`--effort`、开局前的 `/effort` 不进 settings 也不进环境变量；模型默认值由服务端开关、组织默认和模型目录决定；`classic.*` 生命周期钩子不带 effort。唯一准确的来源是 `turn.step` 的 `effort`。另外 user settings 顶层的 `effortLevel` 只对一批旧模型（haiku-4-5、opus-5、fable-5 等硬编码名单）生效，Haiku 5.5、Opus 5.5 等新模型不吃它，走模型默认值；project/local/flag/policy 的顶层 `effortLevel` 对所有模型生效（anvil-k0t.45，逆向 2.1.296）。
 - `$.model.complete` 不流式，`maxTokens` 默认 1024。
 - `$.http.fetch` 单次 30 秒，请求体和响应体各 4 MiB；接第三方大模型 API 就走它，key 放环境变量（`--plugin-dir` 加载时插件配置的敏感项能否写入未证实）。
 
