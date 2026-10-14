@@ -272,18 +272,19 @@ export type Identity = {
 
 /**
  * 几次请求的速度合计（spec D8）：token/s 按 token 加权，总输出 ÷ 总生成用时；首字取各次的平均。
- * 生成用时是首字到结束，整段一起到的请求退回整次用时（只会偏低），这时 isLowerBound 为 true，数字前标 ≥
+ * 生成用时是首字到结束，整段一起到的请求退回整次用时（只会偏低），这时 isLowerBound 为 true，数字前标 ≥。
+ * 有量得出流速的请求时，output、generationMs 只合计这些请求，下限的不算进 token/s（addTally）
  */
 export type SpeedTally = {
   /** 计入的请求次数 */
   requests: number
-  /** 输出 token 数（含思考）之和 */
+  /** token/s 计入的请求的输出 token 数（含思考）之和 */
   output: number
-  /** 生成用时之和，毫秒 */
+  /** token/s 计入的请求的生成用时之和，毫秒 */
   generationMs: number
   /** 首字等待（请求开始到响应的第一块）之和，毫秒 */
   firstTokenMs: number
-  /** 有请求用了退路 */
+  /** token/s 计入的请求都用了退路 */
   isLowerBound: boolean
 }
 

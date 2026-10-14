@@ -277,10 +277,20 @@ function forecast(percent: number, resetsAt: number, empty: number | null, now: 
   return [{ text: `${ICON.battery} `, color: COLOR.ok }, minor(empty === null ? '—' : formatWhen(empty, now))]
 }
 
+/**
+ * 本会话还没有读数时（引擎的读数来自本进程最近一次 API 响应，开局、`/clear` 后要等第一条消息）
+ * 用存档里最近的读数：存档本机会话共用，窗口没过重置时它就是已知最新的用量
+ */
+function storedLimit(kind: 'five_hour' | 'seven_day', history: History | undefined, now: number): RateLimit | undefined {
+  const last = history?.samples.at(-1)
+  if (history === undefined || last === undefined || history.resetsAt <= now) return undefined
+  return { kind, percentUsed: last.percent, resetsAt: new Date(history.resetsAt).toISOString() }
+}
+
 /** 5h、7d：进度条 百分比；第二行两列："󰑐 重置时刻"（次要色） | 预测"图标 时刻" */
 function limitRow(kind: 'five_hour' | 'seven_day', limits: readonly RateLimit[], now: number, inner: number, histories: Histories): GridSpec {
   const { label } = WINDOWS[kind] ?? { label: kind }
-  const limit = limits.find(one => one.kind === kind)
+  const limit = limits.find(one => one.kind === kind) ?? storedLimit(kind, histories[kind], now)
   const resetsAt = parseResetsAt(limit?.resetsAt)
   // 没有读数，或窗口已经过了重置时刻：下一条消息才开始新窗口
   if (limit === undefined || resetsAt === null || resetsAt <= now) {

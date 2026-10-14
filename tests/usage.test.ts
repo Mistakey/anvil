@@ -148,6 +148,20 @@ test('窗口还没开始（没有读数，或已过重置时刻）：0%，第二
   }
 })
 
+test('本会话还没有读数（开局、/clear 后）：窗口没过重置时用存档里最近的读数，过了才写"发送消息后开始计时"', () => {
+  const histories = {
+    five_hour: { resetsAt: at(13, 22), samples: [{ at: at(13, 18), percent: 30 }, { at: at(13, 19, 30), percent: 41 }] },
+    seven_day: { resetsAt: at(13, 19), base: 0, samples: [{ at: at(13, 18), percent: 24, total: 24 }] },
+  }
+  const rows = usageRows(EMPTY_USAGE, NOW, INNER, histories)
+  expect(firstOf(rows, 'five_hour')).toBe(`${barText(41)}  41%`)
+  expect(detailOf(rows, 'five_hour')).toContain(`${RESET} 22:00`)
+  // 7d 的存档窗口已过重置
+  expect(detailOf(rows, 'seven_day')).toBe('发送消息后开始计时')
+  // 有本会话的读数就用读数
+  expect(firstOf(usageRows(WORKING, NOW, INNER, histories), 'five_hour')).toBe(`${barText(62)}  62%`)
+})
+
 test('上下文：第一行进度条、百分比，第二行已用 / 上限；还没有读数时写 —', () => {
   const rows = usageRows(WORKING, NOW, INNER)
   expect(firstOf(rows, 'context')).toBe(`${barText(76)}  76%`)

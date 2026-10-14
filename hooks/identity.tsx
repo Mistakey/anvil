@@ -191,13 +191,19 @@ export function requestSpeed(output: number | null | undefined, startAt: number,
   return { requests: 1, output, generationMs, firstTokenMs: first - startAt, isLowerBound: !isStreamed }
 }
 
+/**
+ * 合起来：次数和首字都加。token/s 只用量得出流速的请求：一边是下限、一边量得出时只留量得出的那边，
+ * 平均不会因为一次整段一起到的请求就一直标 ≥（用户 2026-10-14 反馈）；都是下限时才按下限合计
+ */
 export function addTally(a: SpeedTally, b: SpeedTally): SpeedTally {
+  const counted = (one: SpeedTally) => one.requests > 0 && one.generationMs > 0
+  const rate = !counted(a) ? b : !counted(b) ? a : a.isLowerBound === b.isLowerBound ? null : a.isLowerBound ? b : a
   return {
     requests: a.requests + b.requests,
-    output: a.output + b.output,
-    generationMs: a.generationMs + b.generationMs,
+    output: rate ? rate.output : a.output + b.output,
+    generationMs: rate ? rate.generationMs : a.generationMs + b.generationMs,
     firstTokenMs: a.firstTokenMs + b.firstTokenMs,
-    isLowerBound: a.isLowerBound || b.isLowerBound,
+    isLowerBound: rate ? rate.isLowerBound : a.isLowerBound,
   }
 }
 
@@ -211,7 +217,7 @@ export function averageFirstToken(tally: SpeedTally): number | null {
   return tally.requests > 0 ? tally.firstTokenMs / tally.requests : null
 }
 
-/** 速度的数字；有请求用了退路时前面标 ≥（照 coralline） */
+/** 速度的数字；计入的请求都用了退路时前面标 ≥（照 coralline） */
 function speedNumber(tally: SpeedTally): string | null {
   const speed = tokensPerSecond(tally)
   return speed === null ? null : `${tally.isLowerBound ? '≥' : ''}${speed}`
@@ -355,7 +361,7 @@ export function engineTurnText(props: { word: string; durationMs: number }, turn
   return `${props.word} for ${engineDuration(props.durationMs)} · done ${clockTime(turn.doneAt)}`
 }
 
-/** 接在原生那行后面的字：` · N token/s · 首字 N s`，有请求用了退路时 token/s 前标 ≥ */
+/** 接在原生那行后面的字：` · N token/s · 首字 N s`，这一段的请求都用了退路时 token/s 前标 ≥ */
 export function turnSuffix(turn: TurnSpeed): string {
   const speed = speedNumber(turn.tally)
   return `${speed === null ? '' : ` · ${speed} token/s`} · 首字 ${formatSeconds(turn.firstTokenMs)}`

@@ -84,30 +84,42 @@ const messageLines = (text: string, inner: number) => wrap(text, Math.max(1, inn
 /**
  * 一条消息：整条是一个 Button，焦点移上去反白，Enter 让对话滚到这条消息。序号次要色、右对齐成一列；
  * 第二行和正文对齐（悬挂缩进）。Button 里的字是连着排的，换行后从行首起，缩进只能自己补空格。
+ * 焦点反白引擎只画 Button 的第一行（AGENTS.md Pitfalls）：有焦点时把第二行（连缩进）绝对定位压上去自己反白。
  */
-function messageRow(els: Els, message: MyMessage, seq: number, lines: string[], inner: number, onPress: () => void): RenderElement {
+function messageRow(els: Els, message: MyMessage, seq: number, lines: string[], inner: number, onPress: () => void, isFocused: boolean): RenderElement {
   const { Box, Button, Text } = els
   const indent = ' '.repeat(COLUMN.seq + COLUMN.gap)
   return (
     <Box key={`row:message:${message.id}`} width={inner} height={lines.length} flexShrink={0}>
-      <Button key={`message:${message.id}`} label={`第 ${seq} 条消息`} plain onPress={onPress}>
+      <Button key={messageKey(message)} label={`第 ${seq} 条消息`} plain onPress={onPress}>
         <Text color={COLOR.secondary}>{`${padStart(String(seq), COLUMN.seq)} `}</Text>
         <Text>{lines.join(`\n${indent}`)}</Text>
       </Button>
+      {isFocused
+        ? lines.slice(1).map((line, index) => (
+            <Box key={`over:message:${message.id}:${index + 1}`} position="absolute" top={index + 1} left={0}>
+              <Text inverse>{`${indent}${line}`}</Text>
+            </Box>
+          ))
+        : null}
     </Box>
   )
 }
 
-/** 交给面板的我的消息列表：占满剩余高度，放不下时顶部写更早的条数；条与条之间不空行 */
-export function messageList(els: Els, list: MyMessages, view: { inner: number; onPress: (id: string) => void }): ListBody {
+/** 一条消息那个 Button 的 key：焦点落在它上面时 ui.focus 报的就是它 */
+export const messageKey = (message: Pick<MyMessage, 'id'>) => `message:${message.id}`
+
+/** 交给面板的我的消息列表：占满剩余高度，放不下时顶部写更早的条数；条与条之间不空行。focused：面板里焦点所在元素的 key */
+export function messageList(els: Els, list: MyMessages, view: { inner: number; onPress: (id: string) => void; focused?: string | null }): ListBody {
   const items: ListItem[] = list.items.map((message, index) => {
     const lines = messageLines(message.text, view.inner)
     const shown = lines.length > 0 ? lines : ['']
     const seq = list.dropped + index + 1
     const press = () => view.onPress(message.id)
-    const row = messageRow(els, message, seq, shown, view.inner, press)
+    const isFocused = view.focused === messageKey(message)
+    const row = messageRow(els, message, seq, shown, view.inner, press, isFocused)
     // 面板太矮、连最新一条的两行都放不下时，收成一行
-    const short = shown.length > 1 ? messageRow(els, message, seq, wrap(message.text, Math.max(1, view.inner - COLUMN.seq - COLUMN.gap), 1), view.inner, press) : undefined
+    const short = shown.length > 1 ? messageRow(els, message, seq, wrap(message.text, Math.max(1, view.inner - COLUMN.seq - COLUMN.gap), 1), view.inner, press, isFocused) : undefined
     return { key: message.id, rows: [row], height: shown.length, ...(short ? { short } : {}) }
   })
   return { status: messageCount(list), unit: '条', lead: COLUMN.seq, items, limit: 'fill', empty: '本会话还没有发过消息' }

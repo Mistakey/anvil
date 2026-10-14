@@ -512,6 +512,11 @@ async function startIdentity($: EngineInterface, refresh: GitRefresh) {
   await refreshGit($, refresh)
 }
 
+/** /model 切换了主会话的模型 */
+async function switchModel($: EngineInterface, model: string) {
+  await update($, identity, normalizing(identity, current => ({ ...current, model })))
+}
+
 /** 会改文件或运行命令的工具：调用完 git 状态可能变了 */
 const CHANGES_FILES = new Set(['Bash', 'PowerShell', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit'])
 
@@ -740,7 +745,7 @@ async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderI
       cache: { rows: cacheRows(cached, keepalive, now, inner).flatMap(keepRow) },
     },
     lists: {
-      messages: messageList(els, mine, { inner, onPress: id => void scrollToMessage($, id) }),
+      messages: messageList(els, mine, { inner, focused: e.props.isFocused ? focused : null, onPress: id => void scrollToMessage($, id) }),
       denials: denialList(els, denied, { detail: folding.detail, inner, onPress: id => void pressDetail($, id) }),
       // 子 agent 的行大约从第几行起：缓存框 5 行、细槽、用量框、细槽、上边框
       agents: agentList(els, list, { detail: folding.detail, now, inner, live, focused: e.props.isFocused ? focused : null, onPress: id => void pressDetail($, id) }),
@@ -884,7 +889,9 @@ export const register: Register = (on, options) => {
       await resetSpeeds($).catch(() => undefined)
     }
     await cacheChanged($, cache, loop, redraw, settings)
-    await refreshGit($, gitRefresh).catch(() => undefined)
+    // `$.state` 换了对话就清空：用量、模型和 git 都重新读，不等第一条消息
+    await readUsage($)
+    await startIdentity($, gitRefresh).catch(() => undefined)
     return result
   })
 
@@ -952,6 +959,13 @@ export const register: Register = (on, options) => {
     // 不等它读完，工具结果先交回去；子 agent 改的文件也算
     if (CHANGES_FILES.has(String(e.tool))) void refreshGit($, gitRefresh).catch(() => undefined)
     return ran
+  })
+
+  // /model 切换：模型马上换，不等下一次请求；effort 照旧等请求带来
+  on('classic.PostModelSwitch', async ($, e, next) => {
+    const result = await next(e)
+    await switchModel($, e.to_model).catch(() => undefined)
+    return result
   })
 
   on('classic.PermissionDenied', async ($, e, next) => {

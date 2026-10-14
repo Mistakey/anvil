@@ -322,12 +322,17 @@ test('一次请求：生成用时从首字算到结束；整段一起到（快�
   expect(requestSpeed(0, 0, 0, 1000)).toBe(null)
 })
 
-test('合计：token/s 按 token 加权（总输出 ÷ 总生成用时），不是各次速度的平均；首字取平均；有一次用了退路就标作下限', () => {
+test('合计：token/s 按 token 加权（总输出 ÷ 总生成用时），不是各次速度的平均；首字取平均；量得出的请求才算进 token/s，都是下限时才标作下限', () => {
   // 400 token / 8 秒（50/s）和 280 token / 2 秒（140/s）：680 ÷ 10 秒 = 68，不是 95
   expect(tokensPerSecond(IDENTITY.speed)).toBe(68)
   expect(averageFirstToken(IDENTITY.speed)).toBe(1500)
   expect(IDENTITY.speed.isLowerBound).toBe(false)
-  expect(addTally(IDENTITY.speed, one(99, 1842, 1792, true)).isLowerBound).toBe(true)
+  // 一次整段一起到的请求：首字照算，token/s 不受它影响、不标下限；先来的是下限也一样
+  const mixed = addTally(IDENTITY.speed, one(99, 1842, 1792, true))
+  expect([tokensPerSecond(mixed), Math.round(averageFirstToken(mixed) ?? 0), mixed.isLowerBound]).toEqual([68, 1597, false])
+  expect(addTally(addTally(EMPTY_TALLY, one(99, 1842, 1792, true)), one(400, 8000, 2000))).toEqual({ requests: 2, output: 400, generationMs: 8000, firstTokenMs: 3792, isLowerBound: false })
+  // 都是下限：按下限合计
+  expect(addTally(one(99, 1842, 1792, true), one(100, 1000, 900, true))).toEqual({ requests: 2, output: 199, generationMs: 2842, firstTokenMs: 2692, isLowerBound: true })
   expect(tokensPerSecond(EMPTY_TALLY)).toBe(null)
   expect(averageFirstToken(EMPTY_TALLY)).toBe(null)
 })
@@ -348,8 +353,9 @@ test('第二行只有模型 · effort；第三行写平均：平均 N token/s ·
   }
 })
 
-test('第三行：有请求用了退路时数字前标 ≥；还没有请求时写 —', () => {
-  expect(text(speedLine({ ...IDENTITY, speed: addTally(IDENTITY.speed, one(99, 1842, 1792, true)) }))).toBe('平均  ≥66 token/s · 首字 1.6s')
+test('第三行：计入的请求都用了退路时数字前标 ≥，有量得出的就不标；还没有请求时写 —', () => {
+  expect(text(speedLine({ ...IDENTITY, speed: one(99, 1842, 1792, true) }))).toBe('平均  ≥54 token/s · 首字 1.8s')
+  expect(text(speedLine({ ...IDENTITY, speed: addTally(IDENTITY.speed, one(99, 1842, 1792, true)) }))).toBe('平均   68 token/s · 首字 1.6s')
   expect(text(speedLine({ ...IDENTITY, speed: EMPTY_TALLY }))).toBe('—')
 })
 
@@ -480,8 +486,8 @@ test('每段回复末尾接这一段的 token/s（这一段各次请求加权，
   await turn($, clock, timing, 't2', 'u2', [{ firstMs: 1800, streamMs: 50, output: 99 }])
   expect(await turnRow($, 'u1')).toContain(' · 68 token/s · 首字 2.0s')
   expect(await turnRow($, 'u2')).toContain(' · ≥54 token/s · 首字 1.8s')
-  // 面板是三次请求的平均：(680 + 99) ÷ (10 + 1.85) 秒 = 66，首字 (2 + 1 + 1.8) ÷ 3
-  expect((await lowerLines($))[1]).toBe(`${V} 平均  ≥66 token/s · 首字 1.6s`)
+  // 面板是三次请求的平均：token/s 只算量得出流速的两次，680 ÷ 10 秒 = 68，不标 ≥；首字 (2 + 1 + 1.8) ÷ 3
+  expect((await lowerLines($))[1]).toBe(`${V} 平均   68 token/s · 首字 1.6s`)
   // 读数压在原生那行的最后一行上，从原生的字（图标占 2 格）之后起
   const ui = await $.ui.mount({ plugin: 'anvil', surface: 'terminal', component: 'TurnDuration', requestId: 'u1', props: { word: 'Baked', durationMs: 12_000 } })
   const overlay = (await ui.findAll({ type: 'Box' })).find(box => box.props.position === 'absolute')
@@ -515,6 +521,14 @@ test('第二行：第一次请求前不写 effort（settings、环境变量里�
 
   await step($, clock, { turnId: 't1', index: 0, model: 'claude-opus-5-5', effort: 'xhigh', messageCount: 3 })
   expect((await lowerLines($))[0]).toBe(`${M} Opus 5.5 · xhigh`)
+})
+
+test('/model 切换：第二行马上换模型，不等下一次请求', async ($, on) => {
+  engine(on, { current: sample({ status: CLEAN, numstat: '' }) })
+  on('classic.PostModelSwitch', () => ({}))
+  await $.session.start(SESSION)
+  await $.classic.PostModelSwitch({ from_model: 'claude-opus-5-5', to_model: 'claude-sonnet-5-5', requested_model: 'sonnet', source: 'command' } as never)
+  expect((await lowerLines($))[0]).toBe(`${M} Sonnet 5.5`)
 })
 
 // ---------------------------------------------------------------- 刷新与排版
