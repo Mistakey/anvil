@@ -58,6 +58,7 @@ import { LIGHT } from './motion'
 import { NO_MESSAGES, addMessage, contentText, isMyMessage, messageList, reconcile, settleMessages, userTexts } from './messages'
 import { PANE, PANEL_SUBCOMMAND, drawPanel, gridRow, hidesPanel, innerWidth, spacedGridRows } from './panel'
 import { readSettings } from './settings'
+import { normalized, normalizing } from './shape'
 import { GRID } from './style'
 import {
   EMPTY_BOX,
@@ -93,6 +94,8 @@ import type { Denial, GitView, KeepaliveStop, ListId, Scrolled, Settings, SpeedT
 // - 面板的区块（panel.tsx 的 SECTIONS）由各功能填内容：在 drawAnvilPanel 里把该区块的 SectionBody
 //   放进 bodies；三个列表（我的消息、自动模式拒绝、子 agent）交 ListBody 放进 lists，按上限截、
 //   "更早的"那行、展开和收成一行由 panel.tsx 按共同规则做（list.ts）。身份栏的三行交 identity，接在区块之后。
+// - 热重载不清 `$.state`，旧代码按旧形状写下的值还在：对象、列表形状的 atom 读写时合并到现在的形状上
+//   （`normalized(x, await read($, x))`、`update($, x, normalizing(x, …))`，形状写在 shape.ts）；新加或改了形状的 atom 同样处理。
 // - 主输入框上方的 band（AbovePrompt）只画翻译框（translate.tsx），不放别的功能。
 // - 动效（进行中图标、运行中的耗时）用 live.tsx 的 spin / clock 画：有 Client 时交给 spinner.tsx、elapsed.tsx，
 //   没有或出过错时退回静止；画的时候用 liveFor 取这次怎么画。
@@ -274,7 +277,7 @@ async function toggleKeepalive($: EngineInterface, cache: Cache, loop: Loop, set
 
 /** 缓存框和 `/anvil` 列表里的保活状态 */
 async function keepaliveNow($: EngineInterface, settings: Settings) {
-  const [cached, override, loop] = await Promise.all([read($, cacheView), read($, keepaliveOverride), read($, keepaliveLoop)])
+  const [cached, override, loop] = await Promise.all([read($, cacheView).then(value => normalized(cacheView, value)), read($, keepaliveOverride), read($, keepaliveLoop).then(value => normalized(keepaliveLoop, value))])
   return keepaliveStatus({ settings, override, context: cached.context, loop })
 }
 
@@ -315,7 +318,7 @@ const usage = atom({ plugin: 'anvil', key: 'usage' } as const, EMPTY_USAGE)
 async function noteReading($: EngineInterface, reading: Reading) {
   // 先记进存档再更新读数：读数一变面板就重画，重画时存档已经是新的
   await recordHistories($, reading).catch(() => undefined)
-  await update($, usage, current => applyReading(current, reading))
+  await update($, usage, normalizing(usage, current => applyReading(current, reading)))
 }
 
 /** 5h、7d 的读数记进 `$.store` 的存档（本机会话共用）；先 get 再 set 不是原子的，丢一两个读数无妨，不加锁 */
@@ -351,25 +354,25 @@ const agents = atom({ plugin: 'anvil', key: 'agents' } as const, [] as SubAgent[
 
 async function noteSpawn($: EngineInterface, e: AgentSpawnInput, agentId: string, model: string) {
   const at = await $.clock.now()
-  await update($, agents, list => spawnAgent(list, { id: agentId, description: e.description, prompt: e.prompt, model, at }))
+  await update($, agents, normalizing(agents, list => spawnAgent(list, { id: agentId, description: e.description, prompt: e.prompt, model, at })))
 }
 
 /** 子 agent 的一次请求结束；不在列表里的 id（引擎自己的 fork、工作流里没登记的）不管 */
 async function noteAgentStep($: EngineInterface, e: TurnStepInput, agentId: string, result: TurnStepResult) {
-  if (!(await read($, agents)).some(agent => agent.id === agentId)) return
-  await update($, agents, list => stepAgent(list, agentId, { model: e.model, usage: result.usage, stopReason: result.stopReason ?? null }))
+  if (!normalized(agents, await read($, agents)).some(agent => agent.id === agentId)) return
+  await update($, agents, normalizing(agents, list => stepAgent(list, agentId, { model: e.model, usage: result.usage, stopReason: result.stopReason ?? null })))
 }
 
 async function noteAgentCall($: EngineInterface, e: ToolCallInput, agentId: string, ran: ToolCallResult) {
-  if (!(await read($, agents)).some(agent => agent.id === agentId)) return
+  if (!normalized(agents, await read($, agents)).some(agent => agent.id === agentId)) return
   const isError = ran.deny !== undefined || ran.isError === true
-  await update($, agents, list => callAgent(list, agentId, { tool: String(e.tool), text: describeInput(e), isError }))
+  await update($, agents, normalizing(agents, list => callAgent(list, agentId, { tool: String(e.tool), text: describeInput(e), isError })))
 }
 
 async function noteAgentEnd($: EngineInterface, e: TurnCompleteInput, agentId: string) {
-  if (!(await read($, agents)).some(agent => agent.id === agentId)) return
+  if (!normalized(agents, await read($, agents)).some(agent => agent.id === agentId)) return
   const at = await $.clock.now()
-  await update($, agents, list => completeAgent(list, agentId, { reason: e.reason, answer: e.answer, at }))
+  await update($, agents, normalizing(agents, list => completeAgent(list, agentId, { reason: e.reason, answer: e.answer, at })))
 }
 
 // ---------------------------------------------------------------- 自动模式拒绝（spec D8）
@@ -379,9 +382,9 @@ const denials = atom({ plugin: 'anvil', key: 'denials' } as const, [] as Denial[
 /** 自动模式的分类器拒绝了一次调用：记下时间、工具、完整内容（遮掉密钥）和来源 */
 async function noteDenial($: EngineInterface, e: ClassicEventOf['classic.PermissionDenied']) {
   const at = await $.clock.now()
-  const source = denialSource(e.agent_id, e.agent_type, await read($, agents))
+  const source = denialSource(e.agent_id, e.agent_type, normalized(agents, await read($, agents)))
   const denial: Denial = { id: e.tool_use_id, at, tool: e.tool_name, ...denialContent(e.tool_input), source }
-  await update($, denials, list => addDenial(list, denial))
+  await update($, denials, normalizing(denials, list => addDenial(list, denial)))
 }
 
 // ---------------------------------------------------------------- 我的消息（spec D8）
@@ -399,7 +402,7 @@ async function transcriptTexts($: EngineInterface): Promise<string[] | null> {
 async function syncMessages($: EngineInterface) {
   const texts = await transcriptTexts($)
   if (texts === null) return
-  const current = await read($, messages)
+  const current = normalized(messages, await read($, messages))
   const next = reconcile(current, texts)
   if (next !== current) await update($, messages, () => next)
 }
@@ -408,11 +411,11 @@ async function syncMessages($: EngineInterface) {
 async function noteMessage($: EngineInterface, uuid: string, content: SessionAppendMessage['content']) {
   const text = contentText(content)
   await syncMessages($)
-  await update($, messages, list => addMessage(list, { id: uuid, text }))
+  await update($, messages, normalizing(messages, list => addMessage(list, { id: uuid, text })))
 }
 
 async function settleOnCompact($: EngineInterface) {
-  await update($, messages, list => settleMessages(list))
+  await update($, messages, normalizing(messages, list => settleMessages(list)))
 }
 
 /**
@@ -486,7 +489,7 @@ async function refreshGit($: EngineInterface, refresh: GitRefresh) {
     do {
       refresh.isWanted = false
       const [cwd, view] = await Promise.all([$.session.cwd(), readGit($)])
-      await update($, identity, current => ({ ...current, dir: baseName(cwd), git: view }))
+      await update($, identity, normalizing(identity, current => ({ ...current, dir: baseName(cwd), git: view })))
     } while (refresh.isWanted)
   } finally {
     refresh.isRunning = false
@@ -499,7 +502,7 @@ async function refreshGit($: EngineInterface, refresh: GitRefresh) {
  */
 async function startIdentity($: EngineInterface, refresh: GitRefresh) {
   const model = await $.session.model().catch(() => null)
-  await update($, identity, current => ({ ...current, model: current.model ?? model }))
+  await update($, identity, normalizing(identity, current => ({ ...current, model: current.model ?? model })))
   await refreshGit($, refresh)
 }
 
@@ -514,15 +517,15 @@ const TURN_LINES = 500
 
 /** 主会话一次请求的模型、effort 和速度：算得出就计入本会话的合计和这一段的读数 */
 async function noteSpeed($: EngineInterface, e: TurnStepInput, speed: SpeedTally | null) {
-  await update($, identity, current => ({ ...current, model: e.model, effort: e.effort ?? null, speed: speed ? addTally(current.speed, speed) : current.speed }))
+  await update($, identity, normalizing(identity, current => ({ ...current, model: e.model, effort: e.effort ?? null, speed: speed ? addTally(current.speed, speed) : current.speed })))
   if (!speed) return
-  await update($, turnSpeeds, current => {
+  await update($, turnSpeeds, normalizing(turnSpeeds, current => {
     const turn = current.current?.turnId === e.turnId ? current.current : null
     return {
       ...current,
       current: turn ? { ...turn, tally: addTally(turn.tally, speed) } : { turnId: e.turnId, tally: speed, firstTokenMs: speed.firstTokenMs },
     }
-  })
+  }))
 }
 
 /**
@@ -530,25 +533,25 @@ async function noteSpeed($: EngineInterface, e: TurnStepInput, speed: SpeedTally
  * TurnDuration 的 requestId 就是这个 uuid（anvil-k0t.52 伪终端实测），画的时候按它取
  */
 async function closeTurnSpeed($: EngineInterface, uuid: string) {
-  const [now, list] = await Promise.all([$.clock.now(), read($, agents)])
+  const [now, list] = await Promise.all([$.clock.now(), read($, agents).then(value => normalized(agents, value))])
   const waitingAgents = list.filter(agent => agent.status === 'running').length
-  await update($, turnSpeeds, current => {
+  await update($, turnSpeeds, normalizing(turnSpeeds, current => {
     if (!current.current) return current
     const { tally, firstTokenMs } = current.current
     const kept = Object.entries(current.lines).slice(-(TURN_LINES - 1))
     return { current: null, lines: { ...Object.fromEntries(kept), [uuid]: { tally, firstTokenMs, doneAt: now, waitingAgents } } }
-  })
+  }))
 }
 
 /** 换了对话（`/clear`、`/resume`、`/branch`）：平均从零算，旧的收尾行不再画在屏幕上 */
 async function resetSpeeds($: EngineInterface) {
-  await update($, identity, current => ({ ...current, speed: EMPTY_TALLY }))
+  await update($, identity, normalizing(identity, current => ({ ...current, speed: EMPTY_TALLY })))
   await update($, turnSpeeds, () => NO_TURN_SPEEDS)
 }
 
 /** 这一段回复的读数；恢复前的、打断的没有 */
 async function turnSpeedOf($: EngineInterface, requestId: string) {
-  return (await read($, turnSpeeds)).lines[requestId]
+  return normalized(turnSpeeds, await read($, turnSpeeds)).lines[requestId]
 }
 
 // ---------------------------------------------------------------- 面板按键：列表展开、详情、滚动（spec D9）
@@ -556,17 +559,17 @@ async function turnSpeedOf($: EngineInterface, requestId: string) {
 const fold = atom({ plugin: 'anvil', key: 'fold' } as const, CLOSED)
 
 async function pressList($: EngineInterface, id: ListId) {
-  await update($, fold, current => toggleList(current, id))
+  await update($, fold, normalizing(fold, current => toggleList(current, id)))
 }
 
 /** 子 agent 的序号键、Enter，自动模式拒绝的 Enter：展开或收起这一项的详情 */
 async function pressDetail($: EngineInterface, detailId: string) {
-  await update($, fold, current => toggleDetail(current, detailId))
+  await update($, fold, normalizing(fold, current => toggleDetail(current, detailId)))
 }
 
 /** 展开的列表放不下时，滚轮滚的是列表自己（面板本身放得下，不需要引擎滚）；其余照引擎的 */
 async function scrollPanel($: EngineInterface, e: UiScrollInput): Promise<boolean> {
-  const current = await read($, fold)
+  const current = normalized(fold, await read($, fold))
   if (current.expanded === null || e.contentRows > e.bodyRows) return false
   const total = await listLength($, current.expanded)
   await update($, fold, () => scrollList(current, e.by, total))
@@ -574,9 +577,9 @@ async function scrollPanel($: EngineInterface, e: UiScrollInput): Promise<boolea
 }
 
 async function listLength($: EngineInterface, id: ListId): Promise<number> {
-  if (id === 'agents') return (await read($, agents)).length
-  if (id === 'denials') return (await read($, denials)).length
-  return (await read($, messages)).items.length
+  if (id === 'agents') return normalized(agents, await read($, agents)).length
+  if (id === 'denials') return normalized(denials, await read($, denials)).length
+  return normalized(messages, await read($, messages)).items.length
 }
 
 /**
@@ -584,7 +587,7 @@ async function listLength($: EngineInterface, id: ListId): Promise<number> {
  * 并把展开状态清掉，下次再进面板也是收起的。
  */
 async function foldForDrawing($: EngineInterface, isFocused: boolean) {
-  const current = await read($, fold)
+  const current = normalized(fold, await read($, fold))
   if (isFocused || isClosed(current)) return current
   // 画的钩子里不能写 `$.state`：画完再清
   $.clock.after(0, () => void update($, fold, () => CLOSED).catch(() => undefined))
@@ -601,21 +604,17 @@ type Activity = { reply: Span | null; keep: Span | null; translate: Span | null 
 
 const activity = atom({ plugin: 'anvil', key: 'activity' } as const, { reply: null, keep: null, translate: null } as Activity)
 
-/** 热重载前存下的可能是别的形状（anvil-k0t.46 的 replying），当作什么都没在发生 */
+/** 热重载前存下的可能是别的形状（anvil-k0t.46 的 replying），合并后当作什么都没在发生 */
 async function readActivity($: EngineInterface): Promise<Activity> {
-  const value: unknown = await read($, activity)
-  const span = (one: unknown): Span | null =>
-    typeof one === 'object' && one !== null && typeof (one as Span).since === 'number' ? { since: (one as Span).since, until: typeof (one as Span).until === 'number' ? (one as Span).until : null } : null
-  const all = (typeof value === 'object' && value !== null ? value : {}) as Partial<Record<keyof Activity, unknown>>
-  return { reply: span(all.reply), keep: span(all.keep), translate: span(all.translate) }
+  return read($, activity).then(value => normalized(activity, value))
 }
 
 /** 一件事开始（还没在发生时记下开始的时刻）或结束（在发生时记下结束的时刻） */
 async function markActivity($: EngineInterface, name: keyof Activity, isOn: boolean) {
   const current = (await readActivity($))[name]
   const now = await $.clock.now()
-  if (isOn && (current === null || current.until !== null)) await update($, activity, all => ({ ...all, [name]: { since: now, until: null } }))
-  else if (!isOn && current !== null && current.until === null) await update($, activity, all => ({ ...all, [name]: { since: current.since, until: now } }))
+  if (isOn && (current === null || current.until !== null)) await update($, activity, normalizing(activity, all => ({ ...all, [name]: { since: now, until: null } })))
+  else if (!isOn && current !== null && current.until === null) await update($, activity, normalizing(activity, all => ({ ...all, [name]: { since: current.since, until: now } })))
 }
 
 async function setReplying($: EngineInterface, isReplying: boolean) {
@@ -629,7 +628,7 @@ const faults = atom({ plugin: 'anvil', key: 'clientFaults' } as const, [] as str
 async function noteFault($: EngineInterface, e: UiFaultInput) {
   const name = faultedModule(e.module)
   if (name === null) return
-  await update($, faults, list => (list.includes(name) ? list : [...list, name]))
+  await update($, faults, normalizing(faults, list => (list.includes(name) ? list : [...list, name])))
 }
 
 /** 面板里焦点所在元素的 key（ui.focus）；面板失去焦点后不看它 */
@@ -641,7 +640,7 @@ async function noteFocus($: EngineInterface, element: string | null) {
 
 /** 这次绘制里动效怎么画：相位按绝对时刻算，面板和翻译框不用对零点也同相 */
 async function liveFor($: EngineInterface, els: object, surface: RenderSurface, now: number) {
-  return liveOf(els, surface, now, await read($, faults))
+  return liveOf(els, surface, now, normalized(faults, await read($, faults)))
 }
 
 // ---------------------------------------------------------------- anvil 面板
@@ -688,18 +687,18 @@ async function notePanelClosed($: EngineInterface, e: PaneCloseInput) {
 async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderInput<'Pane'>) {
   const els = $.ui.resolve(e)
   const [current, list, denied, mine, folding, now, who] = await Promise.all([
-    read($, usage),
-    read($, agents),
-    read($, denials),
-    read($, messages),
+    read($, usage).then(value => normalized(usage, value)),
+    read($, agents).then(value => normalized(agents, value)),
+    read($, denials).then(value => normalized(denials, value)),
+    read($, messages).then(value => normalized(messages, value)),
     foldForDrawing($, e.props.isFocused),
     $.clock.now(),
-    read($, identity),
+    read($, identity).then(value => normalized(identity, value)),
   ])
   const [cached, keepalive, loop, live, doing, focused, histories] = await Promise.all([
-    read($, cacheView),
+    read($, cacheView).then(value => normalized(cacheView, value)),
     keepaliveNow($, settings),
-    read($, keepaliveLoop),
+    read($, keepaliveLoop).then(value => normalized(keepaliveLoop, value)),
     liveFor($, els, e.surface, now),
     readActivity($),
     read($, focusKey),
@@ -772,23 +771,23 @@ async function appendToPrompt($: EngineInterface, translation: string): Promise<
  * 失败时把中文画回框里、焦点交给它，显示原因，再按 Enter 重试
  */
 async function submitChinese($: EngineInterface, settings: Settings, band: string, value: string) {
-  if (!shouldTranslate(await read($, translateBox), value)) return
-  await update($, translateBox, box => startTranslating(box, value))
+  if (!shouldTranslate(normalized(translateBox, await read($, translateBox)), value)) return
+  await update($, translateBox, normalizing(translateBox, box => startTranslating(box, value)))
   await markActivity($, 'translate', true).catch(() => undefined)
   const translation = await translateText($, settings, value).finally(() => markActivity($, 'translate', false).catch(() => undefined))
   const refusal = 'error' in translation ? translation.error : await appendToPrompt($, translation.text)
   if (refusal === null && 'text' in translation) {
-    await update($, translateBox, box => translated(box, countWords(translation.text)))
+    await update($, translateBox, normalizing(translateBox, box => translated(box, countWords(translation.text))))
     return
   }
-  const next = await update($, translateBox, box => failed(box, refusal ?? ''))
+  const next = await update($, translateBox, normalizing(translateBox, box => failed(box, refusal ?? '')))
   // plugin test 里没有 ui.focus 的实现，会拒绝；焦点只能在交互会话里验证
   await $.ui.focus({ requestId: band, key: inputKey(next) }).catch(() => undefined)
 }
 
 /** 翻译框里改字：记下框空没空，开始写下一句时去掉"已追加" */
 async function typeChinese($: EngineInterface, value: string) {
-  const next = typed(await read($, translateBox), value)
+  const next = typed(normalized(translateBox, await read($, translateBox)), value)
   if (next !== null) await update($, translateBox, () => next)
 }
 
@@ -797,7 +796,7 @@ async function drawTranslate($: EngineInterface, settings: Settings, e: RenderIn
   // 先排除 mobile，resolve 出来的元素才有 Input
   if (e.surface === 'mobile' || e.props.hasSurvey || (await read($, translateHidden))) return null
   const els = $.ui.resolve(e)
-  const [box, now, doing] = await Promise.all([read($, translateBox), $.clock.now(), readActivity($)])
+  const [box, now, doing] = await Promise.all([read($, translateBox).then(value => normalized(translateBox, value)), $.clock.now(), readActivity($)])
   return drawTranslateBox(els, {
     columns: e.props.bodyColumns,
     box,
