@@ -262,12 +262,45 @@ export type Identity = {
   model: string | null
   /** 主会话最近一次请求的 effort；还没有请求、或模型不支持 effort 时为 null */
   effort: string | number | null
-  /** 主会话最近一次请求的输出速度：输出 token 数 ÷ 首字到结束的秒数 */
-  tokensPerSecond: number | null
-  /** 主会话最近一次请求的首字等待：请求开始到首字，毫秒 */
-  firstTokenMs: number | null
-  /** 主会话最近一次请求的整次用时：请求开始到结束，毫秒 */
-  requestMs: number | null
+  /** 本会话主会话请求的合计，第三行写它的平均；换了对话（`/clear`、`/resume`、`/branch`）从零算 */
+  speed: SpeedTally
+}
+
+/**
+ * 几次请求的速度合计（spec D8）：token/s 按 token 加权，总输出 ÷ 总生成用时；首字取各次的平均。
+ * 生成用时是首字到结束，整段一起到的请求退回整次用时（只会偏低），这时 isLowerBound 为 true，数字前标 ≥
+ */
+export type SpeedTally = {
+  /** 计入的请求次数 */
+  requests: number
+  /** 输出 token 数（含思考）之和 */
+  output: number
+  /** 生成用时之和，毫秒 */
+  generationMs: number
+  /** 首字等待（请求开始到响应的第一块）之和，毫秒 */
+  firstTokenMs: number
+  /** 有请求用了退路 */
+  isLowerBound: boolean
+}
+
+/** 一段回复（一轮）的读数，接在原生收尾那行（TurnDuration）后面 */
+export type TurnSpeed = {
+  /** 这一段各次请求的合计（token/s 用它） */
+  tally: SpeedTally
+  /** 这一段第一次请求的首字等待，毫秒 */
+  firstTokenMs: number
+  /** 收尾那行记进对话的时刻（`$.clock.now()`），原生那行的"done HH:MM"按它算 */
+  doneAt: number
+  /** 这时还在跑的子 agent 数：原生那行这时写成"Waiting for N background agents to finish" */
+  waitingAgents: number
+}
+
+/** 每段回复的读数 */
+export type TurnSpeeds = {
+  /** 正在进行的一轮：turnId 和到目前为止的读数；收尾那行记进对话时移进 lines */
+  current: { turnId: string; tally: SpeedTally; firstTokenMs: number } | null
+  /** 键是收尾那行的 uuid（对话记录里 `turn_duration` 那条，也是 TurnDuration 的 requestId） */
+  lines: Record<string, TurnSpeed>
 }
 
 /** 翻译框的四种显示状态（spec D5）：示例和按键提示、正在翻译、已追加 N 个词、失败原因 */
@@ -344,6 +377,8 @@ declare module 'claude-code' {
       fold: PanelFold
       /** 身份栏 */
       identity: Identity
+      /** 每段回复末尾接的读数 */
+      turnSpeeds: TurnSpeeds
       /** 翻译框在本会话被隐藏：`/anvil translate` 切换，隐藏时为 true */
       translateHidden: boolean
       /** 翻译框的状态 */
