@@ -6,7 +6,7 @@
 
 import type { ModelUsage, TurnUsage } from 'claude-code'
 
-import type { CacheView } from '../types'
+import type { CacheMemory, CacheView } from '../types'
 
 /** 一律按 1 小时 TTL（ADR 0001） */
 export const TTL_MS = 60 * 60 * 1000
@@ -26,31 +26,11 @@ const PRICES: ReadonlyArray<readonly [string, number, number]> = [
   ['haiku', 0.1, 2],
 ]
 
-/** 主会话的缓存状态；只在 register.ts 的闭包里，随模块加载新建，`/clear` 和会话内恢复别的会话时清零 */
-export type Cache = {
-  /** 最后一次主会话请求的时刻，0 表示本会话还没有 */
-  lastRequestAt: number
-  /** 过期时刻，0 表示未知（还没有请求）；一般是 lastRequestAt + TTL，恢复会话时可能更早 */
-  expiresAt: number
-  /** 压缩之后、下一次响应之前：不判过期 */
-  compacted: boolean
-  /** 上下文输入侧：上一条回复所基于的输入 token（未缓存 + 读 + 写） */
-  context: number
-  /** 上一条回复的输出 token */
-  output: number
-  /** 计价用的模型 id */
-  model: string | null
-  /** 上一条消息（主会话上一轮）的缓存读取量和输入总量 */
-  last: { read: number; input: number } | null
-  /** 本会话累计的缓存读取量和输入总量 */
-  session: { read: number; input: number }
-  /** 本会话的冷写：每次重建的 token 数和金额（模型不认识时金额为 null） */
-  coldWrites: Array<{ at: number; tokens: number; usd: number | null }>
-  /** 本轮已从 turn.step 拿到过回复的读数 */
-  steppedThisTurn: boolean
-  /** 守卫已拦过一次的那个过期时刻：同一段过期里再提交就放行 */
-  ackedFor: number
-}
+/**
+ * 主会话的缓存状态；在 register.ts 的闭包里，`/clear` 和会话内恢复别的会话时清零。
+ * 每次变化原样写进 `$.state` 的 anvil.cacheMemory，热重载后从那里接上（restoreCache）；形状在 types 里
+ */
+export type Cache = CacheMemory
 
 export function freshCache(): Cache {
   return {
@@ -62,6 +42,23 @@ export function freshCache(): Cache {
 /** `/clear` 开始新的对话：之前的一切都不再计价。就地清零，闭包里的引用不变 */
 export function resetForClear(c: Cache) {
   Object.assign(c, freshCache(), { model: c.model })
+}
+
+const isNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+const isPart = (v: unknown): v is { read: number; input: number } => isRecord(v) && isNumber(v.read) && isNumber(v.input)
+const isColdWrite = (v: unknown) => isRecord(v) && isNumber(v.at) && isNumber(v.tokens) && (v.usd === null || isNumber(v.usd))
+
+/**
+ * 热重载后读回上一次加载写下的缓存状态（anvil.cacheMemory）。没有，或是别的形状（旧代码写的），返回 null：按冷启动。
+ */
+export function restoreCache(v: unknown): Cache | null {
+  if (!isRecord(v)) return null
+  const ok = isNumber(v.lastRequestAt) && isNumber(v.expiresAt) && typeof v.compacted === 'boolean' &&
+    isNumber(v.context) && isNumber(v.output) && (v.model === null || typeof v.model === 'string') &&
+    (v.last === null || isPart(v.last)) && isPart(v.session) && Array.isArray(v.coldWrites) && v.coldWrites.every(isColdWrite) &&
+    typeof v.steppedThisTurn === 'boolean' && isNumber(v.ackedFor)
+  return ok ? JSON.parse(JSON.stringify(v)) as Cache : null
 }
 
 function priceOf(model: string | null): readonly [number, number] | null {

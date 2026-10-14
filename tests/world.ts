@@ -39,6 +39,12 @@ export type WorldOptions = {
    * 保活随即停下，不碰保活的测试因此不受它影响。`throw` 表示这次调用直接抛错。
    */
   forks?: ForkAnswer[]
+  /**
+   * 插件写进 `$.state` 的这些键（写作 `plugin.key`）一律换成给的值，直到测试从返回的 `rewrite` 里删掉：
+   * 造出"上一次加载留下的 `$.state`"，再让插件收到一次 session.start，就是模块内存和 `$.state` 不一致的热重载。
+   * 测试的钩子给 `state.get` 的值会被剥掉，造不出读到的值，只能改写插件写下的值。
+   */
+  rewrite?: Record<string, unknown>
 }
 
 /** 一次 fork 的回答：读写数（回复正常），整份结果，或抛错 */
@@ -74,9 +80,12 @@ export function world(on: On, options: WorldOptions = {}) {
     return { value: { command: e.name } }
   })
   // 测试拿到的 `$` 没有 state 这个名词，只能在插件之下看它写了什么，再交给测试工具自带的 state
+  const rewrite = new Map(Object.entries(options.rewrite ?? {}))
   on('state.set', ($, e, next) => {
-    state.set(`${e.plugin}.${e.key}`, e.value)
-    return next(e)
+    const name = `${e.plugin}.${e.key}`
+    const written = rewrite.has(name) ? { ...e, value: rewrite.get(name) as never } : e
+    state.set(name, written.value)
+    return next(written)
   })
   on('classic.SessionStart', () => ({}))
   on('classic.PermissionDenied', () => ({}))
@@ -121,7 +130,7 @@ export function world(on: On, options: WorldOptions = {}) {
     }
     return { value }
   })
-  return { commands, registered, state, entered, fills, fillModes, box, forks, store }
+  return { commands, registered, state, entered, fills, fillModes, box, forks, store, rewrite }
 }
 
 /**

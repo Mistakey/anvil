@@ -63,6 +63,7 @@
 
 - 钩子自身执行上限 10 秒（`prompt.edit` 只有 50 毫秒）；等待 `$` 调用（模型、网络、`$.ui.ask`）的时间不计入。
 - `/clear`、`/resume`、`/branch` 会重置 `$.state`，而且不触发 `session.start`；要在 `classic.SessionStart`（source 为 clear/resume/fork）里从 `$.store` 重新载入。
+- 热重载（`--plugin-dir` 下保存插件文件；按类型，`/config` 改插件设置、插件更新也一样）在同一个会话里触发 `session.start`，不触发 `classic.SessionStart`：模块内存是新的，`$.clock.after`/`every` 的定时器被引擎撤掉，`$.state` 保留（伪终端里看到「● anvil: reloaded (…)」）。要跨重载接上的状态写进 `$.state`，在 `session.start` 里读回、重新定时；新会话的 `$.state` 是空的，读不到就冷启动（anvil 的 `anvil.cacheMemory`、`anvil.keepaliveMemory`，anvil-k0t.49）。重载时还在路上的 `$.model.fork` 结果会不会回到旧模块未证实，anvil 重载后按需补发。
 - `$.store` 由本机所有会话共享，先 get 再 set 不是原子操作，总量上限 4 MiB；连续 `cleanupPeriodDays`（默认 30 天）没有会话读写就会被清掉，长期设置放 `userConfig`（`docs/adr/0003-settings-in-config.md`）。
 - advisor 这类服务端工具不走 `tool.check`/`tool.call`，只出现在 `turn.step` 结果的 `serverToolUses` 里；`tool.check` 带 `agentId`。
 - `$.command.register` 的 `name` 和 `command.run` 的匹配器要写字面量，否则 validate 会当成没有 `.catch` 的 gating hook。
@@ -85,4 +86,5 @@
 - plugin test 里插件传给 `$.fs.*` 的路径会被引擎按本机写法规范化（Windows 上 `/` 变 `\`），测试挂的 `fs.*` 钩子比路径前先统一分隔符（anvil-k0t.17）。
 - plugin test 里测试拿到的 `$` 没有 `session.messages`，但测试挂的 `on('session.messages', () => ({ value: [...] }))` 能回答插件的 `$.session.messages()`；`$.session.append(...)` 可以直接模拟一行进对话（anvil-k0t.19）。
 - plugin test 里测试拿到的 `$` 没有 `state`，读不到插件写的 `$.state`；在测试自己的 `on('state.set')` 里记下 `e.value` 再 `next(e)`。
+- plugin test 里测试钩子给 `state.get` 答的值会被剥掉，插件读到的是没写过的值：造不出「上一次加载留下的 `$.state`」。改写插件写下的值可以（测试的 `state.set` 钩子换掉 `e.value` 再 `next`），之后让插件再收一次 `session.start`，就是模块内存和 `$.state` 不一致的热重载（`tests/world.ts` 的 `rewrite`，anvil-k0t.49）。
 - `claude plugin validate` 会校验 `userConfig` 各项的 `type`，但不列出各项设置；要列出来用 `claude --plugin-dir <dir> plugin configure anvil@inline`（不带 `--values-stdin` 时只读），默认值靠 plugin test 核对。

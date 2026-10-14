@@ -53,11 +53,46 @@ export type CacheView = {
   coldWrites: { count: number; usd: number }
 }
 
+/** 主会话缓存状态的原样（hooks/cache.ts 的 Cache），时刻都是 `$.clock.now()` 的毫秒 */
+export type CacheMemory = {
+  /** 最后一次主会话请求的时刻，0 表示本会话还没有 */
+  lastRequestAt: number
+  /** 过期时刻，0 表示未知（还没有请求）；一般是 lastRequestAt + TTL，恢复会话时可能更早 */
+  expiresAt: number
+  /** 压缩之后、下一次响应之前：不判过期 */
+  compacted: boolean
+  /** 上下文输入侧：上一条回复所基于的输入 token（未缓存 + 读 + 写） */
+  context: number
+  /** 上一条回复的输出 token */
+  output: number
+  /** 计价用的模型 id */
+  model: string | null
+  /** 上一条消息（主会话上一轮）的缓存读取量和输入总量 */
+  last: { read: number; input: number } | null
+  /** 本会话累计的缓存读取量和输入总量 */
+  session: { read: number; input: number }
+  /** 本会话的冷写：每次重建的 token 数和金额（模型不认识时金额为 null） */
+  coldWrites: Array<{ at: number; tokens: number; usd: number | null }>
+  /** 本轮已从 turn.step 拿到过回复的读数 */
+  steppedThisTurn: boolean
+  /** 守卫已拦过一次的那个过期时刻：同一段过期里再提交就放行 */
+  ackedFor: number
+}
+
 /**
  * 缓存保活自己停下的原因（spec D3）：一段空闲续满 12 小时（limit，灰）、读数不达标（reading，红）、
  * 请求出错（error，红）。停下只结束这一段空闲，下一次主会话请求后清掉。
  */
 export type KeepaliveStop = { kind: 'limit' | 'reading' | 'error'; reason: string }
+
+/** 保活循环里热重载后要接上的部分（hooks/keepalive.ts 的 LoopMemory）；定时器和路上的请求随模块丢掉 */
+export type KeepaliveMemory = {
+  /** 这一段空闲里续期成功的次数 */
+  renewals: number
+  stopped: KeepaliveStop | null
+  /** 这一段空闲里用 `/anvil keepalive` 重新开启的时刻，0 表示没有 */
+  restartedAt: number
+}
 
 /** 保活循环的读数，缓存框据此和设置、上下文一起定出保活状态 */
 /** 一件事从什么时候起、什么时候结束（还在发生时 until 为 null） */
@@ -287,6 +322,13 @@ declare module 'claude-code' {
       keepaliveOverride: boolean | null
       /** 保活循环的读数 */
       keepalive: KeepaliveView
+      /**
+       * 缓存状态原样（hooks/cache.ts 的 Cache），每次变化时写入。只给热重载后的模块接上：
+       * 重载换掉模块内存、撤掉定时器，`$.state` 还在（anvil-k0t.49）
+       */
+      cacheMemory: CacheMemory
+      /** 保活循环的续期次数、停下和重新开启的时刻（hooks/keepalive.ts 的 LoopMemory），用处同 cacheMemory */
+      keepaliveMemory: KeepaliveMemory
       /** 子 agent 列表，按序号从旧到新 */
       agents: SubAgent[]
       /** 自动模式拒绝列表，旧的在前 */
