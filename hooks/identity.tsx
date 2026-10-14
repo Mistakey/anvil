@@ -11,9 +11,11 @@ import type { Elements, RenderElement } from 'claude-code'
 
 import type { GitOperation, GitView, Identity } from '../types'
 import { formatDuration } from './cache'
+import { spin, still } from './live'
+import type { Live } from './live'
 import { COLOR, ICON, SEPARATOR, fitSegments } from './style'
 import type { Segment } from './style'
-import { cells, fit, padStart } from './text'
+import { cells, fitTail, padStart } from './text'
 
 export const EMPTY_IDENTITY: Identity = { dir: '', git: null, model: null, effort: null, tokensPerSecond: null, firstTokenMs: null, requestMs: null }
 
@@ -194,12 +196,17 @@ export function formatSeconds(ms: number): string {
 
 // ---------------------------------------------------------------- 三行的文字
 
-/** 分支、worktree 名、子目录各自最多占几格（设计稿：worktree 里的分支截成 20 格）；整行放不下时再收到 10 格 */
+/**
+ * 分支、worktree 名、子目录各自最多占几格（设计稿：worktree 里的分支截成 20 格）。
+ * 整行放不下时名字让位给计数：几个名字平分剩下的格子，每个至少 NAME_MIN 格（anvil-k0t.46）
+ */
 const NAME_CELLS = 20
-const NARROW_NAME_CELLS = 10
+const NAME_MIN = 4
+const NAME_ROOMY = 8
 
-/** 几组之间空两格（设计稿 .ft） */
-const GROUP_GAP = '  '
+/** 几组之间空两格（设计稿 .ft）；放不下时收成一格 */
+const GROUP_GAP = 2
+const NARROW_GAP = 1
 
 function opSegments(operation: GitOperation): Segment[] {
   const progress = operation.step !== undefined && operation.total !== undefined ? ` ${operation.step}/${operation.total}` : ''
@@ -210,22 +217,22 @@ function opSegments(operation: GitOperation): Segment[] {
   ]
 }
 
-function spaced(groups: readonly Segment[][]): Segment[] {
-  return groups.filter(group => group.length > 0).flatMap((group, index) => (index === 0 ? group : [{ text: GROUP_GAP }, ...group]))
+function spaced(groups: readonly Segment[][], gap: number): Segment[] {
+  return groups.filter(group => group.length > 0).flatMap((group, index) => (index === 0 ? group : [{ text: ' '.repeat(gap) }, ...group]))
 }
 
 /** 第一行：目录名、分支、停在一半的命令、各项计数和储藏、改动行数 */
-export function gitLine(identity: Identity, names: number = NAME_CELLS): Segment[] {
+export function gitLine(identity: Identity, names: number = NAME_CELLS, gap: number = GROUP_GAP): Segment[] {
   const git = identity.git
   const dirIcon: Segment = { text: `${ICON.dir} `, color: COLOR.icon }
   if (!git) return [dirIcon, { text: identity.dir || '—', bold: true }]
 
   const dir: Segment[] = [dirIcon, { text: git.repo, bold: true }]
-  if (git.worktree) dir.push({ text: ' ' }, { text: `${ICON.worktree} `, color: COLOR.icon }, { text: fit(git.worktree, names) })
-  if (git.sub) dir.push({ text: fit(`/${git.sub}`, names), color: COLOR.secondary })
+  if (git.worktree) dir.push({ text: ' ' }, { text: `${ICON.worktree} `, color: COLOR.icon }, { text: fitTail(git.worktree, names) })
+  if (git.sub) dir.push({ text: fitTail(`/${git.sub}`, names), color: COLOR.secondary })
 
   const branch: Segment[] = []
-  if (git.branch !== null) branch.push({ text: `${ICON.branch} ${fit(git.branch, names)}`, color: COLOR.branch })
+  if (git.branch !== null) branch.push({ text: `${ICON.branch} ${fitTail(git.branch, names)}`, color: COLOR.branch })
   else if (git.commit !== null) branch.push({ text: `${ICON.detached} @${git.commit}`, color: COLOR.branch })
   if (branch.length > 0) {
     if (git.ahead > 0) branch.push({ text: ` ↑${git.ahead}`, color: COLOR.warn })
@@ -255,7 +262,7 @@ export function gitLine(identity: Identity, names: number = NAME_CELLS): Segment
         ]
       : []
 
-  return spaced([dir, branch, git.operation ? opSegments(git.operation) : [], counts, changed])
+  return spaced([dir, branch, git.operation ? opSegments(git.operation) : [], counts, changed], gap)
 }
 
 const joined = (parts: readonly Segment[][]) => parts.flatMap((part, index) => (index === 0 ? part : [SEPARATOR, ...part]))
@@ -274,19 +281,22 @@ export function modelLine(identity: Identity): Segment[] {
  */
 const SPEED_FIELD = { tokens: 3, seconds: 5 } as const
 
-/** 第三行：N token/s · 首字 N s · 用时 N s；数值不着色，缺的项不写，还没有请求时写 — */
-export function speedLine(identity: Identity): Segment[] {
-  const icon: Segment = { text: `${ICON.speed} `, color: COLOR.icon }
+/**
+ * 第三行（不含行首的图标，图标在 identityRows 里画）：N token/s · 首字 N s · 用时 N s；缺的项不写，还没有请求时写 —。
+ * 数值正文色、标签次要色；replying 时数值也退到次要色：那是上一次请求的读数，这一次结束就换（anvil-k0t.46）
+ */
+export function speedLine(identity: Identity, replying = false): Segment[] {
+  const value = (text: string): Segment => (replying ? { text, color: COLOR.secondary } : { text })
   const parts: Segment[][] = []
-  if (identity.tokensPerSecond !== null) parts.push([{ text: padStart(String(identity.tokensPerSecond), SPEED_FIELD.tokens) }, { text: ' token/s', color: COLOR.secondary }])
-  if (identity.firstTokenMs !== null) parts.push([{ text: '首字 ', color: COLOR.secondary }, { text: padStart(formatSeconds(identity.firstTokenMs), SPEED_FIELD.seconds) }])
-  if (identity.requestMs !== null) parts.push([{ text: '用时 ', color: COLOR.secondary }, { text: formatSeconds(identity.requestMs) }])
-  return parts.length === 0 ? [icon, { text: '—' }] : [icon, ...joined(parts)]
+  if (identity.tokensPerSecond !== null) parts.push([value(padStart(String(identity.tokensPerSecond), SPEED_FIELD.tokens)), { text: ' token/s', color: COLOR.secondary }])
+  if (identity.firstTokenMs !== null) parts.push([{ text: '首字 ', color: COLOR.secondary }, value(padStart(formatSeconds(identity.firstTokenMs), SPEED_FIELD.seconds))])
+  if (identity.requestMs !== null) parts.push([{ text: '用时 ', color: COLOR.secondary }, value(formatSeconds(identity.requestMs))])
+  return parts.length === 0 ? [value('—')] : joined(parts)
 }
 
 // ---------------------------------------------------------------- 绘制
 
-type Els = Pick<Elements['terminal'], 'Box' | 'Text'>
+type Els = Pick<Elements['terminal'], 'Box' | 'Text'> & Partial<Pick<Elements['terminal'], 'Client'>>
 
 /**
  * 左边空 2 格：图标和框里的字（名称列、序号）从同一列起；右边空 1 格，和框的右边线对齐。
@@ -297,12 +307,19 @@ const PAD = { left: 2, right: 1 } as const
 /** 一行里放得下的格数 */
 const room = (columns: number) => Math.max(0, columns - PAD.left - PAD.right)
 
-function line(els: Els, key: string, segments: readonly Segment[], columns: number): RenderElement {
+/** 一行；lead 是画在最前面的一格图标（速度行的图标回复中换成转动的 ◐），后面空一格 */
+function line(els: Els, key: string, segments: readonly Segment[], columns: number, lead?: RenderElement): RenderElement {
   const { Box, Text } = els
   // 放不下的从行尾截
-  const shown = fitSegments(segments, room(columns))
+  const shown = fitSegments(segments, room(columns) - (lead ? 2 : 0))
   return (
     <Box key={key} width={columns} flexShrink={0} paddingLeft={PAD.left} paddingRight={PAD.right}>
+      {lead ? (
+        <Box key={`lead:${key}`} width={2} flexShrink={0}>
+          {lead}
+          <Text> </Text>
+        </Box>
+      ) : null}
       <Text wrap="truncate">
         {shown.map(segment => (
           <Text color={segment.color} bold={segment.bold}>
@@ -314,14 +331,39 @@ function line(els: Els, key: string, segments: readonly Segment[], columns: numb
   )
 }
 
-/** 交给面板的三行 */
-export function identityRows(els: Els, identity: Identity, columns: number): RenderElement[] {
-  // 名字长时先把名字截短，让后面的计数和行数留在行里；还放不下再从行尾截
+const widthOf = (segments: readonly Segment[]) => cells(segments.map(segment => segment.text).join(''))
+
+/** 第一行里名字（worktree 名、分支、子目录）有几个 */
+function nameCount(identity: Identity): number {
+  const git = identity.git
+  if (!git) return 0
+  return (git.worktree ? 1 : 0) + (git.sub ? 1 : 0) + (git.branch !== null ? 1 : 0)
+}
+
+/**
+ * 第一行：名字长时先把名字截短（从前面截，留下结尾），让后面的计数和行数留在行里：
+ * 几个名字平分剩下的格子；每个分不到 NAME_ROOMY 格时组间距收成一格再分，每个至少 NAME_MIN 格；还放不下再从行尾截
+ */
+export function fittedGitLine(identity: Identity, columns: number): Segment[] {
   const full = gitLine(identity)
-  const first = cells(full.map(segment => segment.text).join('')) <= room(columns) ? full : gitLine(identity, NARROW_NAME_CELLS)
+  const count = nameCount(identity)
+  if (widthOf(full) <= room(columns) || count === 0) return full
+  // 名字收成一格（"…"）时的宽度，就是名字以外的部分
+  const share = (gap: number) => Math.floor((room(columns) - (widthOf(gitLine(identity, 1, gap)) - count)) / count)
+  const gap = share(GROUP_GAP) >= NAME_ROOMY ? GROUP_GAP : NARROW_GAP
+  return gitLine(identity, Math.max(NAME_MIN, share(gap)), gap)
+}
+
+/**
+ * 交给面板的三行。replying：主会话正在回复，速度行的图标换成转动的 ◐，上一次的读数退到次要色（spec D10 的回复中动效）
+ */
+export function identityRows(els: Els, identity: Identity, columns: number, view: { replying?: boolean; live?: Live } = {}): RenderElement[] {
+  const replying = view.replying === true
+  const { Text } = els
+  const icon = replying ? spin(els, view.live ?? still(0), { key: 'spin:speed', color: COLOR.active }) : <Text color={COLOR.icon}>{ICON.speed}</Text>
   return [
-    line(els, 'identity:git', first, columns),
+    line(els, 'identity:git', fittedGitLine(identity, columns), columns),
     line(els, 'identity:model', modelLine(identity), columns),
-    line(els, 'identity:speed', speedLine(identity), columns),
+    line(els, 'identity:speed', speedLine(identity, replying), columns, icon),
   ]
 }

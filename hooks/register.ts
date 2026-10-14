@@ -90,8 +90,8 @@ import type { Denial, GitView, Identity, KeepaliveStop, ListId, Scrolled, Settin
 //   放进 bodies；三个列表（我的消息、自动模式拒绝、子 agent）交 ListBody 放进 lists，按上限截、
 //   "更早的"那行、展开和收成一行由 panel.tsx 按共同规则做（list.ts）。身份栏的三行交 identity，接在区块之后。
 // - 主输入框上方的 band（AbovePrompt）只画翻译框（translate.tsx），不放别的功能。
-// - 动效（分隔线的呼吸、进行中图标、运行中的耗时）用 live.tsx 的 rule / spin / clock 画：有 Client 时交给
-//   rail.tsx 等 Client 模块，没有或出过错时退回静止；画的时候用 liveFor 取这次怎么画。
+// - 动效（进行中图标、运行中的耗时）用 live.tsx 的 spin / clock 画：有 Client 时交给 spinner.tsx、elapsed.tsx，
+//   没有或出过错时退回静止；画的时候用 liveFor 取这次怎么画。
 
 // ---------------------------------------------------------------- 设置
 
@@ -533,11 +533,11 @@ async function foldForDrawing($: EngineInterface, isFocused: boolean) {
   return CLOSED
 }
 
-// ---------------------------------------------------------------- 动效（spec D10）：分隔线的呼吸、进行中图标、运行中的耗时
+// ---------------------------------------------------------------- 动效（spec D10）：进行中图标、运行中的耗时
 
 /**
  * 主会话正在回复（从这一轮的第一次请求到这一轮结束）时，这一段从哪一刻起；没在回复时为 null。
- * 分隔线从这一刻起呼吸，从线色起步
+ * 回复中身份栏速度行的图标换成转动的 ◐，读数退到次要色
  */
 const replying = atom({ plugin: 'anvil', key: 'replying' } as const, null as number | null)
 
@@ -656,9 +656,7 @@ async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderI
       agents: agentList(els, list, { detail: folding.detail, now, inner, live, focused: e.props.isFocused ? focused : null, onPress: id => void pressDetail($, id) }),
     },
     fold: folding,
-    identity: identityRows(els, who, e.props.bodyColumns),
-    live,
-    replyingSince: since,
+    identity: identityRows(els, who, e.props.bodyColumns, { replying: since !== null, live }),
     onToggle: id => void pressList($, id),
   })
 }

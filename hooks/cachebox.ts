@@ -2,7 +2,7 @@
 // 读数来自 `$.state` 的 anvil.cache（缓存状态）和保活状态（keepalive.ts），绘制在 register.ts 和 panel.tsx。
 
 import type { CacheView } from '../types'
-import { COLOR, ICON, piece, valueWidth } from './style'
+import { COLOR, ICON, SEPARATOR, piece, valueWidth } from './style'
 import type { Segment } from './style'
 import { wrap } from './text'
 import { formatWhen, layoutRow } from './usage'
@@ -24,14 +24,17 @@ export function hitColor(rate: number): string | undefined {
   return undefined
 }
 
-/** ● | "有效 · 过期 21:40"（绿）或"已过期 N 分钟"（红），● 同色；还没有请求、刚压缩完时"● —"（● 图标色、— 次要色），框始终三行 */
+/**
+ * ● | 过期状态，● 和状态词同色。好状态只给符号和状态词上色："● 有效 · 过期 21:40"里 ● 有效绿、"过期"次要色、时刻正文色；
+ * 过期了整句红："● 已过期 N 分钟"。还没有请求、刚压缩完时"● —"（● 图标色、— 次要色），框始终三行
+ */
 function stateRow(view: CacheView, now: number): GridSpec {
   if (view.expiresAt === null || view.compacted) return { key: 'state', label: [{ text: '●', color: COLOR.icon }], value: [piece([{ text: '—', color: COLOR.secondary }])] }
-  const [text, color] =
-    now >= view.expiresAt
-      ? [`已过期 ${formatExpired(now - view.expiresAt)}`, COLOR.danger]
-      : [`有效 · 过期 ${formatWhen(view.expiresAt, now)}`, COLOR.ok]
-  return { key: 'state', label: [{ text: '●', color }], value: [piece([{ text, color }])] }
+  if (now >= view.expiresAt) {
+    return { key: 'state', label: [{ text: '●', color: COLOR.danger }], value: [piece([{ text: `已过期 ${formatExpired(now - view.expiresAt)}`, color: COLOR.danger }])] }
+  }
+  const value: Segment[] = [{ text: '有效', color: COLOR.ok }, SEPARATOR, { text: '过期 ', color: COLOR.secondary }, { text: formatWhen(view.expiresAt, now) }]
+  return { key: 'state', label: [{ text: '●', color: COLOR.ok }], value: [piece(value)] }
 }
 
 /** 缓存框的几行，按框内宽度 inner 排好（layoutRow） */

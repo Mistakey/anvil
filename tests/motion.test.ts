@@ -3,41 +3,23 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
 import { faultedModule, liveOf } from '../hooks/live'
-import { BREATH, SPIN, breathColor, breathLevel, clockOf, follow, mix, spinGlyph, ticking } from '../hooks/motion'
+import { SPIN, clockOf, follow, spinGlyph, ticking } from '../hooks/motion'
 import { PING_AFTER_MS } from '../hooks/keepalive'
-import { COLOR } from '../hooks/style'
+import { COLOR, ICON } from '../hooks/style'
 import { SESSION, drain, flat, spawnInput, stepInput, turnInput, world } from './world'
 
 const NOW = 10 * 3_600_000
 
 // ---------------------------------------------------------------- 纯逻辑（Client 模块共用，motion.ts）
 
-test('转动图标：◐◓◑◒ 轮流，约 120ms 一格；第 n 帧按时钟算', () => {
-  expect(SPIN.stepMs).toBe(120)
-  expect([0, 120, 240, 360, 480].map(spinGlyph)).toEqual(['◐', '◓', '◑', '◒', '◐'])
-  expect(spinGlyph(119)).toBe('◐')
+test('转动图标：◐◓◑◒ 轮流，150ms 一格；第 n 帧按时钟算', () => {
+  expect(SPIN.stepMs).toBe(150)
+  expect([0, 150, 300, 450, 600].map(spinGlyph)).toEqual(['◐', '◓', '◑', '◒', '◐'])
+  expect(spinGlyph(149)).toBe('◐')
   for (const n of [5, 6, 7, 1001]) expect(spinGlyph(n * SPIN.stepMs + 60), `第 ${n} 帧`).toBe(SPIN.frames[n % 4])
 })
 
-test('呼吸：从线色起步，余弦缓动，2.4 秒一个来回，正中间亮到 Claude 橙；颜色分 12 级', () => {
-  expect(BREATH).toEqual({ stepMs: 100, periodMs: 2400, levels: 12 })
-  expect(breathLevel(0)).toBe(0)
-  expect(breathLevel(1200)).toBe(1)
-  expect(breathLevel(2400)).toBe(0)
-  // 前半段越来越亮，后半段对称地暗回去
-  const rising = [0, 300, 600, 900, 1200].map(breathLevel)
-  expect([...rising].sort((a, b) => a - b)).toEqual(rising)
-  expect(breathLevel(600)).toBe(0.5)
-  for (const ms of [100, 500, 1000]) expect(breathLevel(2400 - ms), `${ms}`).toBe(breathLevel(ms))
-  // 每一级都是 1/12 的整数倍
-  for (let ms = 0; ms < 2400; ms += BREATH.stepMs) expect(Number.isInteger(breathLevel(ms) * 12), `${ms}`).toBe(true)
-  expect(breathColor(COLOR.line, COLOR.active, 0)).toBe(COLOR.line)
-  expect(breathColor(COLOR.line, COLOR.active, 1200)).toBe(COLOR.active)
-  expect(mix('#000000', '#ffffff', 0.5)).toBe('#808080')
-  expect(mix('#555a6b', '#d77757', 0)).toBe('#555a6b')
-})
-
-test('相位按时钟算：同一时刻几条线同一个颜色；钩子给了新的 now 就从它重新数，帧时钟的计时也重新起', () => {
+test('相位按时钟算：同一时刻几个图标同一格；钩子给了新的 now 就从它重新数，帧时钟的计时也重新起', () => {
   const timers: string[] = []
   const every = (ms: number) => {
     const id = `t${timers.length + 1}:${ms}`
@@ -46,33 +28,34 @@ test('相位按时钟算：同一时刻几条线同一个颜色；钩子给了�
   }
   const a = ticking(NOW)
   const b = ticking(NOW)
-  follow(a, NOW, every, BREATH.stepMs, () => undefined)
-  follow(b, NOW, every, BREATH.stepMs, () => undefined)
-  expect(timers).toEqual(['t1:100', 't2:100'])
+  follow(a, NOW, every, SPIN.stepMs, () => undefined)
+  follow(b, NOW, every, SPIN.stepMs, () => undefined)
+  expect(timers).toEqual(['t1:150', 't2:150'])
   a.ticks = 3
   b.ticks = 3
-  expect(clockOf(a, BREATH.stepMs)).toBe(NOW + 3 * BREATH.stepMs)
-  expect(breathLevel(clockOf(a, BREATH.stepMs))).toBe(breathLevel(clockOf(b, BREATH.stepMs)))
+  expect(clockOf(a, SPIN.stepMs)).toBe(NOW + 3 * SPIN.stepMs)
+  expect(spinGlyph(clockOf(a, SPIN.stepMs))).toBe(spinGlyph(clockOf(b, SPIN.stepMs)))
   // 同一个 now：不重数，也不重起计时
-  follow(a, NOW, every, BREATH.stepMs, () => undefined)
+  follow(a, NOW, every, SPIN.stepMs, () => undefined)
   expect(a.ticks).toBe(3)
   expect(timers).toHaveLength(2)
   // 新的 now：从它重新数，旧的计时停掉、从这一刻重起
-  follow(a, NOW + 5000, every, BREATH.stepMs, () => undefined)
-  expect(clockOf(a, BREATH.stepMs)).toBe(NOW + 5000)
-  expect(timers).toEqual(['t1:100 停', 't2:100', 't3:100'])
+  follow(a, NOW + 5000, every, SPIN.stepMs, () => undefined)
+  expect(clockOf(a, SPIN.stepMs)).toBe(NOW + 5000)
+  expect(timers).toEqual(['t1:150 停', 't2:150', 't3:150'])
 })
 
 test('有 Client、模块没出过错才用它；ui.fault 报的路径按文件名认', () => {
   const els = { Client: () => null }
-  expect(liveOf(els, 'terminal', 5, [])).toEqual({ now: 5, rail: true, spinner: true, elapsed: true })
-  expect(liveOf(els, 'desktop', 5, [])).toEqual({ now: 5, rail: true, spinner: true, elapsed: true })
-  expect(liveOf(els, 'terminal', 5, ['rail.tsx'])).toEqual({ now: 5, rail: false, spinner: true, elapsed: true })
-  expect(liveOf(els, 'terminal', 5, ['rail.tsx', 'spinner.tsx', 'elapsed.tsx'])).toEqual({ now: 5, rail: false, spinner: false, elapsed: false })
-  expect(liveOf({}, 'terminal', 5, [])).toEqual({ now: 5, rail: false, spinner: false, elapsed: false })
+  expect(liveOf(els, 'terminal', 5, [])).toEqual({ now: 5, spinner: true, elapsed: true })
+  expect(liveOf(els, 'desktop', 5, [])).toEqual({ now: 5, spinner: true, elapsed: true })
+  expect(liveOf(els, 'terminal', 5, ['spinner.tsx'])).toEqual({ now: 5, spinner: false, elapsed: true })
+  expect(liveOf(els, 'terminal', 5, ['spinner.tsx', 'elapsed.tsx'])).toEqual({ now: 5, spinner: false, elapsed: false })
+  expect(liveOf({}, 'terminal', 5, [])).toEqual({ now: 5, spinner: false, elapsed: false })
   // VS Code 的 resolve 也给 Client，但它的元素表里没有，画出来是空的
-  expect(liveOf(els, 'vscode', 5, [])).toEqual({ now: 5, rail: false, spinner: false, elapsed: false })
-  expect(faultedModule('hooks/rail.tsx')).toBe('rail.tsx')
+  expect(liveOf(els, 'vscode', 5, [])).toEqual({ now: 5, spinner: false, elapsed: false })
+  // 分隔线不再有 Client（anvil-k0t.46 去掉了呼吸）
+  expect(faultedModule('hooks/rail.tsx')).toBe(null)
   expect(faultedModule('hooks\\elapsed.tsx')).toBe('elapsed.tsx')
   expect(faultedModule('./spinner.tsx')).toBe('spinner.tsx')
   expect(faultedModule('hooks/other.tsx')).toBe(null)
@@ -114,65 +97,61 @@ function cellsOf(node: unknown): Cell[] {
   return (children ?? (props?.children as unknown[] | undefined) ?? []).flatMap(cellsOf)
 }
 
-/** 主会话从 since 起回复，clock 这一刻整条线的样子：一种颜色 */
-const expected = (width: number, color: string): Cell[] => Array.from({ length: width }, () => ({ color }))
-
-async function railOf(ui: Mounted<'terminal', 'Pane'>, id: string): Promise<RenderElement> {
-  return ui.drawn({ in: `rail:rule:${id}` })
+/** 一行里各段字和它的颜色（Text 嵌套时沿用外层的颜色） */
+function textsOf(node: unknown, inherited?: unknown): { text: string; color?: unknown }[] {
+  if (node === null || typeof node !== 'object') return []
+  const { type, props, children } = node as { type?: string; props?: Record<string, unknown>; children?: unknown[] }
+  const color = type === 'Text' && props?.color !== undefined ? props.color : inherited
+  const kids = children ?? (props?.children as unknown[] | undefined) ?? []
+  const own = kids.filter((kid): kid is string => typeof kid === 'string').join('')
+  const nested = kids.filter(kid => typeof kid !== 'string').flatMap(kid => textsOf(kid, color))
+  return type === 'Text' && own !== '' ? [{ text: own, color }, ...nested] : nested
 }
 
-test('分隔线和框同宽：线色细线；主会话没在回复时静止，帧时钟走了也不动', async ($, on) => {
+test('框与框之间空一行，不画分隔线；没有东西在发生时面板上没有转动的图标', async ($, on) => {
   engine(on)
   await $.session.start(SESSION)
-  await $.agent.spawn(spawnInput('核对读数'))
   for (const columns of [50, 70, 90]) {
     const ui = await $.ui.mount(sized(columns))
-    for (const id of ['usage', 'agents', 'messages']) {
-      expect((await ui.find({ key: `rule:${id}` }))?.props, `${columns} 列 ${id}`).toMatchObject({ width: columns, height: 1 })
-      const client = await ui.find({ key: `rail:rule:${id}` })
-      expect(client?.type).toBe('Client')
-      expect(client?.props).toMatchObject({ module: 'hooks/rail.tsx', width: columns, height: 1, props: { active: false, width: columns, rest: COLOR.line } })
-      const rail = await railOf(ui, id)
-      expect(flat(rail)).toBe('─'.repeat(columns))
-      expect(new Set(cellsOf(rail).map(cell => cell.color))).toEqual(new Set([COLOR.line]))
+    for (const id of ['usage', 'messages']) {
+      const gap = await ui.find({ key: `gap:${id}` })
+      expect(gap?.props, `${columns} 列 ${id}`).toMatchObject({ width: columns, height: 1 })
+      expect(flat(gap)).toBe('')
     }
-    // 缓存框上面、我的消息和身份栏之间不加线
-    expect(await ui.find({ key: 'rule:cache' })).toBeUndefined()
-    await ui.advance(10 * BREATH.stepMs)
-    expect(flat(await railOf(ui, 'usage'))).toBe('─'.repeat(columns))
-    expect(cellsOf(await railOf(ui, 'usage')).every(cell => cell.color === COLOR.line)).toBe(true)
+    // 缓存框上面不空行
+    expect(await ui.find({ key: 'gap:cache' })).toBeUndefined()
+    expect(await ui.find({ key: 'rule:usage' })).toBeUndefined()
+    expect(await ui.findAll({ type: 'Client' })).toEqual([])
+    expect(flat(await ui.find({ key: 'identity:speed' }))).toBe(`${ICON.speed} —`)
     await ui.unmount()
   }
 })
 
-test('主会话正在回复时整条线呼吸：从线色起步慢慢亮到 Claude 橙再暗回去，几条线同一个颜色；回复结束停成静止的线色', async ($, on) => {
+test('主会话正在回复时，身份栏速度行的图标换成转动的 ◐，上一次的读数退到次要色；回复结束复原', async ($, on) => {
   const { clock } = engine(on)
   await $.session.start(SESSION)
-  await $.agent.spawn(spawnInput('核对读数'))
-  // 这一轮的第一次请求已经开始、还没结束
+  await drain($.turn.step(stepInput()))
+  await $.turn.complete(turnInput())
+  // 第二轮的第一次请求已经开始、还没结束
   await drain($.turn.step(stepInput()))
   await clock.advance(700)
   const ui = await $.ui.mount(sized(70))
-  expect((await ui.find({ key: 'rail:rule:usage' }))?.props).toMatchObject({ props: { active: true, since: NOW, now: NOW + 700, glow: COLOR.active } })
-  const first = cellsOf(await railOf(ui, 'usage'))
-  expect(first).toEqual(expected(70, breathColor(COLOR.line, COLOR.active, 700)))
-  for (const id of ['agents', 'messages']) expect(cellsOf(await railOf(ui, id)), id).toEqual(first)
-  // 没有扫过的亮段、没有加粗：整条线一个颜色
-  expect(new Set(first.map(cell => cell.color)).size).toBe(1)
-  expect(first.some(cell => cell.bold)).toBe(false)
-
-  await ui.advance(5 * BREATH.stepMs)
-  const second = cellsOf(await railOf(ui, 'usage'))
-  expect(second).toEqual(expected(70, breathColor(COLOR.line, COLOR.active, 1200)))
-  expect(second[0]?.color).toBe(COLOR.active)
-  for (const id of ['agents', 'messages']) expect(cellsOf(await railOf(ui, id)), id).toEqual(second)
+  expect((await ui.find({ key: 'spin:speed' }))?.props).toMatchObject({ module: 'hooks/spinner.tsx', width: 1, props: { color: COLOR.active, now: NOW + 700 } })
+  expect(flat(await ui.drawn({ in: 'spin:speed' }))).toBe(spinGlyph(NOW + 700))
+  await ui.advance(SPIN.stepMs)
+  expect(flat(await ui.drawn({ in: 'spin:speed' }))).toBe(spinGlyph(NOW + 700 + SPIN.stepMs))
+  const numbers = textsOf(await ui.find({ key: 'identity:speed' })).filter(one => /\d|—/.test(one.text))
+  expect(numbers.length).toBeGreaterThan(0)
+  for (const one of numbers) expect(one.color, one.text).toBe(COLOR.secondary)
 
   await $.turn.complete(turnInput())
   await ui.redraw()
-  await ui.advance(BREATH.stepMs)
-  const rail = await railOf(ui, 'usage')
-  expect(flat(rail)).toBe('─'.repeat(70))
-  expect(cellsOf(rail).every(cell => cell.color === COLOR.line)).toBe(true)
+  expect(await ui.find({ key: 'spin:speed' })).toBeUndefined()
+  const after = textsOf(await ui.find({ key: 'identity:speed' }))
+  expect(after[0]).toMatchObject({ text: ICON.speed, color: COLOR.icon })
+  const values = after.filter(one => /\d|—/.test(one.text))
+  expect(values.length).toBeGreaterThan(0)
+  for (const one of values) expect(one.color, one.text).toBeUndefined()
   await ui.unmount()
 })
 
@@ -182,7 +161,7 @@ test('子 agent 的回复不算主会话在回复', async ($, on) => {
   await $.agent.spawn(spawnInput('核对读数'))
   await drain($.turn.step(stepInput({ agentId: 'ag1' })))
   const ui = await $.ui.mount(sized(70))
-  expect((await ui.find({ key: 'rail:rule:usage' }))?.props).toMatchObject({ props: { active: false } })
+  expect(await ui.find({ key: 'spin:speed' })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -284,14 +263,14 @@ test('翻译框正在翻译时 ◐ 原地转动，后面的字不动', async ($,
 async function stillPanel($: Engine, ui: Mounted<'terminal', 'Pane'> | Mounted<'vscode', 'Pane'>, columns: number) {
   // 一个 Client 都没有
   expect(await ui.findAll({ type: 'Client' })).toEqual([])
-  // 分隔线是静止的线
-  const line = await ui.find({ key: 'rule:usage' })
-  expect(flat(line)).toBe('─'.repeat(columns))
+  // 框间是空行
+  expect(flat(await ui.find({ key: 'gap:usage' }))).toBe('')
+  void columns
   // 运行中的子 agent：Button 里静止的 ◐ 和按 now 算的耗时
   expect(flat(await ui.find({ key: 'agent:1' }))).toMatch(/^◐ +核对读数 +Sonnet +5s$/)
 }
 
-test('没有 Client 的界面：分隔线是静止的线、◐ 静止、耗时随面板重画更新', async ($, on) => {
+test('没有 Client 的界面：◐ 静止、耗时随面板重画更新，回复中速度行是静止的 ◐', async ($, on) => {
   const { clock } = engine(on)
   await $.session.start(SESSION)
   await $.agent.spawn(spawnInput('核对读数'))
@@ -299,6 +278,7 @@ test('没有 Client 的界面：分隔线是静止的线、◐ 静止、耗时�
   await clock.advance(5000)
   const ui = await $.ui.mount(vscode(70))
   await stillPanel($, ui, 70)
+  expect(flat(await ui.find({ key: 'identity:speed' }))).toMatch(/^◐/)
   await clock.advance(3000)
   await ui.redraw()
   expect(flat(await ui.find({ key: 'agent:1' }))).toMatch(/^◐ +核对读数 +Sonnet +8s$/)
@@ -310,7 +290,7 @@ test('没有 Client 的界面：分隔线是静止的线、◐ 静止、耗时�
 
 // ---------------------------------------------------------------- 配色
 
-test('缓存、用量、子 agent、拒绝四个框的边框用各自的标题色，标题加粗；我的消息边框次要色、标题正文色', async ($, on) => {
+test('四个彩框的标题用识别色加粗、边框用同色相调暗的一档；我的消息边框线色、标题正文色', async ($, on) => {
   engine(on)
   await $.session.start(SESSION)
   await $.agent.spawn(spawnInput('核对读数'))
@@ -326,19 +306,19 @@ test('缓存、用量、子 agent、拒绝四个框的边框用各自的标题�
   }
   await $.classic.PermissionDenied(denied)
   const ui = await $.ui.mount(sized(70))
-  const sections: [string, string, string][] = [
-    ['cache', '缓存', COLOR.cache],
-    ['usage', '用量', COLOR.usage],
-    ['agents', '子 agent', COLOR.agents],
-    ['denials', '自动模式拒绝', COLOR.denials],
+  const sections: [string, string, string, string][] = [
+    ['cache', '缓存', COLOR.cache, COLOR.cacheLine],
+    ['usage', '用量', COLOR.usage, COLOR.usageLine],
+    ['agents', '子 agent', COLOR.agents, COLOR.agentsLine],
+    ['denials', '自动模式拒绝', COLOR.denials, COLOR.denialsLine],
   ]
   const texts = await ui.findAll({ type: 'Text' })
-  for (const [id, title, color] of sections) {
-    expect((await ui.find({ key: `box:${id}` }))?.props.borderColor, id).toBe(color)
+  for (const [id, title, color, border] of sections) {
+    expect((await ui.find({ key: `box:${id}` }))?.props.borderColor, id).toBe(border)
     const head = texts.filter(one => (one.text ?? '').endsWith(title))
     expect(head.length, id).toBeGreaterThan(0)
     for (const one of head) expect(one.props, id).toMatchObject({ color, bold: true })
   }
-  expect((await ui.find({ key: 'box:messages' }))?.props.borderColor).toBe(COLOR.secondary)
+  expect((await ui.find({ key: 'box:messages' }))?.props.borderColor).toBe(COLOR.line)
   await ui.unmount()
 })

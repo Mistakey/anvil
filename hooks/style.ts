@@ -6,34 +6,39 @@ import { cells, fit } from './text'
 export type Segment = { text: string; color?: string; bold?: boolean }
 
 /**
- * 色板（spec D10，anvil-k0t.44）。正文不设颜色，用终端的前景色，和对话里的字同一种白；
+ * 色板（spec D10，anvil-k0t.46）。正文不设颜色，用终端的前景色，和对话里的字同一种白；
  * 中性色只有三级：次要文字、图标与分隔符、线。对比度按面板的底色量：引擎给面板画的 #262626
- * （伪终端实测），和翻译框所在的终端底色（用户的 Dracula #282a36）：次要 6.0 / 5.6:1，图标 3.9 / 3.7:1，线 2.2 / 2.1:1。
+ * （伪终端实测），和翻译框所在的终端底色（用户的 Dracula #282a36）：次要 6.0 / 5.6:1，图标 3.9 / 3.7:1，线 2.8 / 2.6:1。
+ * 好状态只给符号（和状态词）上色，数据保持正文色；出问题时整句一个颜色。
  */
 export const COLOR = {
-  /** 次要文字：名称列、标签与单位、第二行的细节、计数、序号、提示、结束了的列表项 */
+  /** 次要文字：名称列、标签与单位、第二行的细节、计数、序号、提示、做完了的列表项 */
   secondary: '#9da3b0',
   /** 图标和分隔符 `·`：不是文字，比次要文字再暗一级 */
   icon: '#7a8194',
-  /** 线：框与框之间的分隔线、进度条的底、翻译框空着时的边框 */
-  line: '#555a6b',
-  /** 正在发生：进行中图标、主会话回复时分隔线的呼吸；Claude 橙（引擎的主题色 claude 画成这个值） */
+  /** 线：我的消息的边框、进度条的底；和四个彩框调暗的边框同一亮度 */
+  line: '#666a71',
+  /** 正在发生：所有进行中的 ◐；Claude 橙（引擎画自己的 spinner 用的也是它，主题色 claude 画成这个值） */
   active: '#d77757',
-  // 状态色：进度条四档、命中率、缓存有效 / 过期、git 计数；一种颜色一个意思
+  // 状态色：进度条四档、命中率、缓存有效 / 过期、预测、git 计数；一种颜色一个意思
   ok: '#8fbf7f',
   warn: '#d7bd6f',
   high: '#d79a6f',
   danger: '#e07a7a',
-  /** 调暗的红：翻译失败时翻译框的边框 */
-  dangerLine: '#8a4f55',
-  // 识别色：各框的标题和边框（spec D10）
+  // 识别色：各框的标题（原色）和边框（同色相调暗到和线同一亮度，2.8:1）
   cache: '#6cc5c0',
+  cacheLine: '#47716e',
   usage: '#7aa7e0',
+  usageLine: '#536c8a',
   agents: '#d78fc4',
+  agentsLine: '#845e7a',
   /** 拒绝就是"被拦下"，和状态色的红是同一个意思，用同一个值 */
   denials: '#e07a7a',
+  denialsLine: '#975959',
   /** 身份栏的分支（git 的识别色） */
   branch: '#b18bd0',
+  /** 翻译框的上下两条线：和引擎画主输入框的线同色（伪终端实测），两条输入框看着是一家 */
+  promptLine: '#888888',
 } as const
 
 /** Nerd Font 图标；图标后一律留一个空格 */
@@ -75,12 +80,15 @@ export function valueWidth(inner: number, label: number = GRID.label): number {
 /** 进度条后的百分比：右对齐 4 格到 100%，数字变长变短时进度条和百分比上下对齐 */
 export const FIELD = { percent: 4 } as const
 
+/** 进度条最长 30 格（用户定，anvil-k0t.46）：面板拖宽时百分比仍靠近名称 */
+export const BAR_MAX = 30
+
 /**
- * 进度条的长度：值那一列除了百分比（前面空 1 格）都给进度条，右边留 1 格。
- * 三条进度条一样长；框 48 列（框内 44 格）时 30 格，和用户的终稿一致。
+ * 进度条的长度：值那一列除了百分比（前面空 1 格）都给进度条，右边留 1 格，最长 BAR_MAX 格。
+ * 三条进度条一样长；框 48 列（框内 44 格）起就是 30 格。
  */
 export function barWidth(inner: number): number {
-  return Math.max(1, valueWidth(inner) - FIELD.percent - 2)
+  return Math.max(1, Math.min(BAR_MAX, valueWidth(inner) - FIELD.percent - 2))
 }
 
 /** 进度条四档：低于 60% 绿，60–80% 黄，80–90% 橙，90% 以上红 */

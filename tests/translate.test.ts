@@ -129,6 +129,11 @@ test('按 Enter：订阅模型（默认 Haiku）翻译，以 append 追加到主
   expect(asked[0]?.system).toContain('Output only the English translation')
   expect(fillModes).toEqual([{ text: ENGLISH, mode: 'append' }])
   expect(await statusText(ui)).toBe('\u{F00C} 已追加 4 个词')
+  // 好状态只给符号上色：✓ 绿，字次要色；上下两条线和主输入框的线同色
+  const texts = await ui.findAll({ type: 'Text' })
+  expect(texts.find(one => one.text === '\u{F00C}')?.props.color).toBe(COLOR.ok)
+  expect(texts.find(one => one.text === ' 已追加 4 个词')?.props.color).toBe(COLOR.secondary)
+  expect((await ui.find({ key: 'rule:translate' }))?.children?.[0]).toMatchObject({ props: { color: COLOR.promptLine } })
   // 还是同一个输入框、没有画值：不重画中文，也就不调 $.ui.focus 抢焦点（焦点只交给新一代的输入框）
   const after = await field(ui)
   expect(after.key).toBe(before.key)
@@ -405,11 +410,11 @@ test('各种宽度下框占满 band、不超宽；框里有字时状态在输入
     // 只有上下两条边框：引擎按整个 band 宽给 Input 排版，左右边框会让长句放不下
     expect((await ui.find({ key: 'title:translate' }))?.text).toMatch(/^── .*中→英 ─+$/)
     expect(cells((await ui.find({ key: 'title:translate' }))?.text ?? '')).toBe(columns)
-    // 标题是正文色加粗，不沿用边框的颜色；失败时边框是调暗的红
+    // 标题是正文色加粗，不沿用边框的颜色；失败时上下两条线是危险红
     const title = (await ui.findAll({ type: 'Text' })).find(one => one.text.endsWith('中→英'))
     expect(title?.props.bold).toBe(true)
     expect(title?.props.color).toBeUndefined()
-    expect((await ui.find({ key: 'rule:translate' }))?.children?.[0]).toMatchObject({ props: { color: COLOR.dangerLine } })
+    expect((await ui.find({ key: 'rule:translate' }))?.children?.[0]).toMatchObject({ props: { color: COLOR.danger } })
     expect(cells((await ui.find({ key: 'rule:translate' }))?.text ?? '')).toBe(columns)
     const status = await ui.find({ key: 'status:translate' })
     // 挪到下面时折成几行，原因不截断

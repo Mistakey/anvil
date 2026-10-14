@@ -25,7 +25,10 @@ function forecastOf(kind: Kind, percent: number, resetsAt: number, now: number, 
   const usage: Usage = { ...EMPTY_USAGE, rateLimits: [{ kind, percentUsed: percent, resetsAt: new Date(resetsAt).toISOString() }] }
   const histories: Histories = history ? { [kind]: history } : {}
   const row = usageRows(usage, now, 66, histories).find(one => one.key === kind)
-  return row?.lines[1]?.at(-1)
+  // 右列从两列间的空格之后起；好状态的图标和时刻分两段上色（图标绿、时刻次要色），按图标的颜色合成一段
+  const line = row?.lines[1] ?? []
+  const parts = line.slice(line.findIndex(one => one.text === '  ') + 1)
+  return parts.length === 0 ? undefined : { text: parts.map(one => one.text).join(''), color: parts[0]?.color }
 }
 
 /** 一个窗口的第二行预测：用不完绿、会用完红、已用满 full */

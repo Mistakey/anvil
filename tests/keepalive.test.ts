@@ -178,11 +178,11 @@ describe('/anvil keepalive', () => {
 
     const back = await $.command.run(anvil(' keepalive '))
     expect(back.text).toBe('缓存保活已开启（本会话）')
-    expect(await keepaliveRow($)).toEqual({ text: '已启用（本会话）', color: COLOR.ok })
+    expect(await keepaliveRow($)).toEqual({ text: '已启用（本会话）' })
     // 这段空闲已过 50 分钟、缓存还有效：马上补一次
     await w.clock.advance(1 * SEC)
     expect(w.forks).toHaveLength(1)
-    expect(await keepaliveRow($)).toEqual({ text: '进行中（本会话）', color: COLOR.ok })
+    expect(await keepaliveRow($)).toEqual({ text: '进行中（本会话）' })
   })
 
   test('/config 关掉自动开启时，切换一次就在本会话开启，按时发 fork', { options: { autoKeepalive: false } }, async ($, on) => {
@@ -213,7 +213,7 @@ describe('/anvil keepalive', () => {
     expect((await keepaliveRow($)).text).toBe('未启用（低于 50k）')
 
     expect((await $.command.run(anvil('keepalive'))).text).toBe('缓存保活已开启（本会话）')
-    expect(await keepaliveRow($)).toEqual({ text: '已启用（本会话）', color: COLOR.ok })
+    expect(await keepaliveRow($)).toEqual({ text: '已启用（本会话）' })
     await w.clock.advance(50 * MIN)
     expect(w.forks).toHaveLength(1)
   })
@@ -226,7 +226,7 @@ describe('/anvil keepalive', () => {
     expect((await keepaliveRow($)).text).toBe('已停止（续期时缓存已过期）')
 
     expect((await $.command.run(anvil('keepalive'))).text).toBe('缓存保活已开启（本会话）')
-    expect(await keepaliveRow($)).toEqual({ text: '已启用（本会话）', color: COLOR.ok })
+    expect(await keepaliveRow($)).toEqual({ text: '已启用（本会话）' })
     // 缓存还有效、已过发请求的时刻：马上补一次
     await w.clock.advance(1 * SEC)
     expect(w.forks).toHaveLength(2)
@@ -281,7 +281,7 @@ describe('停下', () => {
     // 最后一次续期在 11h40m，缓存到 12h40m 过期；过期前 10 分钟敲一次
     await w.clock.advance(10 * MIN)
     expect((await $.command.run(anvil('keepalive'))).text).toBe('缓存保活已开启（本会话）')
-    expect(await keepaliveRow($)).toEqual({ text: '进行中（本会话）', color: COLOR.ok })
+    expect(await keepaliveRow($)).toEqual({ text: '进行中（本会话）' })
 
     // 上一次续期之后 50 分钟（12h30m）照常发、续期
     await w.clock.advance(20 * MIN)
@@ -376,7 +376,7 @@ describe('恢复会话', () => {
 
       // 会话 B：10 分钟前还有响应，缓存没过期
       await $.classic.SessionStart({ source, seconds_since_last_response: 600, context_tokens: 200000, prompt_cache_likely_expired: false })
-      expect(await keepaliveRow($)).toEqual({ text: '已启用', color: COLOR.ok })
+      expect(await keepaliveRow($)).toEqual({ text: '已启用' })
       const b = cacheOf(w.state)
       expect(b.hitRate).toEqual({ last: null, session: null })
       expect(b.coldWrites).toEqual({ count: 0, usd: 0 })
@@ -403,7 +403,7 @@ const SETTINGS: Settings = { threshold: 50000, autoKeepalive: true, guard: true,
 const text = (segments: readonly Segment[]) => segments.map(segment => segment.text).join('')
 /** 一行的值（不折行时就是整个值） */
 const lineOf = (row: GridRow | undefined) => text(row?.lines[0] ?? [])
-const ENABLED: Segment = { text: '已启用', color: COLOR.ok }
+const ENABLED: Segment = { text: '已启用' }
 
 /** 一份缓存框读数：上下文 152k，本会话命中率 94%，21:40 过期 */
 function sample(over: Partial<CacheView> = {}): CacheView {
@@ -430,11 +430,11 @@ describe('缓存框', () => {
     expect(rows.every(row => row.labelWidth === GRID.label)).toBe(true)
   })
 
-  test('有效：● 绿，值"有效 · 过期 HH:MM"绿（标签在前）；不是当天的写 HH:MM MM-DD', () => {
+  test('有效：● 有效绿，"过期"次要色、时刻正文色（好状态只给符号和状态词上色）；不是当天的写 HH:MM MM-DD', () => {
     const [, state] = cacheRows(sample(), ENABLED, at(13, 20), 66)
     expect(state?.label).toEqual([{ text: '●', color: COLOR.ok }])
     expect(lineOf(state)).toBe('有效 · 过期 21:40')
-    expect(state?.lines[0]?.every(one => one.color === COLOR.ok)).toBe(true)
+    expect(state?.lines[0]).toEqual([{ text: '有效', color: COLOR.ok }, { text: ' · ', color: COLOR.icon }, { text: '过期 ', color: COLOR.secondary }, { text: '21:40' }])
     expect(valueOf(cacheRows(sample({ expiresAt: at(14, 0, 30) }), ENABLED, at(13, 23), 66), 'state')).toBe('有效 · 过期 00:30 10-14')
   })
 
@@ -495,8 +495,8 @@ describe('缓存框', () => {
   test('保活状态：自动开启的五种，加上本会话手动开、手动关', () => {
     const idle = { stopped: null, renewing: false, inFlight: false }
     const base = { settings: SETTINGS, override: null, context: 151000, loop: idle }
-    expect(keepaliveStatus(base)).toEqual({ text: '已启用', color: COLOR.ok })
-    expect(keepaliveStatus({ ...base, loop: { stopped: null, renewing: true, inFlight: false } })).toEqual({ text: '进行中', color: COLOR.ok })
+    expect(keepaliveStatus(base)).toEqual({ text: '已启用' })
+    expect(keepaliveStatus({ ...base, loop: { stopped: null, renewing: true, inFlight: false } })).toEqual({ text: '进行中' })
     expect(keepaliveStatus({ ...base, override: false })).toEqual({ text: '已关闭（本会话）', color: COLOR.secondary })
     expect(keepaliveStatus({ ...base, context: 32000 })).toEqual({ text: '未启用（低于 50k）', color: COLOR.secondary })
     expect(keepaliveStatus({ ...base, settings: { ...SETTINGS, autoKeepalive: false } })).toEqual({
@@ -515,8 +515,8 @@ describe('缓存框', () => {
 
     // 本会话手动开：不看自动开启和阈值；手动关：不看停下
     const manual = { ...base, override: true, context: 0, settings: { ...SETTINGS, autoKeepalive: false } }
-    expect(keepaliveStatus(manual)).toEqual({ text: '已启用（本会话）', color: COLOR.ok })
-    expect(keepaliveStatus({ ...manual, loop: { stopped: null, renewing: true, inFlight: false } })).toEqual({ text: '进行中（本会话）', color: COLOR.ok })
+    expect(keepaliveStatus(manual)).toEqual({ text: '已启用（本会话）' })
+    expect(keepaliveStatus({ ...manual, loop: { stopped: null, renewing: true, inFlight: false } })).toEqual({ text: '进行中（本会话）' })
     expect(keepaliveStatus({ ...manual, loop: { stopped: { kind: 'limit', reason: '空闲超过 12 小时' }, renewing: true, inFlight: false } }).text).toBe(
       '已停止（空闲超过 12 小时）',
     )
@@ -542,7 +542,9 @@ describe('缓存框', () => {
       }
       expect(flat(await ui.find({ key: 'row:cache' }))).toBe(`${ICON.cache}100%`)
       expect(flat(await ui.find({ key: 'row:state' }))).toBe('●有效 · 过期 21:00')
-      expect(await colorOf(ui, '有效 · 过期 21:00')).toBe(COLOR.ok)
+      expect(await colorOf(ui, '有效')).toBe(COLOR.ok)
+      expect(await colorOf(ui, '过期 ')).toBe(COLOR.secondary)
+      expect(await colorOf(ui, '21:00')).toBeUndefined()
       expect(await colorOf(ui, '●')).toBe(COLOR.ok)
       await ui.unmount()
     }

@@ -103,18 +103,21 @@ export function modelName(id: string): string {
 /** 运行中的算到现在，结束的算到结束 */
 export const elapsed = (agent: SubAgent, now: number) => formatDuration((agent.endedAt ?? now) - agent.spawnedAt)
 
-/** 右上角："2 运行中 · 1 已完成 · 1 出错"，输出被截断算已完成；没有子 agent 时"0 个" */
+/**
+ * 右上角："2 运行中 · 1 已完成 · 1 出错"，输出被截断算已完成；没有子 agent 时"0 个"。
+ * 计数是次要色（框给的颜色），只有出问题的"N 出错"升到红
+ */
 export function agentCounts(list: readonly SubAgent[]): Segment[] {
   const running = list.filter(agent => agent.status === 'running').length
   const done = list.filter(agent => agent.status === 'done' || agent.status === 'truncated').length
   const failed = list.filter(agent => agent.status === 'failed').length
-  const parts = [
-    running > 0 ? `${running} 运行中` : null,
-    done > 0 ? `${done} 已完成` : null,
-    failed > 0 ? `${failed} 出错` : null,
-  ].filter((part): part is string => part !== null)
+  const parts: Segment[] = [
+    ...(running > 0 ? [{ text: `${running} 运行中` }] : []),
+    ...(done > 0 ? [{ text: `${done} 已完成` }] : []),
+    ...(failed > 0 ? [{ text: `${failed} 出错`, color: COLOR.danger }] : []),
+  ]
   if (parts.length === 0) return [{ text: '0 个' }]
-  return parts.flatMap((text, index) => (index === 0 ? [{ text }] : [SEPARATOR, { text }]))
+  return parts.flatMap((part, index) => (index === 0 ? [part] : [SEPARATOR, part]))
 }
 
 /** 状态符号和颜色：状态都配符号或文字，不只靠颜色（D10） */
@@ -170,15 +173,18 @@ function agentRow(els: Els, agent: SubAgent, now: number, inner: number, onPress
   const width = taskWidth(inner)
   const note = agent.status === 'truncated' ? ` ${TRUNCATED}` : ''
   const task = fit(agent.description || '子 agent', Math.max(1, width - cells(note)))
+  // 正在发生的亮，做完的退后，出问题的不退（anvil-k0t.46）：已完成的任务和耗时退到次要色，出错、被截断的任务留正文色
+  const recede = agent.status === 'done' ? { color: COLOR.secondary } : {}
   const segments: Segment[] = [
-    ...(agent.seq > 9 ? [{ text: `${padStart(String(agent.seq), COLUMN.seq)} `, color: COLOR.agents, bold: true }] : []),
+    // 10 以后没有按键，序号和我的消息的序号一样是次要色
+    ...(agent.seq > 9 ? [{ text: `${padStart(String(agent.seq), COLUMN.seq)} `, color: COLOR.secondary }] : []),
     { ...MARK[agent.status], text: padEnd(MARK[agent.status].text, COLUMN.mark + COLUMN.gap) },
-    { text: task, ...(isOver ? { color: COLOR.secondary } : {}) },
+    { text: task, ...recede },
     ...(note ? [{ text: note, color: COLOR.warn }] : []),
     { text: ' '.repeat(Math.max(0, width - cells(task) - cells(note)) + COLUMN.gap) },
     { text: padStart(modelName(agent.model), COLUMN.model), color: COLOR.secondary },
     { text: ' '.repeat(COLUMN.gap) },
-    { text: padStart(elapsed(agent, now), COLUMN.time), color: COLOR.secondary },
+    { text: padStart(elapsed(agent, now), COLUMN.time), ...(isOver ? { color: COLOR.secondary } : {}) },
   ]
   const hotkey = agent.seq <= 9 ? String(agent.seq) : undefined
   const isRunning = agent.status === 'running'
@@ -194,7 +200,7 @@ function agentRow(els: Els, agent: SubAgent, now: number, inner: number, onPress
       ) : null}
       {isRunning && live.elapsed ? (
         <Box key={`over:time:${agent.id}`} position="absolute" top={0} left={inner - COLUMN.time}>
-          {clock(els, live, { key: `clock:agent:${agent.id}`, since: agent.spawnedAt, endAt: null, color: COLOR.secondary, width: COLUMN.time, inverse: isFocused })}
+          {clock(els, live, { key: `clock:agent:${agent.id}`, since: agent.spawnedAt, endAt: null, width: COLUMN.time, inverse: isFocused })}
         </Box>
       ) : null}
     </Box>

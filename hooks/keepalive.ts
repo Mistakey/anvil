@@ -149,7 +149,7 @@ export type StatusInput = { settings: Settings; override: boolean | null; contex
 /**
  * 按默认的五种：已启用、进行中（这段空闲里续期过或正在续期）、未启用（自动开启已关闭 / 上下文低于阈值）、已停止（原因）。
  * 本会话切换过的：已关闭（本会话）；开着时已启用、进行中带"（本会话）"，停下照样写已停止（原因）。
- * 已停止：空闲到上限为灰，读数不达标和出错为红；其余开着为绿，没开为灰。
+ * 已停止：空闲到上限为灰，读数不达标和出错为红；其余开着为正文色，没开为灰。
  */
 export function keepaliveStatus({ settings, override, context, loop }: StatusInput): Segment {
   if (override === false) return { text: '已关闭（本会话）', color: COLOR.secondary }
@@ -157,5 +157,6 @@ export function keepaliveStatus({ settings, override, context, loop }: StatusInp
   if (override === null && !settings.autoKeepalive) return { text: '未启用（自动开启已关闭）', color: COLOR.secondary }
   if (override === null && context < settings.threshold) return { text: `未启用（低于 ${formatTokens(settings.threshold)}）`, color: COLOR.secondary }
   const mark = override ? '（本会话）' : ''
-  return { text: `${loop.renewing ? '进行中' : '已启用'}${mark}`, color: COLOR.ok }
+  // 正常在保活是好状态：正文色，不上色（好状态安静，anvil-k0t.46）
+  return { text: `${loop.renewing ? '进行中' : '已启用'}${mark}` }
 }

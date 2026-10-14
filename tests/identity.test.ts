@@ -7,6 +7,7 @@ import { COLOR, ICON } from '../hooks/style'
 import type { Segment } from '../hooks/style'
 import { cells } from '../hooks/text'
 import type { Identity } from '../types'
+import { turnInput } from './world'
 
 // ---------------------------------------------------------------- git 输出的固定样例
 
@@ -154,7 +155,7 @@ test('目录名：linked worktree 接 worktree 目录名，主仓库名取共用
     status: ['# branch.oid 1234567', '# branch.head worktree-agent-a9f9190b', '# branch.upstream origin/x', '1 .M N... 1 1 1 a b x.ts'].join('\n'),
     numstat: '120\t4\tx.ts',
   })
-  expect(await firstLine($, on, linked)).toBe(`${D} anvil ${W} agent-a9f9190b  ${B} worktree-agent-a9f9…  !1  ${L} +120 −4`)
+  expect(await firstLine($, on, linked)).toBe(`${D} anvil ${W} agent-a9f9190b  ${B} …tree-agent-a9f9190b  !1  ${L} +120 −4`)
 })
 
 test('目录名：会话目录是仓库的子目录时接相对路径', async ($, on) => {
@@ -311,11 +312,15 @@ test('token/s：输出 ÷ 首字到结束；缺时刻、跨度为零、没有输
   expect(tokensPerSecond(0, 0, 1000)).toBe(null)
 })
 
-test('第二行只有模型 · effort；第三行 token/s · 首字 · 用时，数值不着色、右对齐到定宽', () => {
+test('第二行只有模型 · effort；第三行 token/s · 首字 · 用时（图标另画），数值不着色、右对齐到定宽；回复中数值次要色', () => {
   expect(text(modelLine(IDENTITY))).toBe(`${M} Opus 5.5 · high`)
   const line = speedLine(IDENTITY)
-  expect(text(line)).toBe(`${V}  68 token/s · 首字  1.5s · 用时 12.7s`)
+  expect(text(line)).toBe(' 68 token/s · 首字  1.5s · 用时 12.7s')
   for (const value of [' 68', ' 1.5s', '12.7s']) expect(line.find(segment => segment.text === value)?.color).toBeUndefined()
+  // 主会话回复中：这是上一次的读数，数值退到次要色，写法和位置不变
+  const replying = speedLine(IDENTITY, true)
+  expect(text(replying)).toBe(text(line))
+  for (const value of [' 68', ' 1.5s', '12.7s']) expect(replying.find(segment => segment.text === value)?.color).toBe(COLOR.secondary)
   // 数字变长变短时，"首字""用时"不挪位置
   const at = (identity: Identity, word: string) => text(speedLine(identity)).indexOf(word)
   for (const other of [{ ...IDENTITY, tokensPerSecond: 312, firstTokenMs: 12_700 }, { ...IDENTITY, tokensPerSecond: 9, firstTokenMs: 95_400 }]) {
@@ -326,8 +331,8 @@ test('第二行只有模型 · effort；第三行 token/s · 首字 · 用时，
 
 test('第三行：还没有请求时写 —；缺的项不写', () => {
   const none: Identity = { ...IDENTITY, tokensPerSecond: null, firstTokenMs: null, requestMs: null }
-  expect(text(speedLine(none))).toBe(`${V} —`)
-  expect(text(speedLine({ ...IDENTITY, tokensPerSecond: null }))).toBe(`${V} 首字  1.5s · 用时 12.7s`)
+  expect(text(speedLine(none))).toBe('—')
+  expect(text(speedLine({ ...IDENTITY, tokensPerSecond: null }))).toBe('首字  1.5s · 用时 12.7s')
 })
 
 test('秒数：不到 60 秒一位小数，60 秒起按 1m35s', () => {
@@ -350,7 +355,10 @@ async function step($: Engine, clock: { advance: (ms: number) => Promise<void> }
     return stream.result
   })()
   await clock.advance(60_000)
-  return drained
+  const result = await drained
+  // 主会话的这一轮结束：回复中速度行的图标是转动的 ◐，结束后才是闪电图标
+  if (input.agentId === undefined) await $.turn.complete(turnInput())
+  return result
 }
 
 test('会话开始时只有模型；每次主会话请求后写 effort、从首字算起的 token/s、首字等待和整次用时', async ($, on) => {
@@ -439,12 +447,24 @@ test('身份栏三行在面板最底（我的消息下面）；各种宽度下�
   }
 })
 
-test('面板窄、名字长时先把名字截到 10 格，计数和改动行数留在行里', async ($, on) => {
+test('更窄时组间距收成一格，名字至少 4 格；计数和改动行数仍在行里', async ($, on) => {
+  const linked = sample({
+    cwd: 'C:\w\anvil-worktrees\anvil-k0t.46',
+    revParse: ['C:/w/anvil-worktrees/anvil-k0t.46', 'C:/w/anvil/.git/worktrees/anvil-k0t.46', 'C:/w/anvil/.git', ''].join('\n'),
+    status: ['# branch.oid 1', '# branch.head task/anvil-k0t.46', '1 M. N... 1 1 1 a b x.ts', ...Array.from({ length: 22 }, (_, i) => `1 .M N... 1 1 1 a b y${i}.ts`)].join('\n'),
+    numstat: '433\t186\tx.ts',
+  })
+  const line = await firstLine($, on, linked, 51)
+  expect(line).toBe(`${D} anvil ${W} ….46 ${B} ….46 无上游 +1 !22 ${L} +433 −186`)
+  expect(cells(line)).toBeLessThanOrEqual(51 - 3)
+})
+
+test('面板窄、名字长时名字让位：平分剩下的格子、从前面截，计数和改动行数留在行里', async ($, on) => {
   const linked = sample({
     cwd: 'C:\w\anvil-worktrees\anvil-k0t.17',
     revParse: ['C:/w/anvil-worktrees/anvil-k0t.17', 'C:/w/anvil/.git/worktrees/anvil-k0t.17', 'C:/w/anvil/.git', ''].join('\n'),
     status: ['# branch.oid 1', '# branch.head task/anvil-k0t.17', '1 .M N... 1 1 1 a b x.ts', '? y.ts'].join('\n'),
     numstat: '120\t4\tx.ts',
   })
-  expect(await firstLine($, on, linked, 64)).toBe(`${D} anvil ${W} anvil-k0t…  ${B} task/anvi… 无上游  !1 ?1  ${L} +120 −4`)
+  expect(await firstLine($, on, linked, 64)).toBe(`${D} anvil ${W} …vil-k0t.17  ${B} …vil-k0t.17 无上游  !1 ?1  ${L} +120 −4`)
 })
