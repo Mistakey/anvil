@@ -849,7 +849,7 @@ export const register: Register = (on, options) => {
     startStretch(loop)
     await publishLoop($, loop)
     await scheduleRedraw($, cache, redraw)
-    // token/s 从首字算起（D11 实测）：首字是第一块不是 engine 的，结束是 stop 那块；
+    // token/s 从首字算起（D8）：首字是响应的第一块（含 engine 块，.51 实测），结束是 stop 那块；
     // 首字等待和整次用时从请求开始算
     const startAt = await $.clock.now()
     let firstAt: number | null = null
@@ -860,7 +860,7 @@ export const register: Register = (on, options) => {
       if (chunk.kind === 'stop') {
         stopAt = await $.clock.now()
         output = chunk.usage?.output_tokens
-      } else if (firstAt === null && chunk.kind !== 'engine') {
+      } else if (firstAt === null) {
         firstAt = await $.clock.now()
       }
       yield chunk
@@ -868,7 +868,7 @@ export const register: Register = (on, options) => {
     const result = await stream.result
     if (result.usage) await stepAnswered($, cache, result.usage)
     await noteSpeed($, e, {
-      tokensPerSecond: tokensPerSecond(output ?? result.usage?.output_tokens, firstAt, stopAt),
+      tokensPerSecond: tokensPerSecond(output ?? result.usage?.output_tokens, startAt, firstAt, stopAt),
       firstTokenMs: firstAt === null ? null : firstAt - startAt,
       requestMs: stopAt === null ? null : stopAt - startAt,
     }).catch(() => undefined)

@@ -51,7 +51,10 @@ const usage = (over: Partial<TurnUsage> = {}): TurnUsage => ({
   input_tokens: 2, output_tokens: 400, cache_read_input_tokens: 150000, cache_creation_input_tokens: 500, model: 'claude-opus-5-5', ...over,
 })
 
-/** 一次请求的时间线：等 firstMs 出首字，再用 streamMs 流完，最后是带用量的 stop */
+/**
+ * 一次请求的时间线：等 firstMs 来响应的第一块，再用 streamMs 流完，最后是带用量的 stop。
+ * 真实请求的第一块是引擎的信封（engine 块），测试造不出 engine 块，拿思考不出正文时的空 thinking 块代替
+ */
 type Timing = { firstMs: number; streamMs: number; output: number }
 
 // 插件之下的世界：git 和 git 目录按样例作答；请求按 timing 流出
@@ -73,7 +76,7 @@ function engine(on: On, repo: { current: Sample }, timing: { current: Timing } =
   on('turn.step', async function* ($, e) {
     const { firstMs, streamMs, output } = timing.current
     await clock.sleep(firstMs)
-    const thinking: TurnStepChunk = { kind: 'thinking', index: 0, text: '想' }
+    const thinking: TurnStepChunk = { kind: 'thinking', index: 0, text: '' }
     yield thinking
     await clock.sleep(streamMs)
     const done = usage({ output_tokens: output })
@@ -305,11 +308,15 @@ test('effort 五档颜色：low 绿、medium 黄、high 橙、xhigh 红、max �
 
 const IDENTITY: Identity = { dir: '', git: null, model: 'claude-opus-5-5', effort: 'high', tokensPerSecond: 68, firstTokenMs: 1500, requestMs: 12_740 }
 
-test('token/s：输出 ÷ 首字到结束；缺时刻、跨度为零、没有输出时算不出', () => {
-  expect(tokensPerSecond(400, 2000, 10000)).toBe(50)
-  expect(tokensPerSecond(400, null, 10000)).toBe(null)
-  expect(tokensPerSecond(400, 5000, 5000)).toBe(null)
-  expect(tokensPerSecond(0, 0, 1000)).toBe(null)
+test('token/s：输出 ÷ 首字到结束；整段一起到（快过 1000 token/s）时退回输出 ÷ 用时；没有结束、没有输出时算不出', () => {
+  expect(tokensPerSecond(400, 0, 2000, 10000)).toBe(50)
+  // .51 探针：Opus 工具调用后的一次请求，信封在 1792ms 才到，99 token 在 50ms 里全到
+  expect(tokensPerSecond(99, 0, 1792, 1842)).toBe(54)
+  expect(tokensPerSecond(400, 0, 5000, 5000)).toBe(80)
+  expect(tokensPerSecond(400, 0, null, 10000)).toBe(40)
+  expect(tokensPerSecond(400, 0, 2000, null)).toBe(null)
+  expect(tokensPerSecond(400, 0, 0, 0)).toBe(null)
+  expect(tokensPerSecond(0, 0, 0, 1000)).toBe(null)
 })
 
 test('第二行只有模型 · effort；第三行 token/s · 首字 · 用时（图标另画），数值不着色、右对齐到定宽；回复中数值次要色', () => {
@@ -384,6 +391,15 @@ test('会话开始时只有模型；每次主会话请求后写 effort、从首�
   timing.current = { firstMs: 1500, streamMs: 4000, output: 360 }
   await step($, clock, { turnId: 't3', index: 0, model: 'claude-sonnet-5-5', effort: 'max', messageCount: 5 })
   expect(await lowerLines($)).toEqual([`${M} Sonnet 5.5 · max`, `${V}  90 token/s · 首字  1.5s · 用时 5.5s`])
+})
+
+test('整段一起到的请求：流速算不出，速度按整次用时算', async ($, on) => {
+  // 第一块在 1.8 秒才到、99 token 在 50ms 里全到：按 99 ÷ 1.85 秒
+  const timing = { current: { firstMs: 1800, streamMs: 50, output: 99 } }
+  const { clock } = engine(on, { current: sample({ status: CLEAN, numstat: '' }) }, timing)
+  await $.session.start(SESSION)
+  await step($, clock, { turnId: 't1', index: 0, model: 'claude-opus-5-5', effort: 'high', messageCount: 3 })
+  expect((await lowerLines($))[1]).toBe(`${V}  54 token/s · 首字  1.8s · 用时 1.9s`)
 })
 
 test('第二行：第一次请求前不写 effort（settings、环境变量里设了也不推算），第一次请求后写请求带的', async ($, on) => {
