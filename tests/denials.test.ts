@@ -44,8 +44,8 @@ test('完整内容：命令、路径、网址原样遮掉密钥，其余工具�
 })
 
 test('路径放不下时留开头一段和结尾几段', () => {
-  expect(fitPath('C:\\Users\\33137\\AppData\\Local\\Programs\\Claude\\claude.exe', 16)).toBe('C:\\…\\claude.exe')
-  expect(fitPath('C:\\Users\\33137\\AppData\\Local\\Programs\\Claude\\claude.exe', 24)).toBe('C:\\…\\Claude\\claude.exe')
+  expect(fitPath('C:\\Users\\alice\\AppData\\Local\\Programs\\Claude\\claude.exe', 16)).toBe('C:\\…\\claude.exe')
+  expect(fitPath('C:\\Users\\alice\\AppData\\Local\\Programs\\Claude\\claude.exe', 24)).toBe('C:\\…\\Claude\\claude.exe')
   expect(fitPath('/home/me/a.txt', 30)).toBe('/home/me/a.txt')
   expect(cells(fitPath('C:\\averyveryverylongname\\x', 8))).toBeLessThanOrEqual(8)
 })
@@ -68,7 +68,7 @@ test('主会话和子 agent 各被拒一次：列表行是时间、工具、摘�
   await $.classic.PermissionDenied(denied('Bash', { command: 'export API_TOKEN=supersecret123 && npm publish' }, { tool_use_id: 'd-main' }))
   await clock.advance(60_000)
   await $.classic.PermissionDenied(
-    denied('Read', { file_path: 'C:\\Users\\33137\\.ssh\\id_ed25519' }, { tool_use_id: 'd-agent', agent_id: 'ag1', agent_type: 'general-purpose' }),
+    denied('Read', { file_path: 'C:\\Users\\alice\\.ssh\\id_ed25519' }, { tool_use_id: 'd-agent', agent_id: 'ag1', agent_type: 'general-purpose' }),
   )
 
   const ui = await $.ui.mount(pane(false))
@@ -78,7 +78,7 @@ test('主会话和子 agent 各被拒一次：列表行是时间、工具、摘�
   expect(main).toMatch(new RegExp(`^${clockTime(NOW)} Bash  export API_TOKEN=••• && npm publish$`))
   expect(main).not.toContain('supersecret123')
   const agent = flat(await ui.find({ key: 'denial:d-agent' }))
-  expect(agent).toBe(`${clockTime(NOW + 60_000)} Read  C:\\Users\\33137\\.ssh\\id_ed25519`)
+  expect(agent).toBe(`${clockTime(NOW + 60_000)} Read  C:\\Users\\alice\\.ssh\\id_ed25519`)
   // 收起时没有详情
   expect(await ui.find({ key: 'detail:denial:d-main:source:0' })).toBeUndefined()
   await ui.unmount()
@@ -93,7 +93,7 @@ test('选中一条按 Enter：显示完整内容和来源（主会话，或子 a
   const long = `curl -X POST https://api.example.com/deploy -H "Authorization: Bearer abcdefgh12345" -d @payload.json ${'--verbose '.repeat(6)}`
   await $.classic.PermissionDenied(denied('Bash', { command: long }, { tool_use_id: 'd-main' }))
   await $.classic.PermissionDenied(
-    denied('Read', { file_path: 'C:\\Users\\33137\\AppData\\Local\\Programs\\Claude\\claude.exe' }, { tool_use_id: 'd-agent', agent_id: 'ag1' }),
+    denied('Read', { file_path: 'C:\\Users\\alice\\AppData\\Local\\Programs\\Claude\\claude.exe' }, { tool_use_id: 'd-agent', agent_id: 'ag1' }),
   )
 
   const ui = await $.ui.mount(pane(true))
@@ -101,7 +101,7 @@ test('选中一条按 Enter：显示完整内容和来源（主会话，或子 a
   await ui.press({ key: 'denial:d-agent' })
   // 完整路径比一行长，折成两行
   const path = [flat(await ui.find({ key: 'detail:denial:d-agent:text:0' })), flat(await ui.find({ key: 'detail:denial:d-agent:text:1' }))]
-  expect(path).toEqual(['路径C:\\Users\\33137\\AppData\\Local\\Programs\\Claude\\clau', 'de.exe'])
+  expect(path).toEqual(['路径C:\\Users\\alice\\AppData\\Local\\Programs\\Claude\\clau', 'de.exe'])
   expect(flat(await ui.find({ key: 'detail:denial:d-agent:source:0' }))).toBe('来源子 agent 1「调研 Spinner 首字时刻」第 6 步')
 
   // 换一条：同时只展开一条；长命令折成几行，密钥照样遮掉

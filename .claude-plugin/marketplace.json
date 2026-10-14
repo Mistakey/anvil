@@ -1,0 +1,17 @@
+{
+  "name": "anvil",
+  "metadata": {
+    "description": "anvil: keeps the prompt cache warm while you are away, guards against cold sends, docks a session panel beside the transcript, and translates Chinese drafts into English."
+  },
+  "owner": {
+    "name": "kelch",
+    "url": "https://github.com/Mistakey"
+  },
+  "plugins": [
+    {
+      "name": "anvil",
+      "source": "./",
+      "description": "Cache keepalive and cold-send guard, a docked session panel, and a Chinese-to-English input box for Claude Code."
+    }
+  ]
+}

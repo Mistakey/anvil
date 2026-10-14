@@ -1,8 +1,26 @@
 {
   "name": "anvil",
   "version": "0.1.0",
-  "description": "个人自用的 Claude Code mod：额度利用率（缓存保活）、会话信息显示、英文沟通（中译英输入框）",
-  "author": { "name": "kelch" },
+  "description": "Keeps the prompt cache warm while you are away and stops an accidental cold send, docks a panel with cache, usage, subagents, auto-mode denials, your messages and git status beside the transcript, and translates Chinese drafts into English before you send them",
+  "author": {
+    "name": "kelch",
+    "url": "https://github.com/Mistakey"
+  },
+  "homepage": "https://github.com/Mistakey/anvil",
+  "repository": "https://github.com/Mistakey/anvil",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "claude-code-mod",
+    "claude-code-plugin",
+    "prompt-cache",
+    "keepalive",
+    "statusline",
+    "dashboard",
+    "subagents",
+    "translation",
+    "tui"
+  ],
   "types": "./types/index.d.ts",
   "userConfig": {
     "threshold": {

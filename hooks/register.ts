@@ -1,3 +1,9 @@
+// anvil 的 hooks 入口：所有 on(...) 和用到 `$` 的辅助函数都在这里，结构说明见下面「模块结构」。
+// 模块结构和子 agent 的接线照 flightdeck（https://github.com/scasella/claude-flightdeck）的 register.tsx / core.ts：
+// MIT License, Copyright (c) 2026 Stephen Casella。缓存状态的估算和保活循环的接线照 cache-tax
+// （https://github.com/karanb192/cache-tax，HEAD 06cac47）改写：MIT License, Copyright (c) 2026 Karan Bansal。
+// 两份许可原文见 THIRD_PARTY_NOTICES.md。
+
 import { atom, read, update } from 'claude-code'
 import type {
   AgentSpawnInput,
