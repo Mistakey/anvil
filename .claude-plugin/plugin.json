@@ -1,6 +1,6 @@
 {
   "name": "anvil",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Keeps the prompt cache warm while you are away and stops an accidental cold send, docks a panel with cache, usage, subagents, auto-mode denials, your messages and git status beside the transcript, and translates Chinese drafts into English before you send them",
   "author": {
     "name": "kelch",
