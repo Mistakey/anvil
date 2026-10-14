@@ -2,8 +2,12 @@
 
 export type TranslateBackend = 'haiku' | 'sonnet' | 'api'
 
-/** `/config` 里 anvil 的六项设置（spec D9），默认值写在插件清单的 `userConfig` 里 */
+/** `/config` 里 anvil 的八项设置（spec D9、anvil-7ds），默认值写在插件清单的 `userConfig` 里 */
 export type Settings = {
+  /** 每个会话自动打开 anvil 面板；`/anvil panel` 切本会话 */
+  showPanel: boolean
+  /** 主输入框上方常驻翻译框；`/anvil translate` 切本会话 */
+  showTranslate: boolean
   /** 保活与守卫共用的上下文阈值，单位 token */
   threshold: number
   /** 上下文达到阈值的会话自动开启缓存保活 */
@@ -333,10 +337,10 @@ declare module 'claude-code' {
   interface PluginState {
     anvil: {
       /**
-       * anvil 面板在本会话被隐藏：`/anvil panel` 隐藏或用户手动关掉面板后为 true，
-       * 本会话不再自动打开，再敲 `/anvil panel` 改回 false。
+       * anvil 面板在本会话被隐藏：`/anvil panel` 隐藏或用户手动关掉面板后为 true，本会话不再自动打开；
+       * `/anvil panel` 显示后为 false；和 `/config` 的 showPanel 相同时记 null，按 showPanel（没切换过时读不到值，也按 null）。
        */
-      panelHidden: boolean
+      panelHidden: boolean | null
       /** 用量框的读数 */
       usage: Usage
       /**
@@ -379,8 +383,8 @@ declare module 'claude-code' {
       identity: Identity
       /** 每段回复末尾接的读数 */
       turnSpeeds: TurnSpeeds
-      /** 翻译框在本会话被隐藏：`/anvil translate` 切换，隐藏时为 true */
-      translateHidden: boolean
+      /** 翻译框在本会话被隐藏：`/anvil translate` 切换，隐藏时为 true；和 `/config` 的 showTranslate 相同时（含没切换过）为 null，按 showTranslate */
+      translateHidden: boolean | null
       /** 翻译框的状态 */
       translate: TranslateBox
       /**

@@ -66,7 +66,29 @@ test('/anvil panel 切换：隐藏后本会话不再自动打开，再敲一次�
   const shown = await $.command.run(anvil(' panel '))
   expect(shown.text).toBe('面板已显示')
   expect(opens).toEqual([OPEN, OPEN])
+  expect(state.get('anvil.panelHidden'), '切回默认：按 /config').toBe(null)
+})
+
+test('/config 关掉面板：会话开始不打开、提交消息不补开，/anvil panel 在本会话打开，再敲一次回到隐藏', { options: { showPanel: false } }, async ($, on) => {
+  const { opens, closes, screen, state } = engine(on)
+  await $.session.start(SESSION)
+  expect(opens).toEqual([])
+  // 重新加载时面板可能还开着（刚在 /config 里关掉），收起
+  expect(closes).toEqual(['anvil'])
+
+  screen.placed = false
+  await $.prompt.submit(typed('继续'))
+  expect(opens).toEqual([])
+  expect((await $.command.run(anvil(''))).text).toMatch(/^ {2}\/anvil panel +显示或隐藏 anvil 面板（现在：隐藏）$/m)
+
+  screen.placed = true
+  expect((await $.command.run(anvil('panel'))).text).toBe('面板已显示（本会话）')
+  expect(opens).toEqual([OPEN])
   expect(state.get('anvil.panelHidden')).toBe(false)
+  expect((await $.command.run(anvil(''))).text).toMatch(/^ {2}\/anvil panel +显示或隐藏 anvil 面板（现在：显示）$/m)
+
+  expect((await $.command.run(anvil('panel'))).text).toBe('面板已隐藏')
+  expect(state.get('anvil.panelHidden'), '切回默认：按 /config').toBe(null)
 })
 
 test('切换到显示时引擎放不下面板，说明原因', async ($, on) => {

@@ -548,7 +548,7 @@ describe('热重载', () => {
 
 // ---------------------------------------------------------------- 缓存框
 
-const SETTINGS: Settings = { threshold: 50000, autoKeepalive: true, guard: true, translateBackend: 'haiku', translateApiUrl: '', translateApiModel: '' }
+const SETTINGS: Settings = { showPanel: true, showTranslate: true, threshold: 50000, autoKeepalive: true, guard: true, translateBackend: 'haiku', translateApiUrl: '', translateApiModel: '' }
 const text = (segments: readonly Segment[]) => segments.map(segment => segment.text).join('')
 /** 一行的值（不折行时就是整个值） */
 const lineOf = (row: GridRow | undefined) => text(row?.lines[0] ?? [])

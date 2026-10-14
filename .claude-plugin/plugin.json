@@ -23,6 +23,18 @@
   ],
   "types": "./types/index.d.ts",
   "userConfig": {
+    "showPanel": {
+      "title": "显示 anvil 面板",
+      "description": "决定默认：开着时每个会话自动打开 anvil 面板；单个会话可用 /anvil panel 切换，不受这项限制",
+      "type": "boolean",
+      "default": true
+    },
+    "showTranslate": {
+      "title": "显示翻译框",
+      "description": "决定默认：开着时主输入框上方常驻翻译框；单个会话可用 /anvil translate 切换，不受这项限制",
+      "type": "boolean",
+      "default": true
+    },
     "threshold": {
       "title": "上下文阈值",
       "description": "单位 token。上下文达到它的会话自动开启缓存保活，冷发送守卫也只拦这类会话",
