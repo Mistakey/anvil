@@ -10,7 +10,7 @@ English | [简体中文](README.zh-CN.md)
 **A Claude Code mod that keeps long sessions cheap and readable.** It keeps your prompt cache warm while you're away, stops the one message that would rebuild a cold cache, docks a panel beside the transcript with everything a status line used to show and more, and gives you a box to write in Chinese and send in English.
 
 <p align="center">
-  <img src="docs/media/session.png" alt="Claude Code in fullscreen with the anvil panel docked on the right: cache, usage, one finished subagent, the user's message and the identity rows; the Chinese-to-English box sits above the prompt" width="900">
+  <img src="docs/media/session.png" alt="Claude Code in fullscreen with the anvil panel docked on the right: cache, usage, one finished subagent, the user's message and the identity rows; Claude's English reply on the left, and the Chinese-to-English box above the prompt" width="900">
 </p>
 
 <p align="center">
@@ -26,7 +26,7 @@ English | [简体中文](README.zh-CN.md)
 
 | Panel | Translation box |
 | --- | --- |
-| <img src="docs/media/panel.png" alt="The anvil panel: cache at 94% hit rate and valid until 17:58 with keepalive enabled; 5h and 7d usage bars with reset times and forecasts; context 54k of 1M; cost $0.02; one finished subagent; one message; the identity rows" width="320"> | <img src="docs/media/translate.png" alt="The translation box after a Chinese sentence was translated: it reports 21 words appended, and the English sentence waits in the main prompt" width="520"><br><br>The translation lands in the main prompt; nothing is sent until you press Enter there. |
+| <img src="docs/media/panel.png" alt="The anvil panel: cache at 93% hit rate and valid until 18:17, keepalive off because the context is under 50k; 5h and 7d usage bars with reset times and forecasts; context 45k of 1M; cost $0.01; one finished subagent; one message; the identity rows" width="320"> | <img src="docs/media/translate.png" alt="The translation box after a Chinese sentence was translated: it reports 21 words appended, and the English sentence waits in the main prompt" width="520"><br><br>The translation lands in the main prompt; nothing is sent until you press Enter there. |
 
 ## Requirements
 
