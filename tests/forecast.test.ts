@@ -396,15 +396,7 @@ test('读回来不是存档的样子就当没有', () => {
 // ---------------------------------------------------------------- 读数进存档、面板按存档画
 
 const iso = (ms: number) => new Date(ms).toISOString()
-const pane = {
-  plugin: 'anvil',
-  surface: 'terminal' as const,
-  component: 'Pane' as const,
-  requestId: 'anvil',
-  props: { title: 'anvil', isFocused: false, bodyColumns: 70, placement: 'dock' as const, scroll: { offset: 0, bodyRows: 48 }, view: {} },
-}
-
-test('读数按窗口记进 $.store；面板按存档的最近一段算速度', async ($, on) => {
+test('读数按窗口记进 $.store（用量框暂不画，存档照记）', async ($, on) => {
   // 7d 窗口第 2 天 11:00；前一天猛用到 40%，最近 24 小时只用了 5%：窗口平均会红，最近一段是绿
   const now = START + DAY + 11 * HOUR
   const clock = mock.clock(on, { now: now - DAY - MINUTE })
@@ -432,9 +424,4 @@ test('读数按窗口记进 $.store；面板按存档的最近一段算速度', 
   // 5h 那个窗口没变：一天前的读数是 now − L 之前最近的一个，留着
   expect(parseHistory(store.get(HISTORY_KEYS.five_hour))?.samples.map(one => one.percent)).toEqual([1, 1])
 
-  const ui = await $.ui.mount(pane)
-  const flat = (node: unknown): string =>
-    typeof node === 'string' ? node : Array.isArray(node) ? node.map(flat).join('') : node && typeof node === 'object' ? flat((node as { children?: unknown }).children ?? []) : ''
-  expect(flat(await ui.find({ key: 'row:seven_day:2' }))).toContain(`  ${FINE} `)
-  await ui.unmount()
 })

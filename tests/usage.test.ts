@@ -326,8 +326,6 @@ const pane = (bodyColumns: number) => ({
   },
 })
 
-const SUMMARY = [{ role: 'user' as const, text: '摘要', toolUses: [] }]
-
 function engine(on: On) {
   mock.clock(on, { now: NOW })
   const reading = { current: READING }
@@ -338,68 +336,13 @@ function engine(on: On) {
   return reading
 }
 
-/** 画出来的一个元素里所有的字，按文档顺序 */
-function flat(node: unknown): string {
-  if (typeof node === 'string') return node
-  if (Array.isArray(node)) return node.map(flat).join('')
-  if (node !== null && typeof node === 'object') {
-    const { children, props } = node as { children?: unknown; props?: { children?: unknown } }
-    return flat(children ?? props?.children ?? [])
-  }
-  return ''
-}
-
-test('花费取引擎报的会话总额，一轮结束、压缩之后都只写总额', async ($, on) => {
-  const reading = engine(on)
-  await $.session.start(SESSION)
-  await $.turn.start({ text: '继续', turnId: 't1' })
-  reading.current = { ...READING, cost: { usd: 4.21 } }
-  await $.turn.complete({ answer: '', durationMs: 1000, isAborted: false, turnId: 't1', reason: 'answer' })
-  await $.session.compact({ trigger: 'manual', messages: SUMMARY })
-
-  const ui = await $.ui.mount(pane(70))
-  expect(flat(await ui.find({ key: 'row:cost' }))).toBe('花费$4.21')
-  expect(flat(await ui.find({ key: 'section:usage' }))).not.toContain('压缩')
-  await ui.unmount()
-})
-
-test('session.measure 的新读数进用量框', async ($, on) => {
+test('用量框交还 statusline：面板不画用量框；读数照记', async ($, on) => {
   engine(on)
   await $.session.start(SESSION)
-  await $.session.measure({
-    context: { tokens: 184_000, window: 200_000, percent: 92 },
-    rateLimits: READING.rateLimits,
-    cost: { usd: 5 },
-    changed: ['context', 'cost'],
-  })
-
   const ui = await $.ui.mount(pane(70))
-  expect(flat(await ui.find({ key: 'row:context' }))).toContain(' 92%')
-  expect(flat(await ui.find({ key: 'row:context:2' }))).toBe('184k / 200k')
-  expect(flat(await ui.find({ key: 'row:cost' }))).toContain('$5.00')
+  expect(await ui.find({ key: 'section:usage' })).toBeUndefined()
+  expect(await ui.find({ key: 'row:five_hour' })).toBeUndefined()
   await ui.unmount()
-})
-
-test('终端上，约 70 列和拖宽、拖窄后：用量框每项两行（花费一行）、名称一列定宽且次要色、不超宽', async ($, on) => {
-  engine(on)
-  await $.session.start(SESSION)
-  for (const columns of [70, 110, 90, 51, 40]) {
-    const ui = await $.ui.mount(pane(columns))
-    const inner = columns - 4
-    for (const key of ['five_hour', 'five_hour:2', 'seven_day', 'seven_day:2', 'context', 'context:2', 'cost']) {
-      const row = await ui.find({ key: `row:${key}` })
-      expect(row, `${columns} 列 ${key}`).toBeDefined()
-      expect(row?.props.width).toBe(inner)
-      // 名称一列定宽，值从同一列起；第二行名称那一列空着
-      expect((row?.children[0] as { props?: { width?: number } } | undefined)?.props?.width, `${columns} 列 ${key}`).toBe(GRID.label)
-    }
-    expect(await ui.find({ key: 'row:cost:2' })).toBeUndefined()
-    const name = (await ui.findAll({ type: 'Text' })).filter(one => one.text === '上下文').at(-1)
-    expect(name?.props.color).toBe(COLOR.secondary)
-    expect(flat(await ui.find({ key: 'row:five_hour:2' }))).toBe(two('22:00', `${ALERT} 21:50`))
-    expect(flat(await ui.find({ key: 'section:usage' }))).not.toContain('…')
-    await ui.unmount()
-  }
 })
 
 test('还没有请求时缓存框上边框右侧什么都不画（不留空格）', async ($, on) => {
@@ -408,105 +351,4 @@ test('还没有请求时缓存框上边框右侧什么都不画（不留空格�
   const ui = await $.ui.mount(pane(52))
   expect(await ui.find({ key: 'status:section:cache' })).toBeUndefined()
   await ui.unmount()
-})
-
-test('窗口还没开始时用量框第二行写"发送消息后开始计时"', async ($, on) => {
-  const reading = engine(on)
-  reading.current = { ...READING, rateLimits: [] }
-  await $.session.start(SESSION)
-
-  const ui = await $.ui.mount(pane(70))
-  expect(flat(await ui.find({ key: 'row:five_hour' }))).toContain('0%')
-  expect(flat(await ui.find({ key: 'row:five_hour:2' }))).toBe('发送消息后开始计时')
-  await ui.unmount()
-})
-
-/** 用量框里各行的 key，按画的顺序 */
-async function boxKeys(ui: { find(query: { key: string }): Promise<{ children: unknown[] } | undefined> }) {
-  const box = await ui.find({ key: 'box:usage' })
-  return (box?.children ?? []).map(one => (one as { props?: { key?: string } }).props?.key)
-}
-
-test('终端上（框内约 50、70 格）：项与项之间空一行，缓存框不空', async ($, on) => {
-  engine(on)
-  await $.session.start(SESSION)
-  for (const columns of [54, 74]) {
-    const ui = await $.ui.mount(pane(columns))
-    expect(await boxKeys(ui), `${columns} 列`).toEqual([
-      'row:five_hour',
-      'row:five_hour:2',
-      'space:seven_day',
-      'row:seven_day',
-      'row:seven_day:2',
-      'space:context',
-      'row:context',
-      'row:context:2',
-      'space:cost',
-      'row:cost',
-    ])
-    for (const key of ['seven_day', 'context', 'cost']) {
-      const gap = await ui.find({ key: `space:${key}` })
-      expect(gap?.props.height, key).toBe(1)
-      expect(flat(gap)).toBe('')
-    }
-    const cache = await ui.find({ key: 'box:cache' })
-    const keys = (cache?.children ?? []).map(one => (one as { props?: { key?: string } }).props?.key)
-    expect(keys).toEqual(['row:cache', 'row:state', 'row:keepalive'])
-    await ui.unmount()
-  }
-})
-
-test('终端上（框内约 50、70 格）：三种预测图标和颜色、时刻；两列起点对齐；百分比右对齐同一列；没有"预计"、↻', async ($, on) => {
-  const reading = engine(on)
-  const states: SessionUsage['rateLimits'][] = [
-    // 5h 用不完（绿 󰁹 用完时刻，不是当天），7d 会用完（红 󰂃 用完时刻，不是当天）
-    [
-      { kind: 'five_hour', percentUsed: 18.4, resetsAt: iso(at(13, 23)) },
-      { kind: 'seven_day', percentUsed: (128 * 27) / 168, resetsAt: iso(at(19, 17)) },
-    ],
-    // 5h 会用完（当天的用完时刻），7d 已用满（红 󰂎 用满的时刻）
-    [
-      { kind: 'five_hour', percentUsed: 62, resetsAt: iso(at(13, 22)) },
-      { kind: 'seven_day', percentUsed: 100, resetsAt: iso(at(19, 17)) },
-    ],
-  ]
-  const expected = [
-    [two('23:00', `${FINE} 04:52 10-14`), two('17:00 10-19', `${ALERT} 04:15 10-18`)],
-    // 用满的时刻：本窗口存档里第一个 ≥ 100% 的读数，这里是这次读数的 20:00
-    [two('22:00', `${ALERT} 21:50`), two('17:00 10-19', `${EMPTY} 20:00`)],
-  ]
-  const colors = [
-    [[`${FINE} `, COLOR.ok], ['04:52 10-14', COLOR.secondary], [`${ALERT} 04:15 10-18`, COLOR.danger]],
-    [[`${ALERT} 21:50`, COLOR.danger], [`${EMPTY} 20:00`, COLOR.danger]],
-  ]
-  for (const [index, rateLimits] of states.entries()) {
-    reading.current = { ...READING, context: { tokens: 49_000, window: 1_000_000, percent: 5 }, rateLimits }
-    await $.session.start(SESSION)
-    for (const columns of [54, 74]) {
-      const inner = columns - 4
-      const ui = await $.ui.mount(pane(columns))
-      const five = flat(await ui.find({ key: 'row:five_hour:2' }))
-      const seven = flat(await ui.find({ key: 'row:seven_day:2' }))
-      expect([five, seven], `${columns} 列`).toEqual(expected[index])
-      // 左列"󰑐 重置时刻"（图标色的图标、次要色的时刻），补宽到 13 格；右列起点相同；不超出百分比那一列的右边界
-      const resets = (await ui.findAll({ type: 'Text' })).filter(one => one.text === `${RESET} `)
-      expect(resets.map(one => one.props.color), `${columns} 列`).toEqual([COLOR.icon, COLOR.icon])
-      const start = (line: string) => cells([...line].slice(0, [...line].findIndex(char => [FINE, ALERT, EMPTY].includes(char))).join(''))
-      expect([start(five), start(seven)], `${columns} 列`).toEqual([15, 15])
-      const percentEdge = barWidth(inner) + 1 + FIELD.percent
-      for (const line of [five, seven]) expect(cells(line) <= percentEdge, `${columns} 列 ${line}`).toBe(true)
-      // 三行百分比右对齐在同一列：名称之后的值都正好到百分比那一列的右边界
-      for (const [key, label] of [['five_hour', '5h'], ['seven_day', '7d'], ['context', '上下文']] as const) {
-        const first = flat(await ui.find({ key: `row:${key}` }))
-        expect(first, `${columns} 列 ${key}`).toMatch(/%$/)
-        expect(cells(first) - cells(label), `${columns} 列 ${key}`).toBe(percentEdge)
-      }
-      const texts = await ui.findAll({ type: 'Text' })
-      for (const [shown, color] of colors[index] ?? []) expect(texts.filter(one => one.text === shown).at(-1)?.props.color, shown).toBe(color)
-      const all = flat(await ui.find({ key: 'section:usage' }))
-      expect(all).not.toContain('…')
-      for (const word of ['预计', '↻', '周', '明天', '用尽']) expect(all).not.toContain(word)
-      await ui.unmount()
-    }
-  }
 })

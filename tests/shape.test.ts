@@ -50,16 +50,10 @@ describe('合并到默认值上', () => {
     expect(conformState('panelHidden', false, 'yes')).toBe(false)
   })
 
-  test('身份栏：.52 之前的形状（没有 speed）补上空的合计', () => {
+  test('身份栏：.52 之前的形状（没有 speed）补上空的合计；交还 statusline 前的目录、git、模型字段不影响读取', () => {
     const old = { dir: 'anvil', git: null, model: 'claude-opus-5-5', effort: 'high', tokensPerSecond: 50, firstTokenMs: 2000, requestMs: 10000 }
     const read = conformState('identity', EMPTY_IDENTITY, old) as typeof EMPTY_IDENTITY
     expect(read.speed).toEqual(EMPTY_TALLY)
-    expect(read.model).toBe('claude-opus-5-5')
-    // git 缺字段也补上
-    const partial = conformState('identity', EMPTY_IDENTITY, { git: { repo: 'anvil', branch: 'main' } }) as typeof EMPTY_IDENTITY
-    expect(partial.git?.ahead).toBe(0)
-    expect(partial.git?.operation).toBe(null)
-    expect(partial.speed).toEqual(EMPTY_TALLY)
   })
 
   test('每段的读数：缺的合计、收尾行缺字段都补上', () => {
@@ -196,7 +190,10 @@ for (const [key, stale] of Object.entries(STALE)) {
     await $.classic.PermissionDenied(denied)
     await $.prompt.submit(typed('你好'))
     await turn($, clock, 't1', 'u1')
-    expect((await panel($)).all).toContain('Opus 5.5')
+    // 面板画得出来：缓存框和最底的速度行都在
+    const drawn = await panel($)
+    expect(drawn.all).toContain('保活')
+    expect(drawn.speed).not.toBe('')
     await turnRow($, 'u1')
     expect(await band($)).not.toBe('')
 

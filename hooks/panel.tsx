@@ -67,20 +67,20 @@ export function bordered(
   )
 }
 
-export type SectionId = ListId | 'usage' | 'cache'
+export type SectionId = ListId | 'cache'
 
 /** hotkey：列表的展开键（spec D9 的 a / d / m），只有三个列表有 */
 /** color：标题的颜色，不给时是正文色（我的消息是中性的）；glow：上边框的光从它起；border：侧边和下边 */
 type Section = { id: SectionId; icon: string; title: string; color?: string; glow: string; border: string; hotkey?: string }
 
 /**
- * 自上而下的固定顺序，框与框之间是一道细槽；我的消息占满剩余高度，最下面还有三行身份栏（不带框），占原 statusline 的位置。
+ * 自上而下的固定顺序，框与框之间是一道细槽；我的消息占满剩余高度，最下面还有一行身份栏（不带框）。
+ * 用量框和身份栏的目录、git、模型、effort 已交还 statusline（2026-10-14，用户定：statusline 有的值面板不再画）。
  * 标题用识别色原色、加粗；上边框从标题处的光渐暗到侧边，侧边和下边是识别色调暗的一档（anvil-k0t.47）。
  * 我的消息是中性的：标题正文色，光和边框是中性灰
  */
 export const SECTIONS: readonly Section[] = [
   { id: 'cache', icon: ICON.cache, title: '缓存', color: COLOR.cache, glow: COLOR.cache, border: COLOR.cacheLine },
-  { id: 'usage', icon: ICON.usage, title: '用量', color: COLOR.usage, glow: COLOR.usage, border: COLOR.usageLine },
   { id: 'agents', icon: ICON.agents, title: '子 agent', color: COLOR.agents, glow: COLOR.agents, border: COLOR.agentsLine, hotkey: 'a' },
   { id: 'denials', icon: ICON.denials, title: '自动模式拒绝', color: COLOR.denials, glow: COLOR.denials, border: COLOR.denialsLine, hotkey: 'd' },
   { id: 'messages', icon: ICON.messages, title: '我的消息', glow: COLOR.messages, border: COLOR.messagesLine, hotkey: 'm' },
@@ -130,7 +130,7 @@ export type PanelView = {
   /** 三个列表的内容；没给的子 agent、自动模式拒绝按没有内容处理（不画） */
   lists: Partial<Record<ListId, ListBody>>
   fold: PanelFold
-  /** 身份栏的三行，接在最后一个区块下面（不带框、不加分隔线），贴着面板底边 */
+  /** 身份栏的一行，接在最后一个区块下面（不带框、不加分隔线），贴着面板底边 */
   identity?: RenderElement[]
   /** 按了列表的展开键，或焦点在标题、"更早的"那行上按了 Enter */
   onToggle: (id: ListId) => void
@@ -334,15 +334,6 @@ export function gridRow(els: Els, row: GridRow, inner: number, tail?: RenderElem
       </Box>
     </Box>
   ))
-}
-
-/** 用量框：项与项之间空一行（缓存框不空），空行也是一个元素，框的高度照样按元素数算 */
-export function spacedGridRows(els: Els, rows: readonly GridRow[], inner: number): RenderElement[] {
-  const { Box } = els
-  return rows.flatMap((row, index) => [
-    ...(index === 0 ? [] : [<Box key={`space:${row.key}`} width={inner} height={1} flexShrink={0} />]),
-    ...gridRow(els, row, inner),
-  ])
 }
 
 /**

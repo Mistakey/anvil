@@ -72,24 +72,6 @@ export function conform(shape: unknown, stored: unknown): unknown {
 
 const SPAN = { since: 0, until: null }
 
-const GIT = {
-  repo: '',
-  worktree: null,
-  sub: '',
-  branch: null,
-  commit: null,
-  noUpstream: false,
-  ahead: 0,
-  behind: 0,
-  conflicts: 0,
-  staged: 0,
-  modified: 0,
-  untracked: 0,
-  stashes: 0,
-  lines: maybe({ added: 0, deleted: 0 }),
-  operation: maybe({ name: '' }),
-}
-
 const AGENT = {
   id: '',
   seq: 0,
@@ -123,7 +105,7 @@ const SHAPES: Record<string, unknown> = {
   denials: listOf(DENIAL),
   messages: { items: listOf({ id: '', text: '' }), dropped: 0, settled: 0 },
   scrolled: maybe({ id: '', deny: null }),
-  identity: { dir: '', git: maybe(GIT), model: null, effort: null, speed: EMPTY_TALLY },
+  identity: { speed: EMPTY_TALLY },
   turnSpeeds: {
     current: maybe({ turnId: '', tally: EMPTY_TALLY, firstTokenMs: 0 }),
     lines: recordOf({ tally: EMPTY_TALLY, firstTokenMs: 0, doneAt: 0, waitingAgents: 0 }),

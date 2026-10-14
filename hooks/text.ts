@@ -42,24 +42,6 @@ export function fit(text: string, width: number): string {
   return `${kept}…`
 }
 
-/**
- * 超出 width 格时从前面截，留下结尾、开头换成 `…`；不超出原样返回。
- * 分支、worktree 名区分彼此的部分多在结尾（task/anvil-k0t.46 → …k0t.46）
- */
-export function fitTail(text: string, width: number): string {
-  if (cells(text) <= width) return text
-  if (width <= 1) return '…'
-  let kept = ''
-  let used = 0
-  for (const char of [...text].reverse()) {
-    const next = cellsOf(char.codePointAt(0) ?? 0)
-    if (used + next > width - 1) break
-    kept = char + kept
-    used += next
-  }
-  return `…${kept}`
-}
-
 /** 右侧补空格到 width 格 */
 export function padEnd(text: string, width: number): string {
   return text + ' '.repeat(Math.max(0, width - cells(text)))
