@@ -5,11 +5,8 @@
 // 形状照默认值写：对象按字段合并（多出来的旧字段留着），数字、字符串、布尔类型不对就取默认，
 // 默认值是 null 的字段什么都收；数组默认什么项都收。要细到每一项的，用 maybe、listOf、recordOf、fit。
 
-import { EMPTY_TALLY } from './identity'
-import { EMPTY_BOX } from './translate'
+import { EMPTY_TALLY } from './speed'
 import type { Atom } from 'claude-code'
-
-import type { Denial, DenialSource } from '../types'
 
 const MARK = Symbol('shape')
 
@@ -70,50 +67,34 @@ export function conform(shape: unknown, stored: unknown): unknown {
 
 // ---------------------------------------------------------------- 各 atom 的形状（types/index.d.ts）
 
-const SPAN = { since: 0, until: null }
-
-const AGENT = {
-  id: '',
-  seq: 0,
-  description: '',
-  prompt: '',
-  model: '',
-  status: oneOf(['done', 'running', 'failed', 'truncated']),
-  spawnedAt: 0,
-  endedAt: null,
-  steps: 0,
-  context: 0,
-  output: 0,
-  lastStop: null,
-  calls: listOf({ tool: '', text: '', isError: false }),
-  answer: '',
+const GIT = {
+  repo: '',
+  worktree: null,
+  sub: '',
+  branch: null,
+  commit: null,
+  noUpstream: false,
+  ahead: 0,
+  behind: 0,
+  conflicts: 0,
+  staged: 0,
+  modified: 0,
+  untracked: 0,
+  stashes: 0,
+  lines: maybe({ added: 0, deleted: 0 }),
+  operation: maybe({ name: '' }),
 }
-
-/** 认不出的来源当主会话 */
-function denialSource(stored: unknown): DenialSource {
-  if (!isObject(stored) || stored.kind !== 'agent') return { kind: 'main' }
-  return conform({ kind: 'agent', seq: null, description: '', step: null }, stored) as DenialSource
-}
-
-const DENIAL: Record<keyof Denial, unknown> = { id: '', at: 0, tool: '', kind: oneOf(['input', 'command', 'path', 'url']), text: '', source: fit(denialSource) }
 
 /** 形状会变、要细到每一项的 atom（按 `$.state` 里的键）；其余按 atom 的初始值合并 */
 const SHAPES: Record<string, unknown> = {
-  usage: { context: maybe({ window: 0 }), rateLimits: listOf({ kind: '', percentUsed: 0 }), costUsd: null },
+  usage: { rateLimits: listOf({ kind: '', percentUsed: 0 }), costUsd: null },
+  place: { dir: '', git: maybe(GIT) },
   keepalive: { stopped: maybe({ kind: oneOf(['error', 'limit', 'reading']), reason: '' }), renewing: false, inFlight: false },
-  agents: listOf(AGENT),
-  denials: listOf(DENIAL),
-  messages: { items: listOf({ id: '', text: '' }), dropped: 0, settled: 0 },
-  scrolled: maybe({ id: '', deny: null }),
-  identity: { speed: EMPTY_TALLY },
+  runningAgents: listOf(''),
   turnSpeeds: {
     current: maybe({ turnId: '', tally: EMPTY_TALLY, firstTokenMs: 0 }),
     lines: recordOf({ tally: EMPTY_TALLY, firstTokenMs: 0, doneAt: 0, waitingAgents: 0 }),
   },
-  activity: { reply: maybe(SPAN), keep: maybe(SPAN), translate: maybe(SPAN) },
-  clientFaults: listOf(''),
-  fold: { expanded: fit(stored => (['messages', 'denials', 'agents'].includes(stored as string) ? stored : null)), detail: null, scrolled: 0 },
-  translate: { ...EMPTY_BOX, phase: oneOf(['idle', 'working', 'done', 'failed']) },
 }
 
 /** `$.state` 里 anvil 的一个键读到的值，合并成现在的形状；initial 是 atom 的初始值 */
@@ -121,12 +102,12 @@ export function conformState(key: string, initial: unknown, stored: unknown): un
   return conform(Object.hasOwn(SHAPES, key) ? SHAPES[key] : initial, stored)
 }
 
-/** 读到的值合并成现在的形状：`normalized(identity, await read($, identity))`（`read` 要在调用处直接写 atom，扫描才认） */
+/** 读到的值合并成现在的形状：`normalized(place, await read($, place))`（`read` 要在调用处直接写 atom，扫描才认） */
 export function normalized<T>(target: Atom<T>, value: T): T {
   return conformState(target.ref.key, target.initial, value) as T
 }
 
-/** update 的改法先拿到合并后的值：`update($, identity, normalizing(identity, current => …))` */
+/** update 的改法先拿到合并后的值：`update($, place, normalizing(place, current => …))` */
 export function normalizing<T>(target: Atom<T>, change: (value: T) => T): (value: T) => T {
   return value => change(normalized(target, value))
 }

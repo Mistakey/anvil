@@ -1,6 +1,4 @@
-// 真彩颜色的计算（spec D10）：在 OKLab 里插值，渐变不发灰、亮度均匀。
-// 面板的渐变（上边框的光、进度条的热度、框间的细槽）和动效（呼吸、落定）都用它。
-// 纯函数，钩子和 Client 模块都从这里取。
+// 真彩颜色的计算：在 OKLab 里插值，渐变不发灰、亮度均匀。进度条的热度用它；statusline 脚本里有同样的一份。
 
 type Lab = readonly [number, number, number]
 
@@ -50,7 +48,7 @@ function hex(value: Lab): string {
   return `#${rgb.map(v => Math.round(toGamma(v)).toString(16).padStart(2, '0')).join('')}`
 }
 
-/** 渐变的档数：插值的比例取到 1/16，相邻几帧颜色相同时 Client 不必换字的颜色（Claude Code 的微光取到 1/8） */
+/** 渐变的档数：插值的比例取到 1/16，相邻同色的格子并成一段，一条进度条只有几个节点 */
 export const LEVELS = 16
 
 const quantize = (t: number) => Math.round(Math.min(1, Math.max(0, t)) * LEVELS) / LEVELS
@@ -76,15 +74,4 @@ export function gradient(stops: readonly (readonly [number, string])[], at: numb
     if (at <= p1) return mix(c0, c1, p1 > p0 ? (at - p0) / (p1 - p0) : 1)
   }
   return (stops[stops.length - 1] as readonly [number, string])[1]
-}
-
-/** 相对亮度（WCAG），量对比度用 */
-export function luminance(color: string): number {
-  const [r, g, b] = parse(color).map(toLinear) as [number, number, number]
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b
-}
-
-export function contrast(a: string, b: string): number {
-  const [x, y] = [luminance(a), luminance(b)]
-  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05)
 }

@@ -6,11 +6,8 @@ anvil adapts code and ideas from the two projects below. Both are released under
 
 - Source: https://github.com/scasella/claude-flightdeck
 - Used in:
-  - `hooks/register.ts`: the module layout (one hooks entry holding every `on(...)` and every helper that takes `$`), and the subagent data flow from `agent.spawn`, `turn.step`, `tool.call` and `turn.complete`
-  - `hooks/agents.tsx`: the subagent list's data model (`applyStep`, `noteTool`)
-  - `hooks/describe.ts`: the secret-masking rules and the one-line tool-call summary (`SECRETS`, `redact`, `describeInput`), also used by `hooks/denials.tsx`
+  - `hooks/register.ts`: the module layout (one hooks entry holding every `on(...)` and every helper that takes `$`)
   - `hooks/shape.ts`: merging stored state onto its defaults (`normalize`)
-  - `hooks/elapsed.tsx`, `hooks/glow.tsx`, `hooks/rail.tsx`, `hooks/spinner.tsx`, `hooks/live.tsx`: the frame-clock pattern for client-side animation and its static fallback
 
 ```
 MIT License

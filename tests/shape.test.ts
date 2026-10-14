@@ -1,10 +1,10 @@
-import type { ClassicEventOf, On, SessionAppendInput, TurnStepChunk } from 'claude-code'
+import type { On, SessionAppendInput, TurnStepChunk } from 'claude-code'
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 
-import { EMPTY_IDENTITY, EMPTY_TALLY } from '../hooks/identity'
 import { conform, conformState, listOf, maybe, recordOf } from '../hooks/shape'
-import { flat, pane, spawnInput, turnInput, typed } from './world'
+import { EMPTY_TALLY } from '../hooks/speed'
+import { flat, offline, spawnInput, turnInput, typed } from './world'
 
 // 热重载不清 `$.state`（AGENTS.md Pitfalls）：上一次加载按旧形状写下的值、缺字段的值，读的时候合并到默认值上，钩子不抛错
 
@@ -45,15 +45,16 @@ describe('合并到默认值上', () => {
   })
 
   test('没有专门形状的 atom 按它的初始值合并', () => {
-    expect(conformState('fold', { expanded: null, detail: null, scrolled: 0 }, { expanded: 'agents' })).toEqual({ expanded: 'agents', detail: null, scrolled: 0 })
-    expect(conformState('panelHidden', false, undefined)).toBe(false)
-    expect(conformState('panelHidden', false, 'yes')).toBe(false)
+    expect(conformState('keepaliveOverride', null, true)).toBe(true)
+    expect(conformState('cache', { expiresAt: null, context: 0 }, { context: 5 })).toEqual({ expiresAt: null, context: 5 })
   })
 
-  test('身份栏：.52 之前的形状（没有 speed）补上空的合计；交还 statusline 前的目录、git、模型字段不影响读取', () => {
-    const old = { dir: 'anvil', git: null, model: 'claude-opus-5-5', effort: 'high', tokensPerSecond: 50, firstTokenMs: 2000, requestMs: 10000 }
-    const read = conformState('identity', EMPTY_IDENTITY, old) as typeof EMPTY_IDENTITY
-    expect(read.speed).toEqual(EMPTY_TALLY)
+  test('目录与 git：旧形状缺的字段补上；git 不是对象就当不在 git 里', () => {
+    expect(conformState('place', { dir: '', git: null }, { dir: 'anvil', git: { repo: 'anvil', branch: 'main' } })).toMatchObject({
+      dir: 'anvil',
+      git: { repo: 'anvil', branch: 'main', ahead: 0, lines: null, operation: null },
+    })
+    expect(conformState('place', { dir: '', git: null }, { git: 'x' })).toEqual({ dir: '', git: null })
   })
 
   test('每段的读数：缺的合计、收尾行缺字段都补上', () => {
@@ -63,13 +64,6 @@ describe('合并到默认值上', () => {
     }
     expect(read.current.tally).toEqual(EMPTY_TALLY)
     expect(read.lines.u1).toEqual({ tally: EMPTY_TALLY, firstTokenMs: 900, doneAt: 0, waitingAgents: 0 })
-  })
-
-  test('自动模式拒绝：认不出的来源当主会话', () => {
-    const read = conformState('denials', [], [{ id: 'x', tool: 'Bash' }, { id: 'y', source: { kind: 'agent' } }]) as Array<{ source: unknown; text: string }>
-    expect(read[0]?.source).toEqual({ kind: 'main' })
-    expect(read[0]?.text).toBe('')
-    expect(read[1]?.source).toEqual({ kind: 'agent', seq: null, description: '', step: null })
   })
 })
 
@@ -89,9 +83,8 @@ function engine(on: On, rewrite: Map<string, unknown>) {
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
-  on('ui.open', () => ({ value: { isPlaced: true } }))
   on('classic.SessionStart', () => ({}))
-  on('classic.PermissionDenied', () => ({}))
+  offline(on)
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', ($, e) => ({ text: e.answer }))
   on('agent.spawn', ($, e) => ({ model: e.model ?? 'claude-sonnet-5-5', agentId: 'ag1' }))
@@ -133,14 +126,6 @@ async function turn($: Engine, clock: Clock, turnId: string, uuid: string) {
   await clock.advance(1000)
 }
 
-/** 面板全文和身份栏的速度行 */
-async function panel($: Engine) {
-  const ui = await $.ui.mount(pane(false))
-  const shown = { all: flat(await ui.drawn()), speed: flat(await ui.find({ key: 'identity:speed' })) }
-  await ui.unmount()
-  return shown
-}
-
 async function turnRow($: Engine, uuid: string) {
   const ui = await $.ui.mount({ plugin: 'anvil', surface: 'terminal', component: 'TurnDuration', requestId: uuid, props: { word: 'Baked', durationMs: 12_000 } })
   const shown = flat(await ui.drawn())
@@ -156,52 +141,31 @@ async function band($: Engine) {
   return shown
 }
 
-const denied: ClassicEventOf['classic.PermissionDenied'] = {
-  session_id: 's1',
-  transcript_path: '/work/s1.jsonl',
-  cwd: '/work',
-  hook_event_name: 'PermissionDenied',
-  tool_name: 'Bash',
-  tool_input: { command: 'ls' },
-  tool_use_id: 'deny1',
-  reason: 'classifier',
-}
-
 /** 各 atom 上一次加载可能留下的旧形状、缺字段的值 */
 const STALE: Record<string, unknown> = {
-  identity: { dir: 'anvil', git: { repo: 'anvil', branch: 'main' }, model: 'claude-opus-5-5', effort: 'high', tokensPerSecond: 50, firstTokenMs: 2000, requestMs: 10000 },
+  place: { dir: 'anvil', git: { repo: 'anvil', branch: 'main' } },
   turnSpeeds: { current: { turnId: 'old' }, lines: { u0: { firstTokenMs: 900 } } },
   usage: { context: { tokens: 1000 }, costUsd: 1 },
   cache: { expiresAt: 0 },
   keepalive: { stopped: { reason: '旧的' } },
-  activity: { replying: true },
-  agents: [{ id: 'ag1', description: '旧的子 agent' }],
-  denials: [{ id: 'd1', tool: 'Bash' }],
-  messages: { items: [{ id: 'm1' }] },
-  translate: { phase: 'idle' },
+  runningAgents: 'ag1',
 }
 
 for (const [key, stale] of Object.entries(STALE)) {
-  test(`anvil.${key} 是旧形状：面板、收尾行、翻译框照常画，换回新代码写下的值后读数正常`, async ($, on) => {
+  test(`anvil.${key} 是旧形状：输入框上方那一行、收尾行照常画，换回新代码写下的值后读数正常`, async ($, on) => {
     const rewrite = new Map<string, unknown>([[`anvil.${key}`, stale]])
     const clock = engine(on, rewrite)
     await $.session.start(SESSION)
     await $.agent.spawn(spawnInput('查一下'))
-    await $.classic.PermissionDenied(denied)
     await $.prompt.submit(typed('你好'))
     await turn($, clock, 't1', 'u1')
-    // 面板画得出来：缓存框和最底的速度行都在
-    const drawn = await panel($)
-    expect(drawn.all).toContain('保活')
-    expect(drawn.speed).not.toBe('')
     await turnRow($, 'u1')
-    expect(await band($)).not.toBe('')
+    expect(await band($)).toContain('5h')
 
     // 之后的写入不再被换掉（像新代码第一次写下自己的形状）
     rewrite.clear()
     await turn($, clock, 't2', 'u2')
-    const shown = await panel($)
-    expect(shown.speed).toContain('token/s')
     expect(await turnRow($, 'u2')).toContain('token/s')
+    expect(await band($)).toContain('7d')
   })
 }

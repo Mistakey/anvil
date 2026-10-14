@@ -1,18 +1,14 @@
 import type { ModelForkResult, On } from 'claude-code'
 import { describe, expect, mock, test } from 'claude-code/testing'
-import type { Engine, Mounted } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
 
-import { cacheRows, hitColor } from '../hooks/cachebox'
 import { freshCache, view } from '../hooks/cache'
 import type { Cache } from '../hooks/cache'
-import { IDLE_LIMIT_MS, PING_AFTER_MS, keepaliveStatus } from '../hooks/keepalive'
+import { IDLE_LIMIT_MS, PING_AFTER_MS, keepaliveStatus, statuslineFile } from '../hooks/keepalive'
 import type { LoopMemory } from '../hooks/keepalive'
-import { COLOR, GRID, ICON, valueWidth } from '../hooks/style'
-import type { Segment } from '../hooks/style'
-import { cells } from '../hooks/text'
-import type { GridRow } from '../hooks/usage'
-import type { CacheView, Settings } from '../types'
-import { SESSION, WARM, anvil, drain, stepInput, turnInput, typed, usage, world } from './world'
+import { COLOR } from '../hooks/style'
+import type { CacheView, Settings, StatuslineFile } from '../types'
+import { SESSION, SESSION_ID, WARM, anvil, drain, stepInput, turnInput, typed, usage, world } from './world'
 import type { WorldOptions } from './world'
 
 const SEC = 1000
@@ -25,29 +21,9 @@ const START = at(13, 20)
 
 const cacheOf = (state: Map<string, unknown>) => state.get('anvil.cache') as CacheView
 
-const pane = (bodyColumns: number) => ({
-  plugin: 'anvil',
-  surface: 'terminal' as const,
-  component: 'Pane' as const,
-  requestId: 'anvil',
-  props: { title: 'anvil', isFocused: false, bodyColumns, placement: 'dock' as const, scroll: { offset: 0, bodyRows: 48 }, view: {} },
-})
-
-/** 画出来的一个元素里所有的字，按文档顺序 */
-function flat(node: unknown): string {
-  if (typeof node === 'string') return node
-  if (Array.isArray(node)) return node.map(flat).join('')
-  if (node !== null && typeof node === 'object') {
-    const { children, props } = node as { children?: unknown; props?: { children?: unknown } }
-    return flat(children ?? props?.children ?? [])
-  }
-  return ''
-}
-
 function engine(on: On, options: WorldOptions = {}) {
   const clock = mock.clock(on, { now: START })
   const w = world(on, options)
-  on('ui.open', () => ({ value: { isPlaced: true } }))
   return { clock, ...w }
 }
 
@@ -58,20 +34,10 @@ async function turn($: Engine, over = {}) {
 }
 
 
-/** 字恰好是 text 的最里层 Text 的颜色（外层的 Text 只是把几段包起来） */
-async function colorOf(ui: Mounted<'terminal', 'Pane'>, text: string) {
-  const found = (await ui.findAll({ type: 'Text' })).filter(one => one.text === text)
-  return found.at(-1)?.props.color
-}
-
-/** 缓存框里保活那一行的字和颜色 */
+/** `/anvil` 列表里保活的状态 */
 async function keepaliveRow($: Engine) {
-  const ui = await $.ui.mount(pane(70))
-  const row = await ui.find({ key: 'row:keepalive' })
-  const text = flat(row).replace(/^保活/, '')
-  const color = await colorOf(ui, text)
-  await ui.unmount()
-  return { text, color }
+  const listed = (await $.command.run(anvil(''))).text ?? ''
+  return { text: /\/anvil keepalive .*（现在：(.*)）$/m.exec(listed)?.[1] ?? '' }
 }
 
 describe('自动开启', () => {
@@ -99,7 +65,7 @@ describe('自动开启', () => {
     await turn($, { usage: small })
     await w.clock.advance(2 * HOUR)
     expect(w.forks).toHaveLength(0)
-    expect(await keepaliveRow($)).toEqual({ text: '未启用（低于 50k）', color: COLOR.secondary })
+    expect(await keepaliveRow($)).toEqual({ text: '未启用（低于 50k）' })
   })
 
   test('/config 关掉自动开启后不开', { options: { autoKeepalive: false } }, async ($, on) => {
@@ -169,7 +135,7 @@ describe('/anvil keepalive', () => {
 
     const off = await $.command.run(anvil('keepalive'))
     expect(off.text).toBe('缓存保活已关闭（本会话）')
-    expect(await keepaliveRow($)).toEqual({ text: '已关闭（本会话）', color: COLOR.secondary })
+    expect(await keepaliveRow($)).toEqual({ text: '已关闭（本会话）' })
     await w.clock.advance(50 * MIN)
     expect(w.forks).toHaveLength(0)
     // 关着的时候，新的一轮也不开
@@ -268,7 +234,7 @@ describe('停下', () => {
     expect((await keepaliveRow($)).text).toBe('进行中')
 
     await w.clock.advance(1 * SEC)
-    expect(await keepaliveRow($)).toEqual({ text: '已停止（空闲超过 12 小时）', color: COLOR.secondary })
+    expect(await keepaliveRow($)).toEqual({ text: '已停止（空闲超过 12 小时）' })
     await w.clock.advance(3 * HOUR)
     expect(w.forks).toHaveLength(14)
   })
@@ -294,7 +260,7 @@ describe('停下', () => {
     expect(w.forks).toHaveLength(28)
     expect((await keepaliveRow($)).text).toBe('进行中（本会话）')
     await w.clock.advance(1 * SEC)
-    expect(await keepaliveRow($)).toEqual({ text: '已停止（空闲超过 12 小时）', color: COLOR.secondary })
+    expect(await keepaliveRow($)).toEqual({ text: '已停止（空闲超过 12 小时）' })
     await w.clock.advance(3 * HOUR)
     expect(w.forks).toHaveLength(28)
   })
@@ -311,7 +277,7 @@ describe('停下', () => {
       await w.clock.advance(50 * MIN)
       expect(w.forks).toHaveLength(1)
       expect(cacheOf(w.state).expiresAt).toBe(START + HOUR)
-      expect(await keepaliveRow($)).toEqual({ text: '已停止（续期时缓存已过期）', color: COLOR.danger })
+      expect(await keepaliveRow($)).toEqual({ text: '已停止（续期时缓存已过期）' })
       await w.clock.advance(3 * HOUR)
       expect(w.forks).toHaveLength(1)
     })
@@ -328,7 +294,7 @@ describe('停下', () => {
       await $.session.start(SESSION)
       await turn($)
       await w.clock.advance(50 * MIN)
-      expect(await keepaliveRow($)).toEqual({ text: `已停止（${reason}）`, color: COLOR.danger })
+      expect(await keepaliveRow($)).toEqual({ text: `已停止（${reason}）` })
       await w.clock.advance(3 * HOUR)
       expect(w.forks).toHaveLength(1)
     })
@@ -342,7 +308,6 @@ describe('停下', () => {
     await w.clock.advance(50 * MIN)
     const row = await keepaliveRow($)
     expect(row.text).toStartWith('已停止（续期请求出错：')
-    expect(row.color).toBe(COLOR.danger)
     await w.clock.advance(3 * HOUR)
     expect(w.forks).toHaveLength(1)
   })
@@ -384,10 +349,6 @@ describe('恢复会话', () => {
       // 计价用的模型（Opus 5.5，1 小时写入 $10/MTok）保留
       expect(b.rebuild).toEqual({ tokens: 200000, usd: 2 })
 
-      const ui = await $.ui.mount(pane(70))
-      expect(flat(await ui.find({ key: 'row:cache' }))).toBe(`${ICON.cache}—`)
-      await ui.unmount()
-
       // B 的最后一次响应之后满 50 分钟发 fork
       await w.clock.advance(40 * MIN - 2 * SEC)
       expect(w.forks).toHaveLength(1)
@@ -423,7 +384,7 @@ describe('热重载', () => {
     await $.session.start(SESSION)
   }
 
-  test('有过请求 → 热重载 → 空闲：照原来的过期时刻定时、续期，缓存框和重载前一样', async ($, on) => {
+  test('有过请求 → 热重载 → 空闲：照原来的过期时刻定时、续期，读数和重载前一样', async ($, on) => {
     const w = engine(on, { forks: [WARM, WARM], rewrite: previous(cacheMemory(), loopMemory()) })
     await $.session.start(SESSION)
     await reload($, w)
@@ -452,7 +413,7 @@ describe('热重载', () => {
     await w.clock.advance(10 * MIN)
     expect(w.forks).toHaveLength(1)
     await w.clock.advance(20 * MIN)
-    expect(await keepaliveRow($)).toEqual({ text: '已停止（空闲超过 12 小时）', color: COLOR.secondary })
+    expect(await keepaliveRow($)).toEqual({ text: '已停止（空闲超过 12 小时）' })
     await w.clock.advance(3 * HOUR)
     expect(w.forks).toHaveLength(1)
   })
@@ -462,7 +423,7 @@ describe('热重载', () => {
     const w = engine(on, { forks: [WARM], rewrite: previous(cacheMemory(), loopMemory({ stopped })) })
     await $.session.start(SESSION)
     await reload($, w)
-    expect(await keepaliveRow($)).toEqual({ text: '已停止（续期时缓存已过期）', color: COLOR.danger })
+    expect(await keepaliveRow($)).toEqual({ text: '已停止（续期时缓存已过期）' })
     await w.clock.advance(3 * HOUR)
     expect(w.forks).toHaveLength(0)
 
@@ -481,23 +442,20 @@ describe('热重载', () => {
     expect((await $.prompt.submit(typed('继续'))).drop ?? '').toStartWith('anvil：缓存已过期')
   })
 
-  test('重载前续期请求还在路上：那次请求随旧模块丢了，保活的动效收起，重载后补发一次', async ($, on) => {
-    // 50 分钟前的请求，续期请求发出 5 秒后重载
+  test('重载前续期请求还在路上：那次请求随旧模块丢了，重载后补发一次', async ($, on) => {
+    // 50 分钟前的请求，续期请求发出后重载
     const cache = cacheMemory({ lastRequestAt: START - 50 * MIN, expiresAt: START + 10 * MIN })
-    const keep = { since: START - 5 * SEC, until: null }
-    const w = engine(on, { forks: [WARM], rewrite: previous(cache, loopMemory(), { 'anvil.activity': { reply: null, keep, translate: null } }) })
+    const w = engine(on, { forks: [WARM], rewrite: previous(cache, loopMemory()) })
     await $.session.start(SESSION)
-    // 一轮让插件写下 activity（被换成续期还在路上），这一轮自己的读数也被换掉
+    // 一轮让插件写下读数（被换成上一次加载留下的），这一轮自己的读数也被换掉
     await turn($)
     await reload($, w)
-    const activity = w.state.get('anvil.activity') as { keep: unknown }
-    expect(activity.keep).toEqual({ since: START - 5 * SEC, until: START })
     await w.clock.advance(1 * SEC)
     expect(w.forks).toHaveLength(1)
     expect(cacheOf(w.state).expiresAt).toBe(START + 1 * SEC + HOUR)
   })
 
-  test('$.state 里存的是别的形状：按冷启动，缓存框如实显示还没有请求', async ($, on) => {
+  test('$.state 里存的是别的形状：按冷启动，如实记作还没有请求', async ($, on) => {
     const w = engine(on, { forks: [WARM], live: { tokens: 150000 }, rewrite: previous({ replying: true }, []) })
     await $.session.start(SESSION)
     await reload($, w)
@@ -545,68 +503,11 @@ describe('热重载', () => {
   })
 })
 
-// ---------------------------------------------------------------- 缓存框
+// ---------------------------------------------------------------- 保活状态与写给 statusline 的文件
 
-const SETTINGS: Settings = { showPanel: true, showTranslate: true, threshold: 50000, autoKeepalive: true, guard: true, translateBackend: 'haiku', translateApiUrl: '', translateApiModel: '' }
-const text = (segments: readonly Segment[]) => segments.map(segment => segment.text).join('')
-/** 一行的值（不折行时就是整个值） */
-const lineOf = (row: GridRow | undefined) => text(row?.lines[0] ?? [])
-const ENABLED: Segment = { text: '已启用' }
+const SETTINGS: Settings = { threshold: 50000, autoKeepalive: true, guard: true }
 
-/** 一份缓存框读数：上下文 152k，本会话命中率 94%，21:40 过期 */
-function sample(over: Partial<CacheView> = {}): CacheView {
-  return {
-    ...view(freshCache()),
-    expiresAt: at(13, 21, 40),
-    context: 151000,
-    rebuild: { tokens: 152000, usd: 1.52 },
-    hitRate: { last: 0.99, session: 0.94 },
-    coldWrites: { count: 1, usd: 1.55 },
-    ...over,
-  }
-}
-
-describe('缓存框', () => {
-  /** 某一行的值 */
-  const valueOf = (rows: GridRow[], key: string) => lineOf(rows.find(row => row.key === key))
-
-  test('两行：缓存图标 | 本会话命中率；保活。过期状态交还 statusline', () => {
-    const rows = cacheRows(sample(), ENABLED, 66)
-    expect(rows.map(row => row.key)).toEqual(['cache', 'keepalive'])
-    expect(rows.map(row => text(row.label))).toEqual([ICON.cache, '保活'])
-    expect(valueOf(rows, 'cache')).toBe('94%')
-    expect(rows.every(row => row.labelWidth === GRID.label)).toBe(true)
-  })
-
-  test('还没有请求：命中率写 —', () => {
-    expect(valueOf(cacheRows(view(freshCache()), ENABLED, 66), 'cache')).toBe('—')
-  })
-
-  test('命中率：低于 80% 变黄、低于 50% 变红，图标是图标色；不写"命中率"和上一条', () => {
-    expect([1, 0.8, 0.79, 0.5, 0.49, 0].map(hitColor)).toEqual([undefined, undefined, COLOR.warn, COLOR.warn, COLOR.danger, COLOR.danger])
-    const [hit] = cacheRows(sample({ hitRate: { last: 0.31, session: 0.72 } }), ENABLED, 66)
-    expect(hit?.label).toEqual([{ text: ICON.cache, color: COLOR.icon }])
-    expect(hit?.lines[0]).toEqual([{ text: '72%', color: COLOR.warn }])
-    const all = cacheRows(sample(), ENABLED, 66).flatMap(row => [text(row.label), ...row.lines.map(text)]).join('\n')
-    for (const word of ['命中率', '上一条', '重建', '≈', 'tokens']) expect(all).not.toContain(word)
-  })
-
-  test('窄到放不下时各行整块折到下一行，长的保活状态逐行折下去，都不出现 …', () => {
-    const stopped: Segment = { text: '已停止（续期请求出错：connect ECONNREFUSED 127.0.0.1:443）', color: COLOR.danger }
-    for (const columns of [40, 46, 50, 51, 52, 60, 70, 90]) {
-      const inner = columns - 4
-      {
-        const rows = cacheRows(sample({ hitRate: { last: 1, session: 1 } }), stopped, inner)
-        const lines = rows.flatMap(row => row.lines.map(text))
-        expect(lines.join(' / '), `${columns} 列`).not.toContain('…')
-        for (const line of lines) expect(cells(line) <= valueWidth(inner), `${columns} 列：${line}`).toBe(true)
-        expect(lines.join('').replace(/ /g, ''), `${columns} 列`).toContain(stopped.text.replace(/ /g, ''))
-        const keepalive = rows.find(row => row.key === 'keepalive')
-        for (const line of keepalive?.lines ?? []) expect(line[0]?.color).toBe(COLOR.danger)
-      }
-    }
-  })
-
+describe('保活状态', () => {
   test('保活状态：自动开启的五种，加上本会话手动开、手动关', () => {
     const idle = { stopped: null, renewing: false, inFlight: false }
     const base = { settings: SETTINGS, override: null, context: 151000, loop: idle }
@@ -640,24 +541,41 @@ describe('缓存框', () => {
     )
   })
 
-  test('终端上画出缓存框：两行，上边框右侧不放状态，各种宽度下不超宽；过期状态交还 statusline', async ($, on) => {
-    engine(on, { forks: [] })
+  test('写给 statusline：开着、没停下就会续；读数不达标、请求出错写原因，空闲到上限不算出错', () => {
+    const idle = { stopped: null, renewing: false, inFlight: false }
+    const base = { settings: SETTINGS, override: null, context: 151000, loop: idle }
+    expect(statuslineFile(base, 7)).toEqual({ renews: true, error: null, at: 7 })
+    expect(statuslineFile({ ...base, context: 1000 }, 7)).toEqual({ renews: false, error: null, at: 7 })
+    expect(statuslineFile({ ...base, override: true, context: 1000 }, 7).renews).toBe(true)
+    expect(statuslineFile({ ...base, override: false }, 7).renews).toBe(false)
+    expect(statuslineFile({ ...base, loop: { ...idle, stopped: { kind: 'limit', reason: '空闲超过 12 小时' } } }, 7)).toEqual({ renews: false, error: null, at: 7 })
+    expect(statuslineFile({ ...base, loop: { ...idle, stopped: { kind: 'error', reason: '续期请求被中断' } } }, 7)).toEqual({ renews: false, error: '续期请求被中断', at: 7 })
+  })
+
+  test('状态文件写在 ~/.claude/anvil/sessions/<session_id>.json，按引擎的会话 id；变了才写', async ($, on) => {
+    const w = engine(on, { forks: [{ read: 0, write: 150000 }], env: { USERPROFILE: 'C:/Users/me' } })
+    const path = `C:/Users/me/.claude/anvil/sessions/${SESSION_ID}.json`
+    const file = () => JSON.parse(w.written.get(path) ?? 'null') as StatuslineFile | null
     await $.session.start(SESSION)
+    // 开局上下文低于阈值：不会续
+    expect(file()).toMatchObject({ renews: false, error: null })
     await turn($)
-    for (const columns of [70, 110, 51, 40]) {
-      const ui = await $.ui.mount(pane(columns))
-      expect(await ui.find({ key: 'status:section:cache' })).toBeUndefined()
-      const box = await ui.find({ key: 'box:cache' })
-      const keys = (box?.children ?? []).map(one => (one as { props?: { key?: string } }).props?.key)
-      expect(keys, `${columns} 列`).toEqual(['row:cache', 'row:keepalive'])
-      for (const key of ['cache', 'keepalive']) {
-        const row = await ui.find({ key: `row:${key}` })
-        expect(row?.props.width).toBe(columns - 4)
-        expect((row?.children[0] as { props?: { width?: number } } | undefined)?.props?.width).toBe(GRID.label)
-      }
-      expect(flat(await ui.find({ key: 'row:cache' }))).toBe(`${ICON.cache}100%`)
-      expect(await ui.find({ key: 'row:state' })).toBeUndefined()
-      await ui.unmount()
-    }
+    expect(file()).toMatchObject({ renews: true, error: null })
+    const settled = w.writes.length
+    await turn($)
+    expect(w.writes.length).toBe(settled)
+    // 续期读数不达标：停下，写原因
+    await w.clock.advance(50 * MIN)
+    expect(file()).toMatchObject({ renews: false, error: '续期时缓存已过期' })
+    // 本会话手动关掉
+    await turn($)
+    await $.command.run(anvil('keepalive'))
+    expect(file()).toMatchObject({ renews: false, error: null })
+  })
+
+  test('设了 CLAUDE_CONFIG_DIR 时写在它下面', async ($, on) => {
+    const w = engine(on, { env: { CLAUDE_CONFIG_DIR: 'D:/cc', USERPROFILE: 'C:/Users/me' } })
+    await $.session.start(SESSION)
+    expect([...w.written.keys()]).toEqual([`D:/cc/anvil/sessions/${SESSION_ID}.json`])
   })
 })

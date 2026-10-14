@@ -2,10 +2,11 @@ import type {
   AgentSpawnInput,
   CommandRunInput,
   CommandSpec,
+  FsEntry,
   HookStream,
   ModelForkResult,
   On,
-  PaneOpenArgs,
+  ProcessRunResult,
   PromptSubmitInput,
   SessionMessage,
   SessionStartInput,
@@ -45,7 +46,29 @@ export type WorldOptions = {
    * 测试的钩子给 `state.get` 的值会被剥掉，造不出读到的值，只能改写插件写下的值。
    */
   rewrite?: Record<string, unknown>
+  /** git 和 git 目录按它作答，测试中途可改；不给时不在 git 里 */
+  repo?: { current: Repo }
+  /** `$.env.get` 读到的环境变量；不给的都是没设 */
+  env?: Record<string, string>
 }
+
+/** 一个仓库在某一刻的样子：git 命令的输出，和 git 目录里的文件（键是相对 git 目录的路径） */
+export type Repo = {
+  cwd: string
+  /** rev-parse 的四行；null 表示不在 git 里（exit 128） */
+  revParse: string | null
+  status: string
+  numstat: string | null
+  files?: Record<string, string>
+}
+
+export const NO_REPO: Repo = { cwd: '/work', revParse: null, status: '', numstat: null }
+
+const ran = (stdout: string): ProcessRunResult => ({ exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false })
+const notRepo: ProcessRunResult = { exitCode: 128, stdout: '', stderr: 'fatal: not a git repository', isStdoutTruncated: false, isStderrTruncated: false }
+
+/** 测试会话的 id：写给 statusline 的文件按它命名 */
+export const SESSION_ID = 'test-session'
 
 /** 一次 fork 的回答：读写数（回复正常），整份结果，或抛错 */
 export type ForkAnswer = { read: number; write: number } | ModelForkResult | { throw: string }
@@ -54,7 +77,23 @@ export type ForkAnswer = { read: number; write: number } | ModelForkResult | { t
 export const WARM: ForkAnswer = { read: 150000, write: 40 }
 
 // 插件之下的世界：替引擎回答插件用到的调用，并记下插件注册的命令、写进 `$.state` 的值、
-// 进入会话的消息和放回主输入框的文本
+// 进入会话的消息、放回主输入框的文本、运行的 git 命令和写下的文件。git、文件、环境变量都不碰本机
+const slashed = (path: string) => path.replace(/\\/g, '/')
+
+/**
+ * 不碰本机：会话 id、环境变量、写文件、跑命令、`$.store` 都由测试作答（没有钩子时引擎可能真的去做）。
+ * 不用 world 的测试自己调它；world 自己有一套能核对的
+ */
+export function offline(on: On) {
+  on('session.id', () => ({ value: SESSION_ID }))
+  on('session.cwd', () => ({ value: NO_REPO.cwd }))
+  on('env.get', () => ({ value: undefined }))
+  on('fs.write', () => ({ value: undefined }))
+  on('process.run', () => ({ value: notRepo }))
+  on('store.get', () => ({ value: undefined }))
+  on('store.set', () => ({ value: undefined }))
+}
+
 export function world(on: On, options: WorldOptions = {}) {
   const commands: string[] = []
   const registered: CommandSpec[] = []
@@ -130,34 +169,44 @@ export function world(on: On, options: WorldOptions = {}) {
     }
     return { value }
   })
-  return { commands, registered, state, entered, fills, fillModes, box, forks, store, rewrite }
-}
-
-/**
- * 替引擎管面板：记下每次 `$.ui.open` 和 `$.ui.close`。
- * `placed` 是引擎这时肯不肯把面板放下（终端够不够宽），测试中途可以改。
- */
-export function panes(on: On) {
-  const opens: PaneOpenArgs[] = []
-  const closes: string[] = []
-  const shown = new Map<string, boolean>()
-  const screen = { placed: true }
-  on('ui.open', ($, e) => {
-    opens.push(e)
-    shown.set(e.id, screen.placed)
-    return { value: screen.placed ? { isPlaced: true } : { isPlaced: false, reason: '终端 120 列，不到 144 列' } }
-  })
-  on('ui.close', ($, e) => {
-    closes.push(e.id)
-    shown.delete(e.id)
+  on('session.id', () => ({ value: SESSION_ID }))
+  on('env.get', ($, e) => ({ value: options.env?.[e.name] }))
+  const written = new Map<string, string>()
+  const writes: string[] = []
+  on('fs.write', ($, e) => {
+    written.set(slashed(e.path), e.text)
+    writes.push(slashed(e.path))
     return { value: undefined }
   })
-  on('ui.panes', () => ({
-    value: [...shown].map(([id, isPlaced]) => ({ id, title: id, isShown: isPlaced, isFocused: false, isPlaced })),
-  }))
-  return { opens, closes, screen }
+  // git：引擎把插件给的路径按本机写法规范化（Windows 上是反斜杠），这里统一回正斜杠，取相对 git 目录的部分
+  const repo = options.repo ?? { current: NO_REPO }
+  const gitRuns: string[][] = []
+  const gitDir = () => (repo.current.revParse ?? '').split(/\r?\n/)[1] ?? ''
+  const inGitDir = (path: string) => slashed(path).slice(gitDir().length + 1)
+  on('session.cwd', () => ({ value: repo.current.cwd }))
+  on('process.run', ($, e) => {
+    const [, , command] = e.argv
+    gitRuns.push([...e.argv])
+    const now = repo.current
+    if (command === 'rev-parse') return { value: now.revParse === null ? notRepo : ran(now.revParse) }
+    if (now.revParse === null) return { value: notRepo }
+    if (command === 'status') return { value: ran(now.status) }
+    if (command === 'diff') return { value: now.numstat === null ? notRepo : ran(now.numstat) }
+    return { value: notRepo }
+  })
+  on('fs.list', ($, e) => {
+    const names = slashed(e.path) === gitDir() ? new Set(Object.keys(repo.current.files ?? {}).map(path => path.split('/')[0] ?? '')) : new Set<string>()
+    const entries: FsEntry[] = [...names].map(name => ({ name, kind: 'file', size: 0, mtimeMs: 0, isLink: false }))
+    return { value: entries }
+  })
+  on('fs.read', ($, e) => {
+    const text = repo.current.files?.[inGitDir(e.path)]
+    if (text === undefined) throw new Error(`ENOENT ${e.path}`)
+    return { value: text }
+  })
+  on('fs.exists', ($, e) => ({ value: (repo.current.files ?? {})[inGitDir(e.path)] !== undefined }))
+  return { commands, registered, state, entered, fills, fillModes, box, forks, store, rewrite, written, writes, gitRuns }
 }
-
 
 export const anvil = (args: string): CommandRunInput => ({
   command: 'anvil',
@@ -206,23 +255,7 @@ export async function drain<C, R>(stream: HookStream<C, R>): Promise<R> {
   return stream.result
 }
 
-// ---------------------------------------------------------------- 面板
-
-/** 面板的一次绘制：是否有焦点、能放几行 */
-export const pane = (isFocused: boolean, bodyRows = 48) => ({
-  plugin: 'anvil',
-  surface: 'terminal' as const,
-  component: 'Pane' as const,
-  requestId: 'anvil',
-  props: {
-    title: 'anvil',
-    isFocused,
-    bodyColumns: 70,
-    placement: 'dock' as const,
-    scroll: { offset: 0, bodyRows },
-    view: {},
-  },
-})
+// ---------------------------------------------------------------- 画面
 
 /** 画出来的一个元素里所有的字，按文档顺序 */
 export function flat(node: unknown): string {
