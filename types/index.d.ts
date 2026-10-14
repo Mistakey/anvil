@@ -222,7 +222,7 @@ export type Identity = {
   git: GitView | null
   /** 主会话最近一次请求的模型 id；还没有请求时取会话的模型 */
   model: string | null
-  /** 主会话最近一次请求的 effort；还没有请求时取会话设置里的，模型不支持或设置里没有时为 null */
+  /** 主会话最近一次请求的 effort；还没有请求、或模型不支持 effort 时为 null */
   effort: string | number | null
   /** 主会话最近一次请求的输出速度：输出 token 数 ÷ 首字到结束的秒数 */
   tokensPerSecond: number | null

@@ -2,7 +2,7 @@ import type { FsEntry, On, ProcessRunResult, TurnStepChunk, TurnStepInput, TurnU
 import { expect, mock, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 
-import { effortSegment, formatSeconds, gitLine, startEffort, modelLabel, modelLine, operationOf, parseNumstat, parseRepo, parseStatus, repoNames, speedLine, tokensPerSecond } from '../hooks/identity'
+import { effortSegment, formatSeconds, gitLine, modelLabel, modelLine, operationOf, parseNumstat, parseRepo, parseStatus, repoNames, speedLine, tokensPerSecond } from '../hooks/identity'
 import { COLOR, ICON } from '../hooks/style'
 import type { Segment } from '../hooks/style'
 import { cells } from '../hooks/text'
@@ -374,24 +374,15 @@ test('会话开始时只有模型；每次主会话请求后写 effort、从首�
   expect(await lowerLines($)).toEqual([`${M} Sonnet 5.5 · max`, `${V}  90 token/s · 首字  1.5s · 用时 5.5s`])
 })
 
-test('第二行：一启动就从会话设置写 effort（当前模型自己的设置优先），第一次请求后以请求的为准', async ($, on) => {
+test('第二行：第一次请求前不写 effort（settings、环境变量里设了也不推算），第一次请求后写请求带的', async ($, on) => {
   const { clock } = engine(on, { current: sample({ status: CLEAN, numstat: '' }) })
-  const settings = { current: { effortLevel: 'high', modelSettings: { 'claude-opus-5-5': { effortLevel: 'medium' } } } as Record<string, unknown> }
-  on('settings.read', () => ({ value: settings.current }))
+  on('settings.read', () => ({ value: { effortLevel: 'high', modelSettings: { 'claude-opus-5-5': { effortLevel: 'medium' } } } }))
+  on('env.get', () => ({ value: 'low' }))
   await $.session.start(SESSION)
-  expect((await lowerLines($))[0]).toBe(`${M} Opus 5.5 · medium`)
+  expect((await lowerLines($))[0]).toBe(`${M} Opus 5.5`)
 
   await step($, clock, { turnId: 't1', index: 0, model: 'claude-opus-5-5', effort: 'xhigh', messageCount: 3 })
   expect((await lowerLines($))[0]).toBe(`${M} Opus 5.5 · xhigh`)
-})
-
-test('effort 的启动值：模型自己的设置、全局 effortLevel，都没有时不写', () => {
-  const both = { effortLevel: 'high', modelSettings: { 'claude-opus-5-5': { effortLevel: 'medium' } } }
-  expect(startEffort(both, 'claude-opus-5-5')).toBe('medium')
-  expect(startEffort(both, 'claude-sonnet-5-5')).toBe('high')
-  expect(startEffort({}, 'claude-opus-5-5')).toBe(null)
-  expect(startEffort({ effortLevel: 42 }, null)).toBe(42)
-  expect(startEffort({ effortLevel: { bad: true } }, null)).toBe(null)
 })
 
 // ---------------------------------------------------------------- 刷新与排版

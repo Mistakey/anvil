@@ -27,7 +27,7 @@ import { cacheRows } from './cachebox'
 
 import { COMMAND, answer } from './command'
 import { addDenial, denialContent, denialList, denialSource } from './denials'
-import { EMPTY_IDENTITY, GIT, NUMSTAT, REV_PARSE, STATUS, baseName, gitView, identityRows, operationOf, parseNumstat, parseRepo, parseStatus, startEffort, tokensPerSecond } from './identity'
+import { EMPTY_IDENTITY, GIT, NUMSTAT, REV_PARSE, STATUS, baseName, gitView, identityRows, operationOf, parseNumstat, parseRepo, parseStatus, tokensPerSecond } from './identity'
 import type { RebaseFiles } from './identity'
 import type { Listed, Subcommand } from './command'
 import { describeInput } from './describe'
@@ -464,14 +464,13 @@ async function refreshGit($: EngineInterface, refresh: GitRefresh) {
   }
 }
 
-/** 会话开始时还没有请求：模型取会话的，effort 取会话设置里的（startEffort），第一次请求后以请求的为准 */
+/**
+ * 会话开始时还没有请求：模型取会话的，effort 先不写。mod 在第一次请求前拿不到实际的 effort
+ * （`--effort`、模型默认值都看不到），第一次主会话请求后以请求带的为准（noteSpeed）
+ */
 async function startIdentity($: EngineInterface, refresh: GitRefresh) {
-  const [model, config] = await Promise.all([$.session.model().catch(() => null), $.settings.read().catch(() => ({}))])
-  await update($, identity, current => ({
-    ...current,
-    model: current.model ?? model,
-    effort: current.effort ?? startEffort(config, current.model ?? model),
-  }))
+  const model = await $.session.model().catch(() => null)
+  await update($, identity, current => ({ ...current, model: current.model ?? model }))
   await refreshGit($, refresh)
 }
 
