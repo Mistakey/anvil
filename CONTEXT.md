@@ -1,6 +1,6 @@
 # anvil
 
-个人自用的 Claude Code mod，只在 Claude Code 里用，服务三项需求：**额度利用率**、**显示**、**英文沟通**。当前只有仓库骨架，v1 的设计已定，正在 Epic anvil-k0t 上切任务实现，见 `docs/roadmap.md`。
+Claude Code mod，只在 Claude Code 里用，服务三项需求：**额度利用率**、**显示**、**英文沟通**。v1 在 Epic anvil-k0t 上实现，方向见 `docs/roadmap.md`；怎么装、怎么用见 `README.md`。
 
 ## Language
 
@@ -33,11 +33,11 @@ _Avoid_: 预热（pre-warm 指首次写入缓存）、心跳
 _Avoid_: 冷启动保护
 
 **anvil 面板**：
-全屏渲染下停靠在对话右侧、可拖动边界改宽的面板，自上而下是我的消息、自动模式拒绝、子 agent、用量、缓存，最下面是**身份栏**；**显示**的内容除**翻译输入框**外都在这里，取代 **statusline**。
+全屏渲染下停靠在对话右侧、可拖动边界改宽的面板，自上而下是缓存、用量、子 agent、自动模式拒绝、我的消息，最下面是**身份栏**；**显示**的内容除**翻译输入框**和每段回复末尾接的速度外都在这里，取代 **statusline**。
 _Avoid_: 会话仪表盘、仪表盘、侧栏、flightdeck（专指参考项目）
 
 **身份栏**：
-**anvil 面板**最底的两行：第一行是目录名和 git 状态，第二行是模型、effort 和输出速度；占原 **statusline** 的位置。
+**anvil 面板**最底的三行：目录名和 git 状态；模型和 effort；本会话的平均输出速度和平均首字（每段回复自己的速度和首字接在原生收尾那行后面）。占原 **statusline** 的位置。
 _Avoid_: 状态栏、statusline（专指用户的脚本）
 
 **翻译输入框**：
@@ -57,10 +57,10 @@ Claude Code 自带的提示词输入框；图片、粘贴内容、斜杠命令�
 用户的自定义状态栏脚本 `~/.claude/statusline.mjs`，已显示真实的**缓存状态**和 5h/7d 用量；已定取消，内容并入 **anvil 面板**（其中本会话改动行数改为 git 统计）。
 
 **cache-tax**：
-`karanb192/cache-tax`（MIT），**缓存保活**与**冷发送守卫**的参考实现；本地副本 `C:\work\5.code\external\cache-tax`。
+`karanb192/cache-tax`（MIT），**缓存保活**与**冷发送守卫**的参考实现：https://github.com/karanb192/cache-tax 。
 
 **flightdeck**：
-`scasella/claude-flightdeck`（MIT），**anvil 面板**的参考实现（可拖宽的停靠面板、子 agent 等列表）；本地副本 `C:\work\5.code\external\claude-flightdeck`。
+`scasella/claude-flightdeck`（MIT），**anvil 面板**的参考实现（可拖宽的停靠面板、子 agent 等列表）：https://github.com/scasella/claude-flightdeck 。
 
 ## Relationships
 

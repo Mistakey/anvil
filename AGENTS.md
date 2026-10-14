@@ -5,10 +5,11 @@
 ## 开发
 
 - 仓库本身就是一个插件：`.claude-plugin/plugin.json` 是清单，`hooks/hooks.json` 指向入口 `hooks/register.ts`。
-- 加载调试：`claude --plugin-dir C:\work\5.code\personal\anvil`，保存即热重载。
+- 结构：设置在清单的 `userConfig`，`hooks/settings.ts` 收窄成 `Settings`；`$.state` 的类型契约在 `types/index.d.ts`。照 flightdeck 的 `register.tsx`/`core.ts`：所有 `on(...)` 和用到 `$` 的辅助函数都在 `hooks/register.ts`（辅助函数写在文件顶层）；功能文件只放不碰 `$` 的纯逻辑和界面组件，由 `register.ts` 调用（如 `settings.ts` 的 `readSettings`、`command.ts` 的 `answer`）。几个功能都要的事件（`session.start` 等）只注册一次、不带匹配器，处理函数里按行序依次调用各功能；只属于一个功能的事件用真匹配器（带 `args` 的 `command.run`、按 `requestId` 的 Pane `ui.render`），不用 `{}`。新功能怎么接入写在 `register.ts` 开头的注释里；`/anvil` 子命令的说明加进那里的 `SUBCOMMANDS`，兜底的 `command.run { command: 'anvil' }` 注册在最后。测试在 `tests/`，`tests/world.ts` 替引擎回答插件之下的调用。
+- 加载调试：`claude --plugin-dir <本仓库目录>`，保存即热重载。
 - 检查：`claude plugin validate .` 列出挂的事件、调用的 API 和引擎会拒绝的内容；测试：`claude plugin test .` 跑 `*.test.ts`。
 - 类型：交互加载一次后，引擎在 `.claude-plugin/types/` 生成当前构建的声明（已忽略提交）；查 API 就 grep 其中的 `claude-code/index.d.ts`。类型检查：`npx -p typescript tsc -p .`。`plugin validate`、`plugin test` 和普通 `claude -p` 都不生成类型；不开交互会话时用 `CLAUDE_CODE_PLUGIN_DIR_WATCH=1 claude --plugin-dir <dir> -p "ok" --model haiku --max-turns 1`。新 worktree 里没有类型，先这样加载一次再跑 `tsc`。
-- 参考项目源码：`C:\work\5.code\external\cache-tax`、`C:\work\5.code\external\claude-flightdeck`。
+- 参考项目源码：[cache-tax](https://github.com/karanb192/cache-tax)、[claude-flightdeck](https://github.com/scasella/claude-flightdeck)，克隆到本地对照着读；借用的代码和许可见 `THIRD_PARTY_NOTICES.md`。
 
 ## Pitfalls
 
@@ -22,23 +23,78 @@
 - mod 拿不到 Claude Code 自己的缓存追踪（过期时刻、本次写入的 TTL、失效原因），这些只在 statusline 的 stdin JSON（`prompt_cache`）里；mod 侧按最后一次请求时间加 TTL 估算，cache-tax 就是这么做的。例外：`classic.SessionStart`（resume/fork）带 `prompt_cache_likely_expired`，`classic.Pre/PostModelSwitch` 带 `prompt_cache_warm` 和 `cache_ttl`。
 - 在 `-p` 下实测，第一次 `$.model.fork` 只命中系统提示层、消息部分重新写入；fork 保活能否续上主会话缓存，要在交互会话里实测（cache-tax 有交互会话的正例）。statusline 只要 fork 读到缓存就顺延过期时刻，哪怕只命中了系统提示层。
 - Claude Code 内置的 cache keepalive 由服务端开关控制，会和 anvil 的保活重叠；开没开用 `claude --debug` 开交互会话后 grep `[cache-keepalive]`（headless 下没有这些行）。
+- mod 在第一次请求前拿不到会话实际用的 effort：`--effort`、开局前的 `/effort` 不进 settings 也不进环境变量；模型默认值由服务端开关、组织默认和模型目录决定；`classic.*` 生命周期钩子不带 effort。唯一准确的来源是 `turn.step` 的 `effort`。另外 user settings 顶层的 `effortLevel` 只对一批旧模型（haiku-4-5、opus-5、fable-5 等硬编码名单）生效，Haiku 5.5、Opus 5.5 等新模型不吃它，走模型默认值；project/local/flag/policy 的顶层 `effortLevel` 对所有模型生效（anvil-k0t.45，逆向 2.1.296）。
 - `$.model.complete` 不流式，`maxTokens` 默认 1024。
+- `turn.step` 的块（anvil-k0t.51 探针，2.1.299）：思考不出正文，`thinking` 块的 `text` 都是空串，隔约 1 秒来一个，有时整段思考只在结尾来一个；`usage.output_tokens` 含思考。Haiku 5.5 也会思考。响应的第一块是 engine 块（信封），总在思考之前到，可当首字。Opus 5.5 有时整段回复（含信封）几十毫秒里一起到，从哪一块算起流速都是上千 token/s。plugin test 里测试造不出 engine 块（"a ref this link never pulled as an engine chunk"），只能 yield 别的块代替。
 - `$.http.fetch` 单次 30 秒，请求体和响应体各 4 MiB；接第三方大模型 API 就走它，key 放环境变量（`--plugin-dir` 加载时插件配置的敏感项能否写入未证实）。
 
 ### 界面与元素
 
 - `Spinner` 在终端和桌面都会触发；只在终端绘制的是 `TurnDuration` 和 `InfoNotice`。
 - 面板停靠要求全屏渲染（`viewport.isFullscreen`，会话内固定）且终端至少 110 列；mod 自己打开（定时器、`turn.start`）的面板要至少 144 列，用户亲手开过同一个 id 后降到 110 列（跨会话保留，用户手动关掉后回到 144 列）。不满足时面板内联在提示框上方。
-- `Input`：回车即 `submit`；类型写的是单行，但实测 Shift+Enter 能换行、中文输入法可用（anvil-k0t.4）。没有清空方法：`value` 只在 hook 画出不同值时覆盖，清空要换 `key` 重建，再 `$.ui.focus({ requestId, key })`。
+- `Input`：回车即 `submit`；类型写的是单行，但实测 Shift+Enter 能换行、中文输入法可用（anvil-k0t.4）。没有清空方法：`value` 只在 hook 画出不同值时覆盖，清空要换 `key` 重建，再 `$.ui.focus({ requestId, key })`。有焦点时引擎按所在位置的整栏宽（band 是 `bodyColumns`）减去 label 和「 ⏎ <submitLabel>」给文字排版、折行，不看外层 Box 实际给了多宽：外层窄了（边框、内边距、旁边的字），中文长句被截成一行加「…」、提交标签折行、光标落到别处；没焦点时只画一行、超长截断（anvil-k0t.30，伪终端实测）。在 2.1.296 上回车提交后框被引擎清空、焦点回到主输入框（同上，`anvil-v1` 上也一样）。这之后在 `onSubmit` 里换 `key` 重建、画回 `value`，再 `$.ui.focus` 新 key，焦点能回到 band 的输入框，接着打字进的是它（类型说不持有按键的 site 会 deny，实测没有，anvil-k0t.33）。「⏎ <submitLabel>」去不掉：`submitLabel` 给空串或空格仍画「⏎」。引擎按空格折行，中英混写时长段中文整段挪到下一行；`onInput` 里把空格换成不折行空格重画 `value` 能排满，但快速输入会丢字（伪终端里每字 50 毫秒偶发、20 毫秒必现），不可用（anvil-k0t.33）。
 - `$.prompt.fill` 在有界面占着按键时以 `dialog` 拒绝；结果里的 `text`、`cursor` 只有模块调用过 `$.prompt.read` 才有内容；没有 `refusal` 时原因未知（多半是 hook 拦下）。
+- 面板按键只有 `Button` 的 `hotkey`（一位数字或一个小写字母）：`plain` 带 `hotkey` 时引擎在前面画出"1: "，不带 `plain` 画成 `[ label ]`。面板获得焦点后 ↑↓ 在 Button 间移动焦点、Enter 按下；Esc 不经过 mod，只把焦点交回主输入框，面板以 `isFocused: false` 重画（anvil-k0t.18）。ctrl+x tab 按 主输入框 → band（翻译框）→ 面板 轮转，band 显示着时要按两次才进面板，mod 改不了；点击面板直接获得焦点（anvil-k0t.34）。
+- `Button` 的子元素只能是字符串和 `Text`，引擎把它们连成一行排：`Text` 里的换行从 Button 的行首起，悬挂缩进要自己补空格；焦点反白只画第一行（anvil-k0t.34，伪终端实测）。
+- 画面板的 `ui.render` 钩子里不能写 `$.state`（引擎拒绝）；要在画的时候顺手改状态，用 `$.clock.after(0, …)` 推到画完之后（anvil-k0t.18）。
 - render hook 要先排除 `e.surface === 'mobile'`，再解构 `Input`。
+- 标题嵌进上边框：`position="absolute"`、`top={-1}` 的 Box 放在带边框的 Box 里面，真实终端不画；放在带边框的 Box 之后、同一个外层 Box 里（`top={0}`）才画在边框行上（anvil-k0t.17，见 `panel.tsx` 的 `bordered`）。plugin test 只看元素树、不经过 Ink 的绘制，测不出画没画。
+- 不开交互会话也能看真实终端的画面：Windows 上用 pywinpty 起 `claude --plugin-dir <dir>`（180 列、`CLAUDE_CODE_NO_FLICKER=1`、在已信任的目录里），pyte 把输出还原成屏幕文字；Nerd Font 图标还原成空白（anvil-k0t.17）。开着别的面板（如 Flightdeck）时 anvil 在页签后面：往伪终端写 SGR 鼠标点击 `[<0;列;行M` 加 `…m` 点页签切过去；从 Git Bash 起脚本时传给 claude 的 `/命令` 会被 MSYS 改成 Windows 路径、当普通消息发出，先设 `MSYS_NO_PATHCONV=1`（anvil-k0t.31）。停靠宽度沿用用户拖过的宽度（跨会话保留，关掉 Flightdeck 也不变）：要看别的宽度，往伪终端写 SGR 鼠标拖动面板左边界（`[<0;列;行M` 按下、`[<32;列;行M` 逐列移动、`[<0;列;行m` 松开），截完拖回原宽度；拖完开一个新会话核对保存下来的宽度：会话里看到的宽度可能和保存的不同（anvil-k0t.44：一次会话后段显示成 83 列，新会话仍是 51 列）。伪终端里 auto mode 的分类器不一定拦测试命令（anvil-k0t.44：读 `~/.claude.json`、`curl … | sh` 都放行了），要画拒绝框就在截图用的插件副本里加一次性命令往状态里塞记录，不进提交。只在这次关掉 Flightdeck 用 `--settings <文件>`，文件里写 `{"enabledPlugins":{"flightdeck@claude-flightdeck":false}}`（anvil-k0t.32）。
+- 伪终端截图的几个坑（anvil-k0t.46）：从 PowerShell 起脚本时 claude 一格颜色都不画（pyte 读到的全是 default），从 Git Bash 起（有 `COLORTERM=truecolor`）才有颜色；打完一长串字马上写回车，回车可能被当成粘贴里的换行，写回车前等 1 秒多；派了后台子 agent 之后主会话在等它，这时敲的斜杠命令会排队不执行，往状态里塞记录的一次性命令要放在派子 agent 之前；主会话忙时点翻译框可能点不中，打的中文会进主输入框被发出去。
+- 伪终端的画面要出图给人看时，别自己用 PIL 逐格画：同样的字号和格宽下几何和终端一样，看上去中文仍偏稀（anvil-k0t.55）。把 pyte 的格子转成 ANSI，用 `wt.exe -w new --size <列>,<行>` 开一个新窗口显示，PowerShell 里 `PrintWindow(hwnd, dc, 2)` 截下来（`CopyFromScreen` 在这里报句柄无效）；先画一张满格红底的校准画面量出格子区再裁。演示会话加 `--setting-sources project,local`：不读用户设置和全局 CLAUDE.md（回复不跟用户的语言设置走、不带用户 statusLine 和插件），登录不受影响。
+- 引擎给 Pane 画固定底色 #262626（伪终端里每格的背景都是它，不跟终端主题）；AbovePrompt band 在终端自己的底色上。面板的对比度按 #262626 量（anvil-k0t.44）。
+- 嵌套的 `Text` 沿用外层的 `color`：要用终端前景色（不设 color）的字不能包在带颜色的 Text 里，写成兄弟节点（anvil-k0t.44，翻译框标题曾因此变成线色）。
+- 斜杠命令的补全菜单（2.1.299 伪终端实测）：敲 `/anvil` 时菜单那行只画命令名和 `description`，`argumentHint` 不画在菜单里；敲下 `/anvil `（带空格）后才在输入行的命令后面画成灰字。flightdeck 也一样（anvil-k0t.50）。
+- 原生收尾那行（`TurnDuration`，「✻ Baked for 1m 4s · done 15:43」）的 requestId 是对话记录里那条 `turn_duration` 的 uuid；这条记录经 `session.append`（door `notice`、`type: 'system'`、`name: 'turn_duration'`）进对话，在 `turn.complete` 之前，比它画出来早约 20 毫秒：在 `next` 之前按 uuid 记下要画的东西（anvil-k0t.52，2.1.299 伪终端实测）。`next(e)` 给回的原生元素是不透明的 `{ type: 'engine', ref }`，在引擎里是宽 100% 的一行：放进行方向的 Box、自己的字放后面会被挤到最右再折行，放进带 `width` 的 Box 被拒（"engine node under a Box with prop "width""）；要接在它后面，在它之后放 `position="absolute" bottom={0} left={N}` 的 Box，N 按原生的写法算（2 格图标 + `{word} for {时长} · done HH:MM`，时长照引擎的 formatDuration：不到 1 分钟往下取整秒，往上「1m 4s」；收尾时还有后台子 agent 在跑时整句换成「Waiting for N background agents to finish」；另有 token 预算、`/focus` 隐藏消息的变体，anvil 不管）。plugin test 里没有原生那行，测试自己挂 `ui.render { component: 'TurnDuration' }` 给一个替身。
 - 渲染点里没有 statusLine：`$.ui.status` 是插件自己的一行，mod 读不到、也改不了用户 statusLine 脚本的输出。
+- `Client`（面板里自己在帧时钟上重画的一小块，anvil 的转动图标、耗时；anvil-k0t.39 实测）：
+  - `$.ui.resolve(e)` 在 VS Code 上也给 `Client`（`'Client' in els` 为真），画出来是空的 Box；元素表里有 `Client` 的只有终端和桌面，按 `e.surface` 判断。
+  - `props` 里有 `undefined` 时整个 `ui.render` 被拒（"props holds undefined"），可选项不给就不带这个键。
+  - `<Client module="./x.tsx">` 写在功能文件（非入口）里也认，validate 列在 surface modules；Client 模块可以 import 插件里别的文件（`spinner.tsx` 用 `motion.ts`）。plugin test 里 `find` 到的 `props.module` 是插件目录下的路径（`hooks/spinner.tsx`），`ui.drawn({ in: key })` 读它画的树，`ui.advance(ms)` 走它的帧时钟。
+  - Button 里放不了 `Client`：绝对定位的 Box 放在 Button 之后能压在它的格子上，但焦点反白只反 Button 自己的字，压上去的 Client 不反白；用 `ui.focus` 钩子（`e.element` 是焦点落到的 key）记下焦点，让 Client 自己 `inverse`。
+  - surface 模块（Client 的 `module`）只在会话启动时载入：热重载不会补上新加的 Client 模块，屏幕上出现「Client hooks/x.tsx: the plugin loaded no surface module at that path」、退回静止。新加 Client 模块要开新会话验收（anvil-k0t.48，.47 的 rail.tsx 就是这样没加载上）。
+  - 计时照 flightdeck：`surface.every` 只在挂载时（state 还没有时）起一次，之后按固定节拍走。不要在钩子给了新的 now 时把 `every` 停掉重起（.39 到 .47 的 `follow`）：回复中面板重画频繁又不规律，计时一直被清零重起，动效卡住、跳（anvil-k0t.48）。flightdeck 的耗时在新 now 时重新数，计时没对齐 now，会先多走一秒、下次重画再退回（8s → 7s，anvil-k0t.39）；anvil 的耗时取墙上的第几秒。
+  - Client 里 `Date.now()`、`performance.now()` 都能用；真实会话里 `Date.now()` 和钩子的 `$.clock.now()` 是同一个时钟（伪终端探针，anvil-k0t.48）。plugin test 的 `mock.clock` 和 `ui.advance` 都不动 `Date`：Client 要按墙上时钟算时，先核对钩子给的 now 和 `Date.now()` 对得上，对不上（测试的假时钟）就只数拍。
+  - 几个 Client 模块 import 同一个文件时共用它的模块级状态（rail.tsx 和 spinner.tsx 改的是同一个对象，伪终端探针，anvil-k0t.48）：几处同一拍靠的就是 `motion.ts` 里共用的 pulse。
+  - 帧时钟把 `every(ms)` 凑成整帧：伪终端里 `every(110)` 实测约 123ms 一拍，只数拍会比墙上时钟慢 12%，后挂载的 Client 就和先挂载的不同相（anvil-k0t.48）。
+  - 引擎自己会整屏卡住：回复中从思考切到工具调用等时刻，Claude Code 自己的 spinner 和秒数也停 0.5–3 秒，Client 的 `every` 这时不走，mod 补不回来。伪终端里不加载插件跑同一条消息作对照，引擎自己的 spinner 一样有 0.5 秒的停顿（anvil-k0t.48）。
+  - 主题色名 `claude` 能用（画成 #d77757）；`Text` 的 `dimColor` 画成灰色 #999999，不是调暗原来的颜色。
+  - plugin test 的 `$` 没有 `ui.fault`，造不出 Client 出错，退路只能测纯逻辑。
+  - Agent 工具默认在后台跑子 agent：主会话那一轮在子 agent 运行时就结束了。
+  - 引擎的边框只有一种颜色（`borderColor`，没有分边的颜色）：要画渐变的上边框，在带边框的 Box 之后放一个绝对定位、`top={0} left={0}` 的整行 Text 压住引擎画的那一行，标题、计数再压在它上面（anvil-k0t.47，伪终端实测画得出）。
+  - Client 每格一个颜色、40ms 一拍在伪终端里画得出、跟得上（rail.tsx 一行 51–70 格、四五个 Client 同时走，anvil-k0t.47）；相邻同色并段、颜色取到固定档数，一帧只有十几个节点。anvil 现在 110ms 一拍（.48）。
+  - plugin test 里 `ui.advance(ms)` 按 Client 自己 `every` 的拍子走整拍：40ms 一拍时走 144ms 只走 3 拍（120ms），断言帧要按拍子的整数倍算。
+  - plugin test 在机器忙（别的会话在跑）时会随机有测试 5 秒超时，每次挂的不是同一个；重跑一次核对（anvil-k0t.48）。
+  - plugin test 的 `ui.find({ key })` 找不到带 key 的 Text（Box、Button、Client 找得到）：要核对的元素包一层带 key 的 Box，或找 Client。
+  - 宽字后面占位的那一格要带上宽字的颜色和粗体：相邻同样式并段时，占位格样式不同会把一段字（如"中→英"）拆成几个 Text。
 
 ### 事件、状态与工具链
 
 - 钩子自身执行上限 10 秒（`prompt.edit` 只有 50 毫秒）；等待 `$` 调用（模型、网络、`$.ui.ask`）的时间不计入。
 - `/clear`、`/resume`、`/branch` 会重置 `$.state`，而且不触发 `session.start`；要在 `classic.SessionStart`（source 为 clear/resume/fork）里从 `$.store` 重新载入。
+- 热重载（`--plugin-dir` 下保存插件文件；按类型，`/config` 改插件设置、插件更新也一样）在同一个会话里触发 `session.start`，不触发 `classic.SessionStart`：模块内存是新的，`$.clock.after`/`every` 的定时器被引擎撤掉，`$.state` 保留（伪终端里看到「● anvil: reloaded (…)」）。要跨重载接上的状态写进 `$.state`，在 `session.start` 里读回、重新定时；新会话的 `$.state` 是空的，读不到就冷启动（anvil 的 `anvil.cacheMemory`、`anvil.keepaliveMemory`，anvil-k0t.49）。重载时还在路上的 `$.model.fork` 结果会不会回到旧模块未证实，anvil 重载后按需补发。
+- 热重载不清 `$.state`，atom 里还是旧代码按旧形状写下的值：改了 atom 的形状（如 .52 把 identity 的速度字段换成 `speed`），新代码读到旧值，钩子抛错被跳过（「ui.render hook skipped: threw TypeError」），面板画不出来，直到开新会话（anvil-k0t.53）。对象、列表形状的 atom 读写都合并到默认值上（照 flightdeck 的 normalize，`hooks/shape.ts`），改形状时在那里改形状。`read` 的第二个参数要在调用处直接写 atom 常量，扫描才认：包一层 `readAtom($, x)` 整个模块不加载，写成 `normalized(x, await read($, x))`。plugin test 里用 `state.set` 钩子把插件写下的值换成旧形状来造（`tests/shape.test.ts`）。
 - `$.store` 由本机所有会话共享，先 get 再 set 不是原子操作，总量上限 4 MiB；连续 `cleanupPeriodDays`（默认 30 天）没有会话读写就会被清掉，长期设置放 `userConfig`（`docs/adr/0003-settings-in-config.md`）。
 - advisor 这类服务端工具不走 `tool.check`/`tool.call`，只出现在 `turn.step` 结果的 `serverToolUses` 里；`tool.check` 带 `agentId`。
 - `$.command.register` 的 `name` 和 `command.run` 的匹配器要写字面量，否则 validate 会当成没有 `.catch` 的 gating hook。
+- 收 `$` 的辅助函数必须是文件顶层的函数声明（或绑定到函数的顶层 const）；写在 `register` 里的闭包会让模块加载失败（"$ is passed to …, which is not a function declared at the top of this file"）。状态作参数传进去（anvil-k0t.12）。
+- `claude plugin test` 里插件自己调 `$.ui.scroll`（比如在按键处理里）会以 "no implementation for ui.scroll" 拒绝，测试挂的 `ui.scroll` 钩子接不到；滚动只能在交互会话里验证，代码要接住这个拒绝（anvil-k0t.12）。`$.ui.focus` 一样（"no implementation for ui.focus"），测试挂的 `ui.focus` 钩子接不到（anvil-k0t.20）。滚到对话里的消息（`$.ui.scroll({ to: { requestId } })`）也一样接不到；测试自己调 `$.ui.scroll` 时，测试挂的 `ui.scroll` 钩子倒能收到参数（anvil-k0t.19）。
+- `claude plugin test` 的 `$` 没有 `ui.close`，测试里的插件改写 `ui.close` 的 `origin` 会被拒（"an origin other than the engine set"）：用户手动关面板（origin `person`）测不了，判断写成纯函数测，接线在交互会话里验证（anvil-k0t.15）。
 - auto mode 会拦截读取 `~/.claude.json`。
+- plugin test 里测试自己的钩子抛错时，引擎跳过它，插件收到的是 "no implementation for <事件>"，不是抛出的那条消息；要造调用失败，返回该事件的失败结果（如 fork 的 `isAnswered: false`），抛错只能核对插件接住了（anvil-k0t.16）。
+- plugin test 里 `$.session.compact` 的 `messages` 不能是空数组（"a compaction leaves at least one"），整条链会被跳过；`expect` 没有 `toBeCloseTo`，金额先取整再比（anvil-k0t.14）。
+
+### 模块结构（引擎加载前扫描源码，不合规则整个模块不加载）
+
+以下在 2.1.296 上由 validate 和 plugin test 实测（anvil-k0t.11）。
+
+- `hooks/hooks.json` 的 `modules` 只能有一项，第二项被拒：一个插件只有一个 hooks 模块，按功能分文件而不是分模块。
+- `$` 只能交给同一文件里声明的函数：不能跨 import 传，也不能交给存起来、从对象或数组里取的函数。用到 `$` 的代码和接收它的钩子写在同一个文件里；跨文件只传不含 `$` 的数据和纯函数。
+- `on` 可以交给本模块自己具名的函数（可以跨文件），但不能经对象属性或数组里的函数传，也不能用这类函数的返回值。
+- 同一事件在整个模块里（跨文件合计）只能不带匹配器注册一次；带匹配器的不限，`{}` 也算匹配器、匹配全部，重复注册同一个匹配器也能过。anvil 不用 `{}` 和重复匹配器：几个功能都要的事件（`session.start` 等）在 `register.ts` 里只注册一次、不带匹配器，处理函数里按顺序调用各功能（见「开发」的结构说明）。同一模块里先注册的钩子在外层先跑。
+- `command.run` 的匹配器可以用正则匹配 `args`，如 `{ command: 'anvil', args: /^\s*panel\s+(hide|show)\s*$/ }`，仍算 answers its own command。
+- plugin test 里插件传给 `$.fs.*` 的路径会被引擎按本机写法规范化（Windows 上 `/` 变 `\`），测试挂的 `fs.*` 钩子比路径前先统一分隔符（anvil-k0t.17）。
+- plugin test 里测试拿到的 `$` 没有 `session.messages`，但测试挂的 `on('session.messages', () => ({ value: [...] }))` 能回答插件的 `$.session.messages()`；`$.session.append(...)` 可以直接模拟一行进对话（anvil-k0t.19）。
+- plugin test 里测试拿到的 `$` 没有 `state`，读不到插件写的 `$.state`；在测试自己的 `on('state.set')` 里记下 `e.value` 再 `next(e)`。
+- plugin test 里测试钩子给 `state.get` 答的值会被剥掉，插件读到的是没写过的值：造不出「上一次加载留下的 `$.state`」。改写插件写下的值可以（测试的 `state.set` 钩子换掉 `e.value` 再 `next`），之后让插件再收一次 `session.start`，就是模块内存和 `$.state` 不一致的热重载（`tests/world.ts` 的 `rewrite`，anvil-k0t.49）。
+- `claude plugin validate` 会校验 `userConfig` 各项的 `type`，但不列出各项设置；要列出来用 `claude --plugin-dir <dir> plugin configure anvil@inline`（不带 `--values-stdin` 时只读），默认值靠 plugin test 核对。
