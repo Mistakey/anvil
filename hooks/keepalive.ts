@@ -7,7 +7,7 @@
 
 import type { ModelForkResult } from 'claude-code'
 
-import type { KeepaliveStop, KeepaliveView, Settings } from '../types'
+import type { KeepaliveMemory, KeepaliveStop, KeepaliveView, Settings } from '../types'
 import { TTL_MS, isExpired } from './cache'
 import type { Cache } from './cache'
 import type { Subcommand } from './command'
@@ -26,7 +26,7 @@ export const PING_PROMPT = 'Reply with the single word: warm'
 
 export const KEEPALIVE_SUBCOMMAND: Subcommand = { name: 'keepalive', summary: '开启或关闭缓存保活' }
 
-/** 保活循环，只在 register.ts 的闭包里，随模块加载新建 */
+/** 保活循环，在 register.ts 的闭包里；定时器和路上的请求随模块丢掉，其余写进 anvil.keepaliveMemory，热重载后接上 */
 export type Loop = {
   /** 等着的定时器 */
   pending: { cancel: () => void } | null
@@ -41,6 +41,32 @@ export type Loop = {
 
 export function freshLoop(): Loop {
   return { pending: null, inFlight: false, renewals: 0, stopped: null, restartedAt: 0 }
+}
+
+/** 热重载后要接上的那部分循环（写进 `$.state` 的 anvil.keepaliveMemory） */
+export type LoopMemory = KeepaliveMemory
+
+export const loopMemory = (loop: Loop): LoopMemory => ({ renewals: loop.renewals, stopped: loop.stopped, restartedAt: loop.restartedAt })
+
+const isStop = (v: unknown): v is KeepaliveStop => {
+  const stop = v as KeepaliveStop | null
+  return typeof stop === 'object' && stop !== null && ['limit', 'reading', 'error'].includes(stop.kind) && typeof stop.reason === 'string'
+}
+
+/**
+ * 热重载后读回上一次加载写下的循环（anvil.keepaliveMemory）：续期次数、停下、重新开启的时刻。
+ * 定时器和路上的请求随旧模块丢了，不接（重新定时由 register.ts 做）。没有或是别的形状就不动，按冷启动。
+ */
+export function restoreLoop(loop: Loop, value: unknown): boolean {
+  const v = value as Partial<Record<keyof LoopMemory, unknown>> | null
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false
+  if (typeof v.renewals !== 'number' || typeof v.restartedAt !== 'number' || !(v.stopped === null || isStop(v.stopped))) return false
+  disarm(loop)
+  loop.inFlight = false
+  loop.renewals = v.renewals
+  loop.stopped = v.stopped === null ? null : { kind: v.stopped.kind, reason: v.stopped.reason }
+  loop.restartedAt = v.restartedAt
+  return true
 }
 
 export function disarm(loop: Loop) {

@@ -40,10 +40,12 @@ import {
   freshLoop,
   isEnabled,
   keepaliveStatus,
+  loopMemory,
   loopView,
   nextDelay,
   renew,
   restart,
+  restoreLoop,
   startStretch,
   stopFor,
   thrownStop,
@@ -108,17 +110,28 @@ async function publishSettings($: EngineInterface, settings: Settings) {
 
 const CACHE = { plugin: 'anvil', key: 'cache' } as const
 const cacheView = atom(CACHE, cacheState.view(cacheState.freshCache()))
+const CACHE_MEMORY = { plugin: 'anvil', key: 'cacheMemory' } as const
 
-/** 把缓存状态的读数写进 `$.state`，缓存框和测试从这里读 */
+/** 把缓存状态的读数写进 `$.state`，缓存框和测试从这里读；原样另存一份，热重载后接上 */
 async function publishCache($: EngineInterface, cache: Cache) {
+  await $.state.set(CACHE_MEMORY, cache)
   await $.state.set(CACHE, cacheState.view(cache))
 }
 
-/** 会话开始（含重新加载模块）：取计价用的模型和引擎的实时上下文；还没有请求，不判过期 */
+/**
+ * 会话开始（含热重载）：`$.state` 里有上一次加载存下的缓存状态（热重载换掉模块内存、`$.state` 还在）就接上；
+ * 没有（新会话）或认不出就冷启动：取计价用的模型和引擎的实时上下文，还没有请求，不判过期
+ */
 async function startCache($: EngineInterface, cache: Cache) {
-  cache.model = await $.session.model()
-  const live = (await $.session.usage()).context.tokens
-  if (live !== undefined && live > 0) cache.context = live
+  const restored = cacheState.restoreCache((await $.state.get(CACHE_MEMORY)).value)
+  if (restored) {
+    Object.assign(cache, restored)
+    cache.model ??= await $.session.model()
+  } else {
+    cache.model = await $.session.model()
+    const live = (await $.session.usage()).context.tokens
+    if (live !== undefined && live > 0) cache.context = live
+  }
   await publishCache($, cache)
 }
 
@@ -163,6 +176,7 @@ async function guardSubmission($: EngineInterface, cache: Cache, submission: Sub
   const now = await $.clock.now()
   if (!cacheState.shouldGuard(cache, submission, threshold, now)) return null
   cache.ackedFor = cache.expiresAt
+  await publishCache($, cache)
   // drop 之后引擎不一定把原文留在主输入框（D11 待实测）：等 drop 落定，主输入框空着就放回去
   $.clock.after(0, () => { void restoreDraft($, submission.text) })
   return cacheState.guardText(cache, now)
@@ -182,9 +196,20 @@ async function restoreDraft($: EngineInterface, text: string) {
 
 const keepaliveOverride = atom({ plugin: 'anvil', key: 'keepaliveOverride' } as const, null as boolean | null)
 const keepaliveLoop = atom({ plugin: 'anvil', key: 'keepalive' } as const, loopView(freshLoop()))
+const LOOP_MEMORY = { plugin: 'anvil', key: 'keepaliveMemory' } as const
 
 async function publishLoop($: EngineInterface, loop: Loop) {
+  await $.state.set(LOOP_MEMORY, loopMemory(loop))
   await update($, keepaliveLoop, () => loopView(loop))
+}
+
+/**
+ * 会话开始（含热重载）：接上上一次加载存下的续期次数、停下和重新开启的时刻。
+ * 旧模块的定时器已被引擎撤掉、路上的续期请求随它丢了：这次重新定时（cacheChanged），动效里的续期收起
+ */
+async function startLoop($: EngineInterface, loop: Loop) {
+  restoreLoop(loop, (await $.state.get(LOOP_MEMORY)).value)
+  await markActivity($, 'keep', false).catch(() => undefined)
 }
 
 /** 按缓存状态重新定时（cache-tax 的 arm）：没开、已停下、冷了都不定时；这段空闲到上限就停下 */
@@ -796,9 +821,10 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await publishSettings($, settings)
     // 功能在这里按顺序接入
+    // 热重载换掉模块内存、撤掉定时器：缓存状态和保活循环从 `$.state` 接上，按接上的状态重新定时、定好缓存框的重画
     await startCache($, cache)
-    // 重新加载模块时循环是新的：换掉上一次加载留下的读数
-    await publishLoop($, loop)
+    await startLoop($, loop)
+    await cacheChanged($, cache, loop, redraw, settings)
     await readUsage($)
     await startIdentity($, gitRefresh).catch(() => undefined)
     await startPanel($)

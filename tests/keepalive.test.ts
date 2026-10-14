@@ -4,14 +4,16 @@ import type { Engine, Mounted } from 'claude-code/testing'
 
 import { cacheRows, formatExpired, hitColor } from '../hooks/cachebox'
 import { freshCache, view } from '../hooks/cache'
+import type { Cache } from '../hooks/cache'
 import { IDLE_LIMIT_MS, PING_AFTER_MS, keepaliveStatus } from '../hooks/keepalive'
+import type { LoopMemory } from '../hooks/keepalive'
 import { COLOR, GRID, ICON, valueWidth } from '../hooks/style'
 import type { Segment } from '../hooks/style'
 import { cells } from '../hooks/text'
 import { EMPTY_USAGE, usageRows } from '../hooks/usage'
 import type { GridRow } from '../hooks/usage'
 import type { CacheView, Settings } from '../types'
-import { SESSION, WARM, anvil, drain, stepInput, turnInput, usage, world } from './world'
+import { SESSION, WARM, anvil, drain, stepInput, turnInput, typed, usage, world } from './world'
 import type { WorldOptions } from './world'
 
 const SEC = 1000
@@ -395,6 +397,153 @@ describe('恢复会话', () => {
       expect((await keepaliveRow($)).text).toBe('进行中')
     })
   }
+})
+
+describe('热重载', () => {
+  // 热重载：模块内存（缓存状态、保活循环）是新的，`$.clock.after` 的定时器被引擎撤掉，`$.state` 还在。
+  // 先让插件按冷启动加载一次、把它写下的读数换成"上一次加载留下的"（rewrite），再收一次 session.start
+  /** 上一次加载留下的缓存状态：30 分钟前主会话发过一次请求，之后空闲 */
+  const cacheMemory = (over: Partial<Cache> = {}): Cache => ({
+    ...freshCache(),
+    lastRequestAt: START - 30 * MIN,
+    expiresAt: START + 30 * MIN,
+    context: 150502,
+    output: 1000,
+    model: 'claude-opus-5-5',
+    last: { read: 150000, input: 150502 },
+    session: { read: 300000, input: 301004 },
+    coldWrites: [{ at: START - 2 * HOUR, tokens: 150500, usd: 1.505 }],
+    ...over,
+  })
+  const loopMemory = (over: Partial<LoopMemory> = {}): LoopMemory => ({ renewals: 0, stopped: null, restartedAt: 0, ...over })
+  const previous = (cache: unknown, loop: unknown, more: Record<string, unknown> = {}) =>
+    ({ 'anvil.cacheMemory': cache, 'anvil.keepaliveMemory': loop, ...more })
+
+  async function reload($: Engine, w: { rewrite: Map<string, unknown> }) {
+    w.rewrite.clear()
+    await $.session.start(SESSION)
+  }
+
+  test('有过请求 → 热重载 → 空闲：照原来的过期时刻定时、续期，缓存框和重载前一样', async ($, on) => {
+    const w = engine(on, { forks: [WARM, WARM], rewrite: previous(cacheMemory(), loopMemory()) })
+    await $.session.start(SESSION)
+    await reload($, w)
+    expect(cacheOf(w.state)).toEqual(view(cacheMemory()))
+    expect(await keepaliveRow($)).toEqual({ text: '已启用' })
+
+    // 上一次请求之后满 50 分钟（START + 20 分钟）发 fork，以这次请求顺延过期时刻
+    await w.clock.advance(20 * MIN - 2 * SEC)
+    expect(w.forks).toHaveLength(0)
+    await w.clock.advance(2 * SEC)
+    expect(w.forks).toHaveLength(1)
+    expect(cacheOf(w.state).expiresAt).toBe(START + 20 * MIN + HOUR)
+    expect((await keepaliveRow($)).text).toBe('进行中')
+    await w.clock.advance(50 * MIN)
+    expect(w.forks).toHaveLength(2)
+  })
+
+  test('这段空闲里续期过：重载后仍是进行中，12 小时上限照最后一次主会话请求算', async ($, on) => {
+    // 11h30m 前发过请求，续期过 13 次，最后一次在 40 分钟前
+    const cache = cacheMemory({ lastRequestAt: START - IDLE_LIMIT_MS + 30 * MIN, expiresAt: START + 20 * MIN })
+    const w = engine(on, { forks: Array.from({ length: 5 }, () => WARM), rewrite: previous(cache, loopMemory({ renewals: 13 })) })
+    await $.session.start(SESSION)
+    await reload($, w)
+    expect(await keepaliveRow($)).toEqual({ text: '进行中' })
+
+    await w.clock.advance(10 * MIN)
+    expect(w.forks).toHaveLength(1)
+    await w.clock.advance(20 * MIN)
+    expect(await keepaliveRow($)).toEqual({ text: '已停止（空闲超过 12 小时）', color: COLOR.secondary })
+    await w.clock.advance(3 * HOUR)
+    expect(w.forks).toHaveLength(1)
+  })
+
+  test('重载时保活已停下：保持停下和原因，不发；下一次主会话请求之后照常', async ($, on) => {
+    const stopped = { kind: 'reading', reason: '续期时缓存已过期' } as const
+    const w = engine(on, { forks: [WARM], rewrite: previous(cacheMemory(), loopMemory({ stopped })) })
+    await $.session.start(SESSION)
+    await reload($, w)
+    expect(await keepaliveRow($)).toEqual({ text: '已停止（续期时缓存已过期）', color: COLOR.danger })
+    await w.clock.advance(3 * HOUR)
+    expect(w.forks).toHaveLength(0)
+
+    await turn($)
+    await w.clock.advance(50 * MIN)
+    expect(w.forks).toHaveLength(1)
+  })
+
+  test('缓存在重载前已过期：不发，守卫照常拦', async ($, on) => {
+    const cache = cacheMemory({ lastRequestAt: START - 2 * HOUR, expiresAt: START - HOUR })
+    const w = engine(on, { forks: [WARM], rewrite: previous(cache, loopMemory()) })
+    await $.session.start(SESSION)
+    await reload($, w)
+    await w.clock.advance(2 * HOUR)
+    expect(w.forks).toHaveLength(0)
+    expect((await $.prompt.submit(typed('继续'))).drop ?? '').toStartWith('anvil：缓存已过期')
+  })
+
+  test('重载前续期请求还在路上：那次请求随旧模块丢了，保活的动效收起，重载后补发一次', async ($, on) => {
+    // 50 分钟前的请求，续期请求发出 5 秒后重载
+    const cache = cacheMemory({ lastRequestAt: START - 50 * MIN, expiresAt: START + 10 * MIN })
+    const keep = { since: START - 5 * SEC, until: null }
+    const w = engine(on, { forks: [WARM], rewrite: previous(cache, loopMemory(), { 'anvil.activity': { reply: null, keep, translate: null } }) })
+    await $.session.start(SESSION)
+    // 一轮让插件写下 activity（被换成续期还在路上），这一轮自己的读数也被换掉
+    await turn($)
+    await reload($, w)
+    const activity = w.state.get('anvil.activity') as { keep: unknown }
+    expect(activity.keep).toEqual({ since: START - 5 * SEC, until: START })
+    await w.clock.advance(1 * SEC)
+    expect(w.forks).toHaveLength(1)
+    expect(cacheOf(w.state).expiresAt).toBe(START + 1 * SEC + HOUR)
+  })
+
+  test('$.state 里存的是别的形状：按冷启动，缓存框如实显示还没有请求', async ($, on) => {
+    const w = engine(on, { forks: [WARM], live: { tokens: 150000 }, rewrite: previous({ replying: true }, []) })
+    await $.session.start(SESSION)
+    await reload($, w)
+    expect(cacheOf(w.state)).toMatchObject({ expiresAt: null, context: 150000, hitRate: { last: null, session: null } })
+    expect((await keepaliveRow($)).text).toBe('已启用')
+    await w.clock.advance(2 * HOUR)
+    expect(w.forks).toHaveLength(0)
+  })
+
+  test('$.state 里没有（新会话）：按冷启动', async ($, on) => {
+    const w = engine(on, { forks: [WARM], live: { tokens: 150000 } })
+    await $.session.start(SESSION)
+    expect(cacheOf(w.state)).toMatchObject({ expiresAt: null, context: 150000 })
+    await w.clock.advance(2 * HOUR)
+    expect(w.forks).toHaveLength(0)
+  })
+
+  test('本会话手动关掉的，重载后仍关着', async ($, on) => {
+    const w = engine(on, { forks: [WARM] })
+    await $.session.start(SESSION)
+    await turn($)
+    await $.command.run(anvil('keepalive'))
+    await reload($, w)
+    expect((await keepaliveRow($)).text).toBe('已关闭（本会话）')
+    await w.clock.advance(2 * HOUR)
+    expect(w.forks).toHaveLength(0)
+  })
+
+  test('模块内存和 $.state 一致时再收到 session.start：读数不变，定时器不重复', async ($, on) => {
+    const w = engine(on, { forks: [WARM, WARM, WARM] })
+    await $.session.start(SESSION)
+    await turn($)
+    await w.clock.advance(30 * MIN)
+    const before = cacheOf(w.state)
+    expect((w.state.get('anvil.cacheMemory') as Cache).lastRequestAt).toBe(START)
+
+    await reload($, w)
+    expect(cacheOf(w.state)).toEqual(before)
+    await w.clock.advance(20 * MIN)
+    expect(w.forks).toHaveLength(1)
+    await w.clock.advance(49 * MIN)
+    expect(w.forks).toHaveLength(1)
+    await w.clock.advance(1 * MIN)
+    expect(w.forks).toHaveLength(2)
+  })
 })
 
 // ---------------------------------------------------------------- 缓存框
