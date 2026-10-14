@@ -76,10 +76,11 @@ test('没有存档时预测按窗口平均的速度外推：用不完绿色"󰁹
   // 窗口 18:00 开始，2 小时用了 18.4%，到 23:00 重置时用到 46%；按这个速度 8 小时 52 分钟用完，10-14 04:52
   const slow = usageRows(limitsOf({ kind: 'five_hour', percentUsed: 18.4, resetsAt: iso(at(13, 23)) }), NOW, INNER)
   expect(detailOf(slow, 'five_hour')).toBe(two('23:00', `${FINE} 04:52 10-14`))
-  expect(lineAt(slow, 'five_hour').at(-1)).toEqual({ text: `${FINE} 04:52 10-14`, color: COLOR.ok })
+  // 好状态只给图标上色，时刻和重置时刻一样是次要色
+  expect(lineAt(slow, 'five_hour').slice(-2)).toEqual([{ text: `${FINE} `, color: COLOR.ok }, { text: '04:52 10-14', color: COLOR.secondary }])
   // 当天用完、晚于重置：窗口 16:00 开始，4 小时用了 60%，22:40 用完，重置是 21:00
   const today = usageRows(limitsOf({ kind: 'five_hour', percentUsed: 60, resetsAt: iso(at(13, 21)) }), NOW, INNER)
-  expect(lineAt(today, 'five_hour').at(-1)).toEqual({ text: `${FINE} 22:40`, color: COLOR.ok })
+  expect(lineAt(today, 'five_hour').slice(-2)).toEqual([{ text: `${FINE} `, color: COLOR.ok }, { text: '22:40', color: COLOR.secondary }])
   // 7d 窗口 10-12 17:00 开始，27 小时用了 128 × 27 / 168 %：131 小时 15 分钟用完，10-18 04:15
   const fast = usageRows(limitsOf({ kind: 'seven_day', percentUsed: (128 * 27) / 168, resetsAt: iso(at(19, 17)) }), NOW, INNER)
   expect(firstOf(fast, 'seven_day')).toBe(`${barText((128 * 27) / 168)}  21%`)
@@ -96,7 +97,7 @@ test('窗口刚开始也照常推算，不设等待期，窗口开始前当作�
   expect(detailOf(usageRows(early, NOW, INNER), 'five_hour')).toBe(two('00:50 10-14', `${FINE} 21:00 10-15`))
   const idle = limitsOf({ kind: 'five_hour', percentUsed: 0, resetsAt: iso(at(13, 22)) })
   expect(detailOf(usageRows(idle, NOW, INNER), 'five_hour')).toBe(two('22:00', `${FINE} —`))
-  expect(lineAt(usageRows(idle, NOW, INNER), 'five_hour').at(-1)).toEqual({ text: `${FINE} —`, color: COLOR.ok })
+  expect(lineAt(usageRows(idle, NOW, INNER), 'five_hour').slice(-2)).toEqual([{ text: `${FINE} `, color: COLOR.ok }, { text: '—', color: COLOR.secondary }])
   // 窗口 17:00 开始，3 小时用了 30%：没有存档，按窗口平均
   expect(burnRate(30, at(13, 22), 5 * 3_600_000, NOW, 3_600_000, [])).toEqual({ used: 30, span: 3 * 3_600_000 })
 })
@@ -166,9 +167,11 @@ test('花费：只有本会话总额一行', () => {
 })
 
 test('第二行的细节都是次要色（󰑐 图标色，预测图标除外）；不写"预计"、↻、"本会话""上一条""压缩""≈"、星期、"明天""用尽"', () => {
-  // 7d 用不完：除了开头的 󰑐 和绿色 󰁹 都是次要色
+  // 7d 用不完：除了开头的 󰑐 和绿色 󰁹 都是次要色，用完时刻也是
   const rows = usageRows(WORKING, NOW, INNER)
-  expect(lineAt(rows, 'seven_day').slice(1, -1).every(one => one.color === COLOR.secondary)).toBe(true)
+  const seven = lineAt(rows, 'seven_day')
+  expect(seven.at(-2)).toEqual({ text: `${FINE} `, color: COLOR.ok })
+  expect(seven.slice(1).filter(one => one.text !== `${FINE} `).every(one => one.color === COLOR.secondary)).toBe(true)
   expect(lineAt(rows, 'seven_day')[0]).toEqual({ text: `${RESET} `, color: COLOR.icon })
   const context = lineAt(rows, 'context')
   expect(context.length > 0 && context.every(one => one.color === COLOR.secondary)).toBe(true)
@@ -198,11 +201,13 @@ test('三条进度条一样长、百分比上下对齐，数字变长变短不�
   }
 })
 
-test('进度条加长：值那一列除了百分比都给进度条，右边留一格', () => {
-  // 用户的终稿：框 48 列（框内 44 格）时进度条 30 格
+test('进度条加长：值那一列除了百分比都给进度条，右边留一格，最长 30 格', () => {
+  // 用户的终稿：框 48 列（框内 44 格）时进度条 30 格；拖宽到 70 列也不超过 30 格（anvil-k0t.46）
+  expect(barWidth(36)).toBe(valueWidth(36) - FIELD.percent - 2)
   expect(barWidth(44)).toBe(30)
-  expect(barWidth(47)).toBe(33)
-  expect(barWidth(66)).toBe(valueWidth(66) - FIELD.percent - 2)
+  expect(barWidth(47)).toBe(30)
+  expect(barWidth(66)).toBe(30)
+  expect(barWidth(86)).toBe(30)
 })
 
 test('进度条四档颜色：低于 60% 绿，60–80% 黄，80–90% 橙，90% 以上红；百分比同色', () => {
@@ -458,7 +463,7 @@ test('终端上（框内约 50、70 格）：三种预测图标和颜色、时�
     [two('22:00', `${ALERT} 21:50`), two('17:00 10-19', `${EMPTY} 20:00`)],
   ]
   const colors = [
-    [[`${FINE} 04:52 10-14`, COLOR.ok], [`${ALERT} 04:15 10-18`, COLOR.danger]],
+    [[`${FINE} `, COLOR.ok], ['04:52 10-14', COLOR.secondary], [`${ALERT} 04:15 10-18`, COLOR.danger]],
     [[`${ALERT} 21:50`, COLOR.danger], [`${EMPTY} 20:00`, COLOR.danger]],
   ]
   for (const [index, rateLimits] of states.entries()) {

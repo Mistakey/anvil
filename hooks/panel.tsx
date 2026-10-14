@@ -10,8 +10,6 @@ import type { ListId, PanelFold } from '../types'
 import type { Subcommand } from './command'
 import { earlierText, fitCount, fitRows } from './list'
 import type { Fit } from './list'
-import { rule, still } from './live'
-import type { Live } from './live'
 import { COLOR, GRID, ICON, fitSegments, valueWidth } from './style'
 import type { Segment } from './style'
 import { cells, fit, padStart } from './text'
@@ -69,15 +67,16 @@ export type SectionId = ListId | 'usage' | 'cache'
 type Section = { id: SectionId; icon: string; title: string; color?: string; border: string; hotkey?: string }
 
 /**
- * 自上而下的固定顺序，框与框之间一条分隔线；我的消息占满剩余高度，最下面还有三行身份栏（不带框），占原 statusline 的位置。
- * 缓存、用量、子 agent、拒绝的边框和标题同色（标题加粗）；我的消息是中性的：标题正文色，边框次要色
+ * 自上而下的固定顺序，框与框之间空一行；我的消息占满剩余高度，最下面还有三行身份栏（不带框），占原 statusline 的位置。
+ * 标题用识别色原色、加粗；边框用同色相调暗到和线同一亮度的那一档，五个框的边框一样亮（anvil-k0t.46）。
+ * 我的消息是中性的：标题正文色，边框线色
  */
 export const SECTIONS: readonly Section[] = [
-  { id: 'cache', icon: ICON.cache, title: '缓存', color: COLOR.cache, border: COLOR.cache },
-  { id: 'usage', icon: ICON.usage, title: '用量', color: COLOR.usage, border: COLOR.usage },
-  { id: 'agents', icon: ICON.agents, title: '子 agent', color: COLOR.agents, border: COLOR.agents, hotkey: 'a' },
-  { id: 'denials', icon: ICON.denials, title: '自动模式拒绝', color: COLOR.denials, border: COLOR.denials, hotkey: 'd' },
-  { id: 'messages', icon: ICON.messages, title: '我的消息', border: COLOR.secondary, hotkey: 'm' },
+  { id: 'cache', icon: ICON.cache, title: '缓存', color: COLOR.cache, border: COLOR.cacheLine },
+  { id: 'usage', icon: ICON.usage, title: '用量', color: COLOR.usage, border: COLOR.usageLine },
+  { id: 'agents', icon: ICON.agents, title: '子 agent', color: COLOR.agents, border: COLOR.agentsLine, hotkey: 'a' },
+  { id: 'denials', icon: ICON.denials, title: '自动模式拒绝', color: COLOR.denials, border: COLOR.denialsLine, hotkey: 'd' },
+  { id: 'messages', icon: ICON.messages, title: '我的消息', border: COLOR.line, hotkey: 'm' },
 ]
 
 /** 框的边框和左右内边距各占 1 格 */
@@ -126,10 +125,6 @@ export type PanelView = {
   fold: PanelFold
   /** 身份栏的三行，接在最后一个区块下面（不带框、不加分隔线），贴着面板底边 */
   identity?: RenderElement[]
-  /** 动效怎么画（live.tsx）；不给时一律静止 */
-  live?: Live
-  /** 主会话正在回复时，这一段从哪一刻起：分隔线从这一刻起呼吸；没在回复时为 null */
-  replyingSince?: number | null
   /** 按了列表的展开键，或焦点在标题、"更早的"那行上按了 Enter */
   onToggle: (id: ListId) => void
 }
@@ -339,7 +334,7 @@ export function spacedGridRows(els: Els, rows: readonly GridRow[], inner: number
 
 /**
  * 每个列表这次画出哪几项。占满剩余高度的只有一个：展开的列表；没有展开时是我的消息。
- * 其余区块的高度先算出来（没画的占 0 行，收成一行的占 1 行，框占内容加 2 行边框，区块之间的分隔线各占 1 行），剩下的给它。
+ * 其余区块的高度先算出来（没画的占 0 行，收成一行的占 1 行，框占内容加 2 行边框，区块之间的空行各占 1 行），剩下的给它。
  */
 function fitLists(view: PanelView, expanded: ListId | null, fillId: SectionId): { fits: Map<ListId, Fit>; room: number } {
   const fits = new Map<ListId, Fit>()
@@ -402,12 +397,11 @@ export function drawPanel(els: Els, view: PanelView): RenderElement {
     return frame(els, section, body, columns, isFill, title, toggle)
   })
 
-  // 框与框之间一条分隔线，占原来空的那一行；没画的区块不留线
-  const live = view.live ?? still(0)
+  // 框与框之间空一行（框自己有边框，再画线会叠成三道横线，anvil-k0t.46）；没画的区块不留空行
   const spaced = drawn.flatMap((element, index) => {
     if (element === null) return []
-    const line = rule(els, live, { key: `rule:${SECTIONS[index]?.id}`, width: columns, since: view.replyingSince ?? null, rest: COLOR.line })
-    return [line, element]
+    const gap = <Box key={`gap:${SECTIONS[index]?.id}`} width={columns} height={1} flexShrink={0} />
+    return [gap, element]
   })
   return (
     <Box flexDirection="column" width={columns} minHeight={view.rows}>

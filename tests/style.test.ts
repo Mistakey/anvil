@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { COLOR } from '../hooks/style'
 
-// 色板（spec D10，anvil-k0t.44）：按面板的底色量对比度（WCAG 相对亮度）：引擎给面板画的 #262626，
+// 色板（spec D10，anvil-k0t.46）：按面板的底色量对比度（WCAG 相对亮度）：引擎给面板画的 #262626，
 // 和翻译框所在的终端底色（用户的 Dracula #282a36）
 
 const luminance = (hex: string) => {
@@ -32,4 +32,24 @@ test('中性色只有三级，由亮到暗：次要文字、图标、线', () =>
     expect(contrast(COLOR.secondary, ground)).toBeGreaterThan(contrast(COLOR.icon, ground))
     expect(contrast(COLOR.icon, ground)).toBeGreaterThan(contrast(COLOR.line, ground))
   }
+})
+
+test('五个框的边框一样亮（对面板底约 2.8:1，和线同一档）：彩框是识别色同色相调暗的一档，标题保留原色', () => {
+  const ground = '#262626'
+  const borders = [COLOR.cacheLine, COLOR.usageLine, COLOR.agentsLine, COLOR.denialsLine, COLOR.line]
+  for (const border of borders) {
+    expect(Math.abs(contrast(border, ground) - 2.8), border).toBeLessThan(0.1)
+    // 边框比图标暗，不和框里的字抢
+    expect(contrast(border, ground)).toBeLessThan(contrast(COLOR.icon, ground))
+  }
+  // 标题原色比边框亮得多
+  for (const [title, border] of [[COLOR.cache, COLOR.cacheLine], [COLOR.usage, COLOR.usageLine], [COLOR.agents, COLOR.agentsLine], [COLOR.denials, COLOR.denialsLine]] as const) {
+    expect(contrast(title, ground) / contrast(border, ground), title).toBeGreaterThan(1.8)
+  }
+})
+
+test('翻译框的线和引擎主输入框的线同色；失败时换成危险红，亮度相近（只换色相）', () => {
+  expect(COLOR.promptLine).toBe('#888888')
+  const ground = '#282a36'
+  expect(Math.abs(contrast(COLOR.danger, ground) - contrast(COLOR.promptLine, ground))).toBeLessThan(1)
 })

@@ -5,6 +5,7 @@ import type { Engine } from 'claude-code/testing'
 import { agentCounts, completeAgent, modelName, spawnAgent, stepAgent } from '../hooks/agents'
 import { describeInput, redact } from '../hooks/describe'
 import { CLOSED, earlierText, fitCount, fitRows, scrollList, toggleDetail, toggleList } from '../hooks/list'
+import { COLOR } from '../hooks/style'
 import { cells, wrap } from '../hooks/text'
 import { SESSION, drain, flat, pane, spawnInput, stepInput, turnInput, usage, world } from './world'
 
@@ -157,6 +158,60 @@ test('子 agent 列表：四种状态各自的符号和文字，右上角计数�
   expect(fifth).toMatch(/^◐ +调研 Spinner 首字时刻 +Sonnet +2m41s$/)
   // 一行正好占满框内宽度：引擎画的"5: "加上这行
   expect(cells(fifth) + 3).toBe(70 - 4)
+  await ui.unmount()
+})
+
+/** 一个元素里各段字的颜色（Text 嵌套时沿用外层的颜色） */
+function colors(node: unknown, inherited?: unknown): Map<string, unknown> {
+  const out = new Map<string, unknown>()
+  const walk = (one: unknown, color: unknown) => {
+    if (one === null || typeof one !== 'object') return
+    const { type, props, children } = one as { type?: string; props?: Record<string, unknown>; children?: unknown[] }
+    const own = type === 'Text' && props?.color !== undefined ? props.color : color
+    for (const kid of children ?? (props?.children as unknown[] | undefined) ?? []) {
+      if (typeof kid === 'string' && type === 'Text' && kid.trim() !== '') out.set(kid.trim(), own)
+      else walk(kid, own)
+    }
+  }
+  walk(node, inherited)
+  return out
+}
+
+test('子 agent 行的颜色：运行中的亮，做完的退到次要色，出问题的不退；右上角只有"N 出错"是红', async ($, on) => {
+  const { clock, stop } = engine(on)
+  await fiveAgents($, clock, stop)
+  const ui = await $.ui.mount(pane(false))
+  // 已完成：✓ 绿，任务、耗时次要色
+  const done = colors(await ui.find({ key: 'agent:3' }))
+  expect(done.get('\u{F00C}')).toBe(COLOR.ok)
+  expect(done.get('核对缓存读数')).toBe(COLOR.secondary)
+  expect([...done.entries()].find(([text]) => /^\d+(m\d+)?s$/.test(text))?.[1]).toBe(COLOR.secondary)
+  // 输出被截断：任务留正文色，提示黄
+  const truncated = colors(await ui.find({ key: 'agent:4' }))
+  expect(truncated.get('整理按键说明')).toBeUndefined()
+  expect(truncated.get('输出被截断')).toBe(COLOR.warn)
+  // 运行中：◐ 橙，任务、耗时正文色，模型次要色
+  const running = colors(await ui.find({ key: 'agent:5' }))
+  expect(running.get('◐')).toBe(COLOR.active)
+  expect(running.get('调研 Spinner 首字时刻')).toBeUndefined()
+  expect(running.get('2m41s')).toBeUndefined()
+  expect(running.get('Sonnet')).toBe(COLOR.secondary)
+  // 右上角：计数次要色，出错的那项红
+  const status = colors(await ui.find({ key: 'section:agents' }))
+  expect(status.get('1 运行中')).toBe(COLOR.secondary)
+  expect(status.get('1 出错')).toBe(COLOR.danger)
+  await ui.unmount()
+})
+
+test('第 10 个以后的子 agent 没有按键，序号次要色、不加粗，和我的消息的序号一样', async ($, on) => {
+  engine(on)
+  await $.session.start(SESSION)
+  for (let n = 1; n <= 10; n += 1) await $.agent.spawn(spawnInput(`任务 ${n}`))
+  const ui = await $.ui.mount(pane(false))
+  const texts = await ui.findAll({ type: 'Text' })
+  const seq = texts.find(one => one.text === '10 ')
+  expect(seq?.props.color).toBe(COLOR.secondary)
+  expect(seq?.props.bold).toBeFalsy()
   await ui.unmount()
 })
 

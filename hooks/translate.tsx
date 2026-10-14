@@ -193,17 +193,31 @@ const MIN_FIELD = cells(PLACEHOLDER) + cells(` ⏎ ${SUBMIT}`) + 1
  * 失败时也只写原因，中文画回框里，按 Enter 重试就靠引擎那处「⏎ 翻译」（anvil-k0t.33）。
  * 「⏎ 翻译」去不掉：submitLabel 给空串或空格，引擎仍画「⏎」（anvil-k0t.33 伪终端实测）。
  */
-function status(box: TranslateBox): { text: string; color: string } | null {
-  if (box.phase === 'working') return { text: `${WORKING} 正在翻译`, color: COLOR.secondary }
-  if (box.phase === 'done') return { text: `${ICON.done} 已追加 ${box.words} 个词`, color: COLOR.ok }
+function status(box: TranslateBox): Status | null {
+  if (box.phase === 'working') return { text: `${WORKING} 正在翻译`, color: COLOR.secondary, head: { text: WORKING, color: COLOR.active } }
+  // 好状态只给符号上色；失败整句红（anvil-k0t.46）
+  if (box.phase === 'done') return { text: `${ICON.done} 已追加 ${box.words} 个词`, color: COLOR.secondary, head: { text: ICON.done, color: COLOR.ok } }
   if (box.phase === 'failed') return { text: `${ICON.failed} ${box.reason}`, color: COLOR.danger }
   return box.empty ? { text: 'Enter 翻译 · Shift+Enter 换行', color: COLOR.secondary } : null
 }
 
+/** 状态行：text 整行的颜色；head 是开头那个符号另有的颜色（正在翻译的 ◐ 画的时候换成转动的） */
+type Status = { text: string; color: string; head?: { text: string; color: string } }
+
+/** 上下两条线：和引擎画主输入框的线同色，两条输入框看着是一家；失败时危险红，只换色相不变暗（anvil-k0t.46） */
 function border(box: TranslateBox): string {
-  if (box.phase === 'failed') return COLOR.dangerLine
-  // 空着时和框间分隔线一样是线色；翻译中、追加后和我的消息的边框一样是次要色
-  return box.phase === 'idle' ? COLOR.line : COLOR.secondary
+  return box.phase === 'failed' ? COLOR.danger : COLOR.promptLine
+}
+
+/** 状态行里的一行字：分隔符 · 用图标色 */
+function statusText(els: Pick<Els, 'Text'>, key: string, text: string, color: string): RenderElement[] {
+  const { Text } = els
+  return text.split(' · ').flatMap((part, index) => [
+    ...(index === 0 ? [] : [<Text key={`${key}:sep:${index}`} color={COLOR.icon}>{' · '}</Text>]),
+    <Text key={`${key}:${index}`} color={color}>
+      {part}
+    </Text>,
+  ])
 }
 
 /** 上边框：标题嵌在里面，和面板各框的标题对齐（`╭─ 标题 ─…`） */
@@ -237,19 +251,31 @@ export function drawTranslateBox(els: Els, view: BandView): RenderElement {
   const line =
     shown === null ? null : (
       <Box key="status:translate" flexDirection="column" flexShrink={0} width={Math.max(0, ...lines.map(cells))}>
-        {lines.map((text, index) =>
-          view.box.phase === 'working' && index === 0 && text.startsWith(WORKING) ? (
-            // 原地替换 ◐：转动的图标加后面的字，宽度不变
+        {lines.map((text, index) => {
+          const head = index === 0 && shown.head && text.startsWith(shown.head.text) ? shown.head : null
+          if (!head) {
+            return (
+              <Box key={`status:${index}`} flexShrink={0}>
+                {statusText(els, `status:${index}`, text, shown.color)}
+              </Box>
+            )
+          }
+          // 开头的符号另上色；正在翻译的 ◐ 原地换成转动的，后面的字宽度不变
+          const icon =
+            view.box.phase === 'working' ? (
+              spin(els, view.live ?? still(0), { key: 'spin:translate', color: head.color })
+            ) : (
+              <Text key="head:translate" color={head.color}>
+                {head.text}
+              </Text>
+            )
+          return (
             <Box key={`status:${index}`} flexShrink={0}>
-              {spin(els, view.live ?? still(0), { key: 'spin:translate', color: COLOR.active })}
-              <Text color={shown.color}>{text.slice(WORKING.length)}</Text>
+              {icon}
+              {statusText(els, `status:${index}`, text.slice(head.text.length), shown.color)}
             </Box>
-          ) : (
-            <Text key={`status:${index}`} color={shown.color}>
-              {text}
-            </Text>
-          ),
-        )}
+          )
+        })}
       </Box>
     )
   const fieldWidth = beside ? columns - 2 - cells(shown.text) : columns

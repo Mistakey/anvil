@@ -268,14 +268,13 @@ function replayDay(percent: number, resetsAt: number, now: number, samples: read
 const RESET_WIDTH = cells(`${ICON.reset} 00:00 00-00`)
 
 /**
- * 预测一律"图标 时刻"：用完时刻晚于重置是绿色"󰁹 用完时刻"（用不完写"󰁹 —"），不晚于重置是红色"󰂃 用完时刻"；
- * 已用满是红色"󰂎 用满的时刻"（存档里没有 ≥ 100% 的读数写"—"）
+ * 预测一律"图标 时刻"。好状态只给图标上色：用完时刻晚于重置是绿色的 󰁹 加次要色的时刻（用不完写"󰁹 —"）；
+ * 出问题整块红：不晚于重置是"󰂃 用完时刻"，已用满是"󰂎 用满的时刻"（存档里没有 ≥ 100% 的读数写"—"）
  */
-function forecast(percent: number, resetsAt: number, empty: number | null, now: number, fullAt: number | undefined): Segment {
-  if (percent >= 100) return { text: `${ICON.batteryOut} ${fullAt === undefined ? '—' : formatWhen(fullAt, now)}`, color: COLOR.danger }
-  if (empty === null) return { text: `${ICON.battery} —`, color: COLOR.ok }
-  if (empty > resetsAt) return { text: `${ICON.battery} ${formatWhen(empty, now)}`, color: COLOR.ok }
-  return { text: `${ICON.batteryAlert} ${formatWhen(empty, now)}`, color: COLOR.danger }
+function forecast(percent: number, resetsAt: number, empty: number | null, now: number, fullAt: number | undefined): Segment[] {
+  if (percent >= 100) return [{ text: `${ICON.batteryOut} ${fullAt === undefined ? '—' : formatWhen(fullAt, now)}`, color: COLOR.danger }]
+  if (empty !== null && empty <= resetsAt) return [{ text: `${ICON.batteryAlert} ${formatWhen(empty, now)}`, color: COLOR.danger }]
+  return [{ text: `${ICON.battery} `, color: COLOR.ok }, minor(empty === null ? '—' : formatWhen(empty, now))]
 }
 
 /** 5h、7d：进度条 百分比；第二行两列："󰑐 重置时刻"（次要色） | 预测"图标 时刻" */
@@ -292,7 +291,7 @@ function limitRow(kind: 'five_hour' | 'seven_day', limits: readonly RateLimit[],
   const empty = emptyAt(kind, percent, resetsAt, now, samples, base)
   const detail: Piece[] = [
     piece([{ text: `${ICON.reset} `, color: COLOR.icon }, minor(padEnd(formatWhen(resetsAt, now), RESET_WIDTH - cells(`${ICON.reset} `)))]),
-    piece([forecast(percent, resetsAt, empty, now, firstFull(samples, base)?.at)], minor(' '.repeat(GRID.gap))),
+    piece(forecast(percent, resetsAt, empty, now, firstFull(samples, base)?.at), minor(' '.repeat(GRID.gap))),
   ]
   return { key: kind, label, value: [meter(percent, `${Math.round(percent)}%`, inner)], detail }
 }
