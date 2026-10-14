@@ -238,7 +238,7 @@ async function totalHeight(ui: Mounted<'terminal', 'Pane'>) {
 // 面板内宽：开着别的面板时约 50 列，请求的 70 列，拖宽后 90 列
 const PANEL_WIDTHS = [50, 70, 90]
 
-test('框与框之间空一行（不画分隔线），我的消息和身份栏之间不空', async ($, on) => {
+test('框与框之间是一行细槽（不是空行），我的消息和身份栏之间没有', async ($, on) => {
   layoutEngine(on)
   await $.session.start(SESSION)
   await addAgents($, 1)
@@ -265,7 +265,7 @@ test('框与框之间空一行（不画分隔线），我的消息和身份栏�
     ])
     const gap = await ui.find({ key: 'gap:usage' })
     expect(gap?.props.height).toBe(1)
-    expect(flat(gap)).toBe('')
+    expect(flat(gap)).toBe('─'.repeat(70))
     await ui.unmount()
   }
 })

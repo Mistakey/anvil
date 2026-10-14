@@ -10,7 +10,9 @@ import type { ListId, PanelFold } from '../types'
 import type { Subcommand } from './command'
 import { earlierText, fitCount, fitRows } from './list'
 import type { Fit } from './list'
-import { COLOR, GRID, ICON, fitSegments, valueWidth } from './style'
+import { rail, still } from './live'
+import type { Live, Span } from './live'
+import { COLOR, GRID, ICON, edgeLine, fitSegments, valueWidth } from './style'
 import type { Segment } from './style'
 import { cells, fit, padStart } from './text'
 import type { GridRow } from './usage'
@@ -39,13 +41,18 @@ type Els = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'> & Partial<Pick<
  */
 export function bordered(
   els: Pick<Els, 'Box'>,
-  frame: { key: string; columns: number; grow?: boolean; box: RenderElement; head?: RenderElement | null; status?: RenderElement | null },
+  frame: { key: string; columns: number; grow?: boolean; box: RenderElement; edge?: RenderElement | null; head?: RenderElement | null; status?: RenderElement | null },
 ): RenderElement {
   const { Box } = els
   const id = frame.key
   return (
     <Box key={id} flexDirection="column" width={frame.columns} flexShrink={0} flexGrow={frame.grow ? 1 : 0}>
       {frame.box}
+      {frame.edge ? (
+        <Box key={`edge:${id}`} position="absolute" top={0} left={0}>
+          {frame.edge}
+        </Box>
+      ) : null}
       {frame.head ? (
         <Box key={`title:${id}`} position="absolute" top={0} left={2}>
           {frame.head}
@@ -63,20 +70,20 @@ export function bordered(
 export type SectionId = ListId | 'usage' | 'cache'
 
 /** hotkey：列表的展开键（spec D9 的 a / d / m），只有三个列表有 */
-/** color：标题的颜色，不给时是正文色（我的消息是中性的） */
-type Section = { id: SectionId; icon: string; title: string; color?: string; border: string; hotkey?: string }
+/** color：标题的颜色，不给时是正文色（我的消息是中性的）；glow：上边框的光从它起；border：侧边和下边 */
+type Section = { id: SectionId; icon: string; title: string; color?: string; glow: string; border: string; hotkey?: string }
 
 /**
- * 自上而下的固定顺序，框与框之间空一行；我的消息占满剩余高度，最下面还有三行身份栏（不带框），占原 statusline 的位置。
- * 标题用识别色原色、加粗；边框用同色相调暗到和线同一亮度的那一档，五个框的边框一样亮（anvil-k0t.46）。
- * 我的消息是中性的：标题正文色，边框线色
+ * 自上而下的固定顺序，框与框之间是一道细槽；我的消息占满剩余高度，最下面还有三行身份栏（不带框），占原 statusline 的位置。
+ * 标题用识别色原色、加粗；上边框从标题处的光渐暗到侧边，侧边和下边是识别色调暗的一档（anvil-k0t.47）。
+ * 我的消息是中性的：标题正文色，光和边框是中性灰
  */
 export const SECTIONS: readonly Section[] = [
-  { id: 'cache', icon: ICON.cache, title: '缓存', color: COLOR.cache, border: COLOR.cacheLine },
-  { id: 'usage', icon: ICON.usage, title: '用量', color: COLOR.usage, border: COLOR.usageLine },
-  { id: 'agents', icon: ICON.agents, title: '子 agent', color: COLOR.agents, border: COLOR.agentsLine, hotkey: 'a' },
-  { id: 'denials', icon: ICON.denials, title: '自动模式拒绝', color: COLOR.denials, border: COLOR.denialsLine, hotkey: 'd' },
-  { id: 'messages', icon: ICON.messages, title: '我的消息', border: COLOR.line, hotkey: 'm' },
+  { id: 'cache', icon: ICON.cache, title: '缓存', color: COLOR.cache, glow: COLOR.cache, border: COLOR.cacheLine },
+  { id: 'usage', icon: ICON.usage, title: '用量', color: COLOR.usage, glow: COLOR.usage, border: COLOR.usageLine },
+  { id: 'agents', icon: ICON.agents, title: '子 agent', color: COLOR.agents, glow: COLOR.agents, border: COLOR.agentsLine, hotkey: 'a' },
+  { id: 'denials', icon: ICON.denials, title: '自动模式拒绝', color: COLOR.denials, glow: COLOR.denials, border: COLOR.denialsLine, hotkey: 'd' },
+  { id: 'messages', icon: ICON.messages, title: '我的消息', glow: COLOR.messages, border: COLOR.messagesLine, hotkey: 'm' },
 ]
 
 /** 框的边框和左右内边距各占 1 格 */
@@ -127,6 +134,8 @@ export type PanelView = {
   identity?: RenderElement[]
   /** 按了列表的展开键，或焦点在标题、"更早的"那行上按了 Enter */
   onToggle: (id: ListId) => void
+  /** 动效：这次怎么画（live.tsx），和主会话回复的起止（细槽上的流光）；不给时静止 */
+  motion?: { live: Live; reply: Span | null }
 }
 
 const isList = (id: SectionId): id is ListId => id === 'messages' || id === 'denials' || id === 'agents'
@@ -179,6 +188,9 @@ function frame(els: Els, section: Section, body: SectionBody | undefined, column
   const taken = `${TITLE_IN_BORDER ? `  ${title}` : title}${section.hotkey && onPress ? 'a: ' : ''}`
   const status = body?.status && body.status.length > 0 ? fitSegments([{ text: ' ' }, ...body.status, { text: ' ' }], statusRoom(columns, taken)) : []
   const head = heading(els, section, title, onPress)
+  // 上边框整行自己画：标题处有光，往右渐暗（style.ts 的 edgeLine）；标题、计数再压在它上面
+  const titleEnd = 2 + cells(` ${section.hotkey && onPress ? 'a: ' : ''}${title} `)
+  const edge = TITLE_IN_BORDER ? <Text key={`edge:${section.id}`}>{segments(els, edgeLine(columns, titleEnd, section.glow, section.border))}</Text> : null
   // 嵌在边框上时左右各空一格；空格放在 Button 外面，引擎画的"a: "才紧挨着标题："╭─ a: 标题 ─"
   const inBorder = (
     <Box key={`head:${section.id}`}>
@@ -207,6 +219,7 @@ function frame(els: Els, section: Section, body: SectionBody | undefined, column
     columns,
     grow: isFill,
     box,
+    edge,
     head: TITLE_IN_BORDER ? inBorder : null,
     status: status.length > 0 ? <Text color={COLOR.secondary}>{segments(els, status)}</Text> : null,
   })
@@ -305,9 +318,9 @@ const fitFixed = (body: ListBody, limit: number): Fit => fitCount(body.items.len
 /**
  * 用量框、缓存框的两列的一项：名称定宽，值从同一列起。第二行起（细节、放不下折下去的块）
  * 各画成一行，名称那一列空着；一行一个元素，框的高度按元素数算（fitLists）。
- * tail：接在第一行字后面的元素（保活续期请求在路上时转动的图标）。
+ * tail：接在第一行字后面的元素（保活续期请求在路上时转动的图标）；first：换掉第一行的字（续期中"进行中"上的微光）。
  */
-export function gridRow(els: Els, row: GridRow, inner: number, tail?: RenderElement): RenderElement[] {
+export function gridRow(els: Els, row: GridRow, inner: number, tail?: RenderElement, first?: RenderElement): RenderElement[] {
   const { Box, Text } = els
   const width = valueWidth(inner, row.labelWidth)
   return row.lines.map((line, index) => (
@@ -316,7 +329,7 @@ export function gridRow(els: Els, row: GridRow, inner: number, tail?: RenderElem
         {index === 0 ? <Text wrap="truncate">{segments(els, fitSegments(row.label, row.labelWidth))}</Text> : null}
       </Box>
       <Box width={width} flexShrink={0}>
-        <Text wrap="truncate">{segments(els, line)}</Text>
+        {index === 0 && first ? first : <Text wrap="truncate">{segments(els, line)}</Text>}
         {index === 0 && tail ? tail : null}
       </Box>
     </Box>
@@ -378,30 +391,43 @@ export function drawPanel(els: Els, view: PanelView): RenderElement {
   const fillId: SectionId = expanded ?? 'messages'
   const { fits, room } = fitLists(view, expanded, fillId)
 
-  const drawn = SECTIONS.map(section => {
+  // 每个区块画成什么、占几行（细槽的行号按它累加：波前从上往下依次扫过）
+  const drawn = SECTIONS.map((section): { element: RenderElement; height: number } | null => {
     const id = section.id
     const isFill = id === fillId
-    if (!isList(id)) return frame(els, section, view.bodies[id], columns, isFill, `${section.icon} ${section.title}`, null)
+    if (!isList(id)) {
+      const body = view.bodies[id]
+      return { element: frame(els, section, body, columns, isFill, `${section.icon} ${section.title}`, null), height: (body?.rows.length ?? 0) + 2 }
+    }
     const toggle = () => view.onToggle(id)
     const list = view.lists[id]
     if (isHidden(id, list)) return null
-    if (expanded !== null && id !== expanded) return folded(els, section, list, columns, toggle)
+    if (expanded !== null && id !== expanded) return { element: folded(els, section, list, columns, toggle), height: 1 }
     const isExpanded = id === expanded
     const title = `${isExpanded ? '▾ ' : ''}${section.icon} ${section.title}`
-    if (!list) return frame(els, section, undefined, columns, isFill, title, toggle)
+    if (!list) return { element: frame(els, section, undefined, columns, isFill, title, toggle), height: 3 }
     const fitted = fits.get(id) ?? { start: 0, end: list.items.length }
     const status = isExpanded ? [...list.status, { text: ` · 按 ${section.hotkey} 收起` }] : list.status
     // 我的消息收起时占满剩余高度：按 room 收紧，不把身份栏挤出去
     const squeezed = isFill && !isExpanded && list.limit === 'fill' ? room : undefined
     const body = { status, rows: listRows(els, section, list, fitted, inner, isExpanded, toggle, squeezed) }
-    return frame(els, section, body, columns, isFill, title, toggle)
+    return { element: frame(els, section, body, columns, isFill, title, toggle), height: (isFill ? room : listHeight(list, fitted, isExpanded)) + 2 }
   })
 
-  // 框与框之间空一行（框自己有边框，再画线会叠成三道横线，anvil-k0t.46）；没画的区块不留空行
-  const spaced = drawn.flatMap((element, index) => {
-    if (element === null) return []
-    const gap = <Box key={`gap:${SECTIONS[index]?.id}`} width={columns} height={1} flexShrink={0} />
-    return [gap, element]
+  // 框与框之间是一道细槽（中间略亮、两端隐去的刻痕，不是第三条横线，anvil-k0t.47）；主会话回复中细槽上走流光。
+  // 没画的区块不留细槽
+  const motion = view.motion ?? { live: still(0), reply: null }
+  let row = 0
+  const spaced = drawn.flatMap((one, index) => {
+    if (one === null) return []
+    const gap = rail(els, motion.live, { key: `rail:${SECTIONS[index]?.id}`, row: row - 1, columns, span: motion.reply })
+    row += one.height + 1
+    return [
+      <Box key={`gap:${SECTIONS[index]?.id}`} width={columns} height={1} flexShrink={0}>
+        {gap}
+      </Box>,
+      one.element,
+    ]
   })
   return (
     <Box flexDirection="column" width={columns} minHeight={view.rows}>

@@ -52,6 +52,11 @@
   - 主题色名 `claude` 能用（画成 #d77757）；`Text` 的 `dimColor` 画成灰色 #999999，不是调暗原来的颜色。
   - plugin test 的 `$` 没有 `ui.fault`，造不出 Client 出错，退路只能测纯逻辑。
   - Agent 工具默认在后台跑子 agent：主会话那一轮在子 agent 运行时就结束了。
+  - 引擎的边框只有一种颜色（`borderColor`，没有分边的颜色）：要画渐变的上边框，在带边框的 Box 之后放一个绝对定位、`top={0} left={0}` 的整行 Text 压住引擎画的那一行，标题、计数再压在它上面（anvil-k0t.47，伪终端实测画得出）。
+  - Client 每格一个颜色、40ms 一拍在伪终端里画得出、跟得上（rail.tsx 一行 51–70 格、四五个 Client 同时走，anvil-k0t.47）；相邻同色并段、颜色取到固定档数，一帧只有十几个节点。
+  - plugin test 里 `ui.advance(ms)` 按 Client 自己 `every` 的拍子走整拍：40ms 一拍时走 144ms 只走 3 拍（120ms），断言帧要按拍子的整数倍算。
+  - plugin test 的 `ui.find({ key })` 找不到带 key 的 Text（Box、Button、Client 找得到）：要核对的元素包一层带 key 的 Box，或找 Client。
+  - 宽字后面占位的那一格要带上宽字的颜色和粗体：相邻同样式并段时，占位格样式不同会把一段字（如"中→英"）拆成几个 Text。
 
 ### 事件、状态与工具链
 

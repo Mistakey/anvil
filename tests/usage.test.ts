@@ -222,14 +222,13 @@ test('进度条四档颜色：低于 60% 绿，60–80% 黄，80–90% 橙，90%
     COLOR.danger,
   ])
   const rows = usageRows(WORKING, NOW, INNER)
+  // 百分比按四档；进度条按位置取热度色：填到哪，最后一格就和百分比同色一带
   const colorOf = (key: string, part: string) => rowOf(rows, key)?.lines[0]?.find(one => one.text.includes(part))?.color
-  expect([colorOf('five_hour', '━'), colorOf('five_hour', '%'), colorOf('seven_day', '━'), colorOf('seven_day', '%'), colorOf('context', '%')]).toEqual([
-    COLOR.warn,
-    COLOR.warn,
-    COLOR.ok,
-    COLOR.ok,
-    COLOR.warn,
-  ])
+  const lastFill = (key: string) => rowOf(rows, key)?.lines[0]?.filter(one => one.text.includes('━')).at(-1)?.color
+  expect([colorOf('five_hour', '%'), colorOf('seven_day', '%'), colorOf('context', '%')]).toEqual([COLOR.warn, COLOR.ok, COLOR.warn])
+  expect(colorOf('seven_day', '━')).toBe(COLOR.ok)
+  expect(colorOf('five_hour', '━')).toBe(COLOR.ok)
+  expect(lastFill('five_hour')).not.toBe(COLOR.ok)
 })
 
 // 面板可能停靠的宽度：请求的 70 列，开着别的面板（带页签）时更窄，拖宽后更宽

@@ -60,6 +60,9 @@ export type CacheView = {
 export type KeepaliveStop = { kind: 'limit' | 'reading' | 'error'; reason: string }
 
 /** 保活循环的读数，缓存框据此和设置、上下文一起定出保活状态 */
+/** 一件事从什么时候起、什么时候结束（还在发生时 until 为 null） */
+export type ActivitySpan = { since: number; until: number | null }
+
 export type KeepaliveView = {
   /** 这一段空闲里停下了；null 表示没停 */
   stopped: KeepaliveStop | null
@@ -303,8 +306,11 @@ declare module 'claude-code' {
       translateHidden: boolean
       /** 翻译框的状态 */
       translate: TranslateBox
-      /** 主会话正在回复（这一轮的第一次请求到这一轮结束）时，这一段从哪一刻起（`$.clock.now()` 的毫秒）：面板的分隔线从这一刻起呼吸；没在回复时为 null */
-      replying: number | null
+      /**
+       * 正在发生的几件事各自的起止（`$.clock.now()` 的毫秒；还在发生时 until 为 null，结束后留着，落定要用）：
+       * 主会话回复（这一轮的第一次请求到这一轮结束，子 agent 的不算）、保活续期请求、翻译。动效按它画（spec D10「流光」）
+       */
+      activity: { reply: ActivitySpan | null; keep: ActivitySpan | null; translate: ActivitySpan | null }
       /** 面板里焦点所在元素的 key（ui.focus 的 element）；面板没有焦点时不看它 */
       focusKey: string | null
       /** 出过错（ui.fault）的 Client 模块文件名，如 `rail.tsx`；之后不再用它，退回静止 */
