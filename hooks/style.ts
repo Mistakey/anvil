@@ -26,7 +26,7 @@ export const COLOR = {
   pane: '#262626',
   /** 正在发生：所有进行中的 ◐、细槽上的呼吸；Claude 橙（引擎画自己的 spinner 用的也是它，主题色 claude 画成这个值） */
   active: '#d77757',
-  // 状态色：进度条热度、命中率、缓存有效 / 过期、预测、git 计数；一种颜色一个意思
+  // 状态色：进度条热度、命中率、预测、保活状态；一种颜色一个意思
   ok: '#8fbf7f',
   warn: '#d7bd6f',
   high: '#d79a6f',
@@ -44,8 +44,6 @@ export const COLOR = {
   /** 我的消息是中性的：标题正文色，光从浅灰起，侧边是中性灰 */
   messages: '#c8ccd4',
   messagesLine: '#777b82',
-  /** 身份栏的分支（git 的识别色） */
-  branch: '#b18bd0',
   /** 翻译框的上下两条线：和引擎画主输入框的线同色（伪终端实测），两条输入框看着是一家 */
   promptLine: '#888888',
 } as const
@@ -62,16 +60,7 @@ export const ICON = {
   battery: '\u{F0079}',
   batteryAlert: '\u{F0083}',
   batteryOut: '\u{F008E}',
-  // 身份栏
-  dir: '\u{F07C}',
-  branch: '\u{F418}',
-  detached: '\u{F417}',
-  worktree: '\u{F402}',
-  stash: '\u{F51E}',
-  lines: '\u{F440}',
-  pause: '\u{F04C}',
-  model: '\u{F4BC}',
-  /** 速度行（nf-fa-bolt） */
+  /** 身份栏的速度行（nf-fa-bolt） */
   speed: '\u{F0E7}',
   translate: '\u{F05CA}',
   done: '\u{F00C}',

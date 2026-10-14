@@ -2,7 +2,7 @@ import type { ModelForkResult, On } from 'claude-code'
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { cacheRows, formatExpired, hitColor } from '../hooks/cachebox'
+import { cacheRows, hitColor } from '../hooks/cachebox'
 import { freshCache, view } from '../hooks/cache'
 import type { Cache } from '../hooks/cache'
 import { IDLE_LIMIT_MS, PING_AFTER_MS, keepaliveStatus } from '../hooks/keepalive'
@@ -10,7 +10,6 @@ import type { LoopMemory } from '../hooks/keepalive'
 import { COLOR, GRID, ICON, valueWidth } from '../hooks/style'
 import type { Segment } from '../hooks/style'
 import { cells } from '../hooks/text'
-import { EMPTY_USAGE, usageRows } from '../hooks/usage'
 import type { GridRow } from '../hooks/usage'
 import type { CacheView, Settings } from '../types'
 import { SESSION, WARM, anvil, drain, stepInput, turnInput, typed, usage, world } from './world'
@@ -571,66 +570,33 @@ describe('缓存框', () => {
   /** 某一行的值 */
   const valueOf = (rows: GridRow[], key: string) => lineOf(rows.find(row => row.key === key))
 
-  test('三行：缓存图标 | 本会话命中率；● | 过期状态；保活。名称一列和用量框同宽', () => {
-    const rows = cacheRows(sample(), ENABLED, at(13, 20), 66)
-    expect(rows.map(row => row.key)).toEqual(['cache', 'state', 'keepalive'])
-    expect(rows.map(row => text(row.label))).toEqual([ICON.cache, '●', '保活'])
+  test('两行：缓存图标 | 本会话命中率；保活。过期状态交还 statusline', () => {
+    const rows = cacheRows(sample(), ENABLED, 66)
+    expect(rows.map(row => row.key)).toEqual(['cache', 'keepalive'])
+    expect(rows.map(row => text(row.label))).toEqual([ICON.cache, '保活'])
     expect(valueOf(rows, 'cache')).toBe('94%')
     expect(rows.every(row => row.labelWidth === GRID.label)).toBe(true)
   })
 
-  test('有效：● 有效绿，"过期"次要色、时刻正文色（好状态只给符号和状态词上色）；不是当天的写 HH:MM MM-DD', () => {
-    const [, state] = cacheRows(sample(), ENABLED, at(13, 20), 66)
-    expect(state?.label).toEqual([{ text: '●', color: COLOR.ok }])
-    expect(lineOf(state)).toBe('有效 · 过期 21:40')
-    expect(state?.lines[0]).toEqual([{ text: '有效', color: COLOR.ok }, { text: ' · ', color: COLOR.icon }, { text: '过期 ', color: COLOR.secondary }, { text: '21:40' }])
-    expect(valueOf(cacheRows(sample({ expiresAt: at(14, 0, 30) }), ENABLED, at(13, 23), 66), 'state')).toBe('有效 · 过期 00:30 10-14')
-  })
-
-  test('已过期：● 红，值"已过期 N 分钟"红，1 小时起写 N 小时 M 分钟', () => {
-    const expired = (now: number) => cacheRows(sample(), ENABLED, now, 66)[1]
-    expect(lineOf(expired(at(13, 21, 40)))).toBe('已过期 0 分钟')
-    expect(lineOf(expired(at(13, 22, 32)))).toBe('已过期 52 分钟')
-    expect(lineOf(expired(at(13, 22, 50)))).toBe('已过期 1 小时 10 分钟')
-    expect(lineOf(expired(at(14, 6, 52)))).toBe('已过期 9 小时 12 分钟')
-    expect(expired(at(13, 22, 50))?.label).toEqual([{ text: '●', color: COLOR.danger }])
-    expect(expired(at(13, 22, 50))?.lines[0]?.every(one => one.color === COLOR.danger)).toBe(true)
-    expect([59, 60, 61, 552].map(minutes => formatExpired(minutes * MIN + 30 * SEC))).toEqual(['59 分钟', '1 小时 0 分钟', '1 小时 1 分钟', '9 小时 12 分钟'])
-  })
-
-  test('还没有请求、刚压缩完：命中率写 —，● 那一行照画，"● —"（● 图标色、— 次要色），框始终三行', () => {
-    for (const rows of [cacheRows(view(freshCache()), ENABLED, at(13, 20), 66), cacheRows(sample({ compacted: true }), ENABLED, at(13, 22, 50), 66)]) {
-      expect(rows.map(row => row.key)).toEqual(['cache', 'state', 'keepalive'])
-      const state = rows[1]
-      expect(state?.label).toEqual([{ text: '●', color: COLOR.icon }])
-      expect(state?.lines[0]).toEqual([{ text: '—', color: COLOR.secondary }])
-    }
-    expect(valueOf(cacheRows(view(freshCache()), ENABLED, at(13, 20), 66), 'cache')).toBe('—')
+  test('还没有请求：命中率写 —', () => {
+    expect(valueOf(cacheRows(view(freshCache()), ENABLED, 66), 'cache')).toBe('—')
   })
 
   test('命中率：低于 80% 变黄、低于 50% 变红，图标是图标色；不写"命中率"和上一条', () => {
     expect([1, 0.8, 0.79, 0.5, 0.49, 0].map(hitColor)).toEqual([undefined, undefined, COLOR.warn, COLOR.warn, COLOR.danger, COLOR.danger])
-    const [hit] = cacheRows(sample({ hitRate: { last: 0.31, session: 0.72 } }), ENABLED, at(13, 20), 66)
+    const [hit] = cacheRows(sample({ hitRate: { last: 0.31, session: 0.72 } }), ENABLED, 66)
     expect(hit?.label).toEqual([{ text: ICON.cache, color: COLOR.icon }])
     expect(hit?.lines[0]).toEqual([{ text: '72%', color: COLOR.warn }])
-    const all = cacheRows(sample(), ENABLED, at(13, 23), 66).flatMap(row => [text(row.label), ...row.lines.map(text)]).join('\n')
+    const all = cacheRows(sample(), ENABLED, 66).flatMap(row => [text(row.label), ...row.lines.map(text)]).join('\n')
     for (const word of ['命中率', '上一条', '重建', '≈', 'tokens']) expect(all).not.toContain(word)
-  })
-
-  test('缓存框和用量框的值从同一列起', () => {
-    for (const inner of [46, 47, 66]) {
-      const cache = cacheRows(sample(), ENABLED, at(13, 20), inner)
-      const usage = usageRows(EMPTY_USAGE, at(13, 20), inner)
-      expect(new Set([...cache, ...usage].map(row => row.labelWidth))).toEqual(new Set([GRID.label]))
-    }
   })
 
   test('窄到放不下时各行整块折到下一行，长的保活状态逐行折下去，都不出现 …', () => {
     const stopped: Segment = { text: '已停止（续期请求出错：connect ECONNREFUSED 127.0.0.1:443）', color: COLOR.danger }
     for (const columns of [40, 46, 50, 51, 52, 60, 70, 90]) {
       const inner = columns - 4
-      for (const now of [at(13, 20), at(14, 6, 52)]) {
-        const rows = cacheRows(sample({ hitRate: { last: 1, session: 1 } }), stopped, now, inner)
+      {
+        const rows = cacheRows(sample({ hitRate: { last: 1, session: 1 } }), stopped, inner)
         const lines = rows.flatMap(row => row.lines.map(text))
         expect(lines.join(' / '), `${columns} 列`).not.toContain('…')
         for (const line of lines) expect(cells(line) <= valueWidth(inner), `${columns} 列：${line}`).toBe(true)
@@ -674,8 +640,8 @@ describe('缓存框', () => {
     )
   })
 
-  test('终端上画出缓存框：三行，上边框右侧不放状态，和用量框的值同一列起，各种宽度下不超宽', async ($, on) => {
-    const w = engine(on, { forks: [] })
+  test('终端上画出缓存框：两行，上边框右侧不放状态，各种宽度下不超宽；过期状态交还 statusline', async ($, on) => {
+    engine(on, { forks: [] })
     await $.session.start(SESSION)
     await turn($)
     for (const columns of [70, 110, 51, 40]) {
@@ -683,27 +649,15 @@ describe('缓存框', () => {
       expect(await ui.find({ key: 'status:section:cache' })).toBeUndefined()
       const box = await ui.find({ key: 'box:cache' })
       const keys = (box?.children ?? []).map(one => (one as { props?: { key?: string } }).props?.key)
-      expect(keys, `${columns} 列`).toEqual(['row:cache', 'row:state', 'row:keepalive'])
-      for (const key of ['cache', 'state', 'keepalive', 'five_hour']) {
+      expect(keys, `${columns} 列`).toEqual(['row:cache', 'row:keepalive'])
+      for (const key of ['cache', 'keepalive']) {
         const row = await ui.find({ key: `row:${key}` })
         expect(row?.props.width).toBe(columns - 4)
         expect((row?.children[0] as { props?: { width?: number } } | undefined)?.props?.width).toBe(GRID.label)
       }
       expect(flat(await ui.find({ key: 'row:cache' }))).toBe(`${ICON.cache}100%`)
-      expect(flat(await ui.find({ key: 'row:state' }))).toBe('●有效 · 过期 21:00')
-      expect(await colorOf(ui, '有效')).toBe(COLOR.ok)
-      expect(await colorOf(ui, '过期 ')).toBe(COLOR.secondary)
-      expect(await colorOf(ui, '21:00')).toBeUndefined()
-      expect(await colorOf(ui, '●')).toBe(COLOR.ok)
+      expect(await ui.find({ key: 'row:state' })).toBeUndefined()
       await ui.unmount()
     }
-
-    // 过期后（保活在 50 分钟那次停下了）：写已过期时长，红
-    await w.clock.advance(2 * HOUR + 10 * MIN)
-    const ui = await $.ui.mount(pane(70))
-    expect(flat(await ui.find({ key: 'row:state' }))).toBe('●已过期 1 小时 10 分钟')
-    expect(await colorOf(ui, '已过期 1 小时 10 分钟')).toBe(COLOR.danger)
-    expect(await colorOf(ui, '●')).toBe(COLOR.danger)
-    await ui.unmount()
   })
 })

@@ -383,7 +383,7 @@ test('框与框之间是一道细槽（不是空行、也不是线）；没有�
   await $.session.start(SESSION)
   for (const columns of [50, 70, 90]) {
     const ui = await $.ui.mount(sized(columns))
-    for (const id of ['usage', 'messages']) {
+    for (const id of ['messages']) {
       const gap = await ui.find({ key: `gap:${id}` })
       expect(gap?.props, `${columns} 列 ${id}`).toMatchObject({ width: columns, height: 1 })
       expect(flat(gap)).toBe('─'.repeat(columns))
@@ -400,7 +400,7 @@ test('框与框之间是一道细槽（不是空行、也不是线）；没有�
   }
 })
 
-test('主会话回复中：细槽、模型名、速度行的图标一起呼吸，几处同相；钩子重画不清零、不重起', async ($, on) => {
+test('主会话回复中：细槽、速度行的图标一起呼吸；钩子重画不清零、不重起', async ($, on) => {
   const { clock } = engine(on)
   await $.session.start(SESSION)
   await replying($, clock)
@@ -409,21 +409,15 @@ test('主会话回复中：细槽、模型名、速度行的图标一起呼吸�
   const now = since + 500
   const ui = await $.ui.mount(sized(70))
   // 细槽：rail.tsx，带回复开始的时刻和画的时刻，没有相位零点、行号
-  const rail = await ui.find({ key: 'rail:usage' })
+  const rail = await ui.find({ key: 'rail:messages' })
   expect(rail?.props).toMatchObject({ module: 'hooks/rail.tsx', width: 70, props: { now, since, width: 70 } })
   expect(Object.keys((rail?.props.props as object) ?? {}).sort()).toEqual(['now', 'since', 'width'])
 
-  // 走到吸得最满的那一拍：细槽中段是粗线，宽度不变；两道细槽同一时刻画得一模一样（同相）
+  // 走到吸得最满的那一拍：细槽中段是粗线，宽度不变
   await ui.advance(toPeak(now) * STEP)
-  const drawn = flat(await ui.drawn({ in: 'rail:usage' }))
+  const drawn = flat(await ui.drawn({ in: 'rail:messages' }))
   expect(drawn).toMatch(/^─+╼━+╾─+$/)
   expect(cells(drawn)).toBe(70)
-  expect(textsOf(await ui.drawn({ in: 'rail:messages' }))).toEqual(textsOf(await ui.drawn({ in: 'rail:usage' })))
-
-  // 模型名：glow.tsx，lit 是 Claude 橙，亮的一档是光芯
-  const model = await ui.find({ key: 'glow:model' })
-  expect(model?.props).toMatchObject({ module: 'hooks/glow.tsx', props: { mode: 'breathe', lit: LIGHT.body, shine: LIGHT.core, now, since } })
-  expect(flat(await ui.drawn({ in: 'glow:model' }))).toBe('Opus 5.5')
 
   // 速度行：转动的 ◐，颜色跟着呼吸；读数退到次要色
   const spin = await ui.find({ key: 'spin:speed' })
@@ -445,13 +439,13 @@ test('主会话回复中：细槽、模型名、速度行的图标一起呼吸�
   expect(flat(await ui.drawn({ in: 'spin:speed' }))).toBe(spinGlyph(at + 2 * TURN))
 
   // 一口气之后回到原样：周期固定
-  const first = textsOf(await ui.drawn({ in: 'rail:usage' }))
+  const first = textsOf(await ui.drawn({ in: 'rail:messages' }))
   await ui.advance(BREATH.cycleMs)
-  expect(textsOf(await ui.drawn({ in: 'rail:usage' }))).toEqual(first)
+  expect(textsOf(await ui.drawn({ in: 'rail:messages' }))).toEqual(first)
   await ui.unmount()
 })
 
-test('回复结束：细槽暗下去，模型名落回正文色，新的读数和闪电图标从微光色落回原色；落定后一个 Client 都不剩', async ($, on) => {
+test('回复结束：细槽暗下去，新的读数和闪电图标从微光色落回原色；落定后一个 Client 都不剩', async ($, on) => {
   const { clock } = engine(on)
   await $.session.start(SESSION)
   await replying($, clock)
@@ -470,14 +464,12 @@ test('回复结束：细槽暗下去，模型名落回正文色，新的读数�
   // 刚结束：读数是微光色
   const first = textsOf(await ui.drawn({ in: 'glow:speed' }))
   expect(first[0]).toMatchObject({ text: ICON.speed, color: LIGHT.shine })
-  // 模型名、细槽还在落定、暗下去
-  expect((await ui.find({ key: 'glow:model' }))?.props).toMatchObject({ props: { until: ended } })
-  expect((await ui.find({ key: 'rail:usage' }))?.props).toMatchObject({ props: { until: ended } })
+  // 细槽还在暗下去
+  expect((await ui.find({ key: 'rail:messages' }))?.props).toMatchObject({ props: { until: ended } })
   // Client 自己走完落定：画回原色
   await ui.advance(BREATH.settleMs + STEP)
   const settled = textsOf(await ui.drawn({ in: 'glow:speed' }))
   expect(settled[0]).toMatchObject({ text: ICON.speed, color: COLOR.icon })
-  expect(textsOf(await ui.drawn({ in: 'glow:model' })).map(one => one.color)).toEqual([undefined])
   // 面板下一次重画：一个 Client 都不剩，读数正文色
   await clock.advance(1000)
   await ui.redraw()
@@ -495,7 +487,7 @@ test('子 agent 的回复不算主会话在回复', async ($, on) => {
   await drain($.turn.step(stepInput({ agentId: 'ag1' })))
   const ui = await $.ui.mount(sized(70))
   expect(await ui.find({ key: 'spin:speed' })).toBeUndefined()
-  expect(await ui.find({ key: 'rail:usage' })).toBeUndefined()
+  expect(await ui.find({ key: 'rail:messages' })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -611,12 +603,12 @@ async function stillPanel($: Engine, ui: Mounted<'terminal', 'Pane'> | Mounted<'
   // 一个 Client 都没有
   expect(await ui.findAll({ type: 'Client' })).toEqual([])
   // 框间是静止的细槽
-  expect(flat(await ui.find({ key: 'gap:usage' }))).toBe('─'.repeat(columns))
+  expect(flat(await ui.find({ key: 'gap:messages' }))).toBe('─'.repeat(columns))
   // 运行中的子 agent：Button 里静止的 ◐ 和按 now 算的耗时
   expect(flat(await ui.find({ key: 'agent:1' }))).toMatch(/^◐ +核对读数 +Sonnet +5s$/)
 }
 
-test('没有 Client 的界面：◐ 静止、耗时随面板重画更新；回复中模型名直接是 Claude 橙、速度行是静止的 ◐', async ($, on) => {
+test('没有 Client 的界面：◐ 静止、耗时随面板重画更新；回复中速度行是静止的 ◐', async ($, on) => {
   const { clock } = engine(on)
   await $.session.start(SESSION)
   await $.agent.spawn(spawnInput('核对读数'))
@@ -625,7 +617,6 @@ test('没有 Client 的界面：◐ 静止、耗时随面板重画更新；回�
   const ui = await $.ui.mount(vscode(70))
   await stillPanel($, ui, 70)
   expect(flat(await ui.find({ key: 'identity:speed' }))).toMatch(/^◐/)
-  expect(textsOf(await ui.find({ key: 'identity:model' })).find(one => one.text === 'Opus 5.5')?.color).toBe(LIGHT.body)
   await clock.advance(3000)
   await ui.redraw()
   expect(flat(await ui.find({ key: 'agent:1' }))).toMatch(/^◐ +核对读数 +Sonnet +8s$/)
@@ -637,7 +628,7 @@ test('没有 Client 的界面：◐ 静止、耗时随面板重画更新；回�
 
 // ---------------------------------------------------------------- 框
 
-test('四个彩框：标题识别色加粗；侧边是识别色调暗的一档；上边框从标题处的光渐暗到侧边。我的消息中性', async ($, on) => {
+test('三个彩框：标题识别色加粗；侧边是识别色调暗的一档；上边框从标题处的光渐暗到侧边。我的消息中性', async ($, on) => {
   engine(on)
   await $.session.start(SESSION)
   await $.agent.spawn(spawnInput('核对读数'))
@@ -655,7 +646,6 @@ test('四个彩框：标题识别色加粗；侧边是识别色调暗的一档�
   const ui = await $.ui.mount(sized(70))
   const sections: [string, string, string, string][] = [
     ['cache', '缓存', COLOR.cache, COLOR.cacheLine],
-    ['usage', '用量', COLOR.usage, COLOR.usageLine],
     ['agents', '子 agent', COLOR.agents, COLOR.agentsLine],
     ['denials', '自动模式拒绝', COLOR.denials, COLOR.denialsLine],
     ['messages', '我的消息', COLOR.messages, COLOR.messagesLine],

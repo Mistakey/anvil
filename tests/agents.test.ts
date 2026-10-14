@@ -226,13 +226,13 @@ test('按 a 展开子 agent 列表：全部显示，我的消息收成一行，�
   expect(flat(await ui.find({ key: 'agent:1' }))).toMatch(/核对面板拖动宽度 +Haiku +47s$/)
   expect(await ui.find({ key: 'row:earlier:agents' })).toBeUndefined()
   expect(flat(await ui.find({ key: 'section:agents' }))).toContain('按 a 收起')
-  // 我的消息收成一行（不再是框），没有内容的自动模式拒绝照样不画，用量、缓存不变
+  // 我的消息收成一行（不再是框），没有内容的自动模式拒绝照样不画，缓存不变
   const messages = await ui.find({ key: 'section:messages' })
   expect(messages?.props.borderStyle).toBeUndefined()
   expect(await ui.find({ key: 'box:messages' })).toBeUndefined()
   expect(flat(messages)).toMatch(/^▸ \S+ 我的消息 ─+ 0 条$/)
   expect(await ui.find({ key: 'section:denials' })).toBeUndefined()
-  expect((await ui.find({ key: 'box:usage' }))?.props.borderStyle).toBe('round')
+  expect((await ui.find({ key: 'box:cache' }))?.props.borderStyle).toBe('round')
 
   await ui.press({ key: 'list:agents' })
   expect(await ui.find({ key: 'agent:2' })).toBeUndefined()

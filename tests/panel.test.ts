@@ -152,7 +152,7 @@ test('标题和右上角状态是带边框的框之后的兄弟节点，绝对�
   await $.agent.spawn(spawnInput('核对缓存读数'))
   const ui = await $.ui.mount(PANE_70)
   const keys = (await ui.findAll({ type: 'Box' })).map(one => one.key)
-  for (const [id, title] of [['messages', '我的消息'], ['agents', '子 agent'], ['usage', '用量'], ['cache', '缓存']]) {
+  for (const [id, title] of [['messages', '我的消息'], ['agents', '子 agent'], ['cache', '缓存']]) {
     expect((await ui.find({ key: `box:${id}` }))?.props.borderStyle).toBe('round')
     // 标题不在带边框的框里面，在它后面
     expect(flat(await ui.find({ key: `box:${id}` }))).not.toContain(` ${title} `)
@@ -248,10 +248,10 @@ async function heightOf(ui: Mounted<'terminal', 'Pane'>, id: string) {
   return (await ui.find({ key: `section:${id}` })) ? 1 : 0
 }
 
-/** 整个面板占的行数：各区块、区块之间的空行，加上身份栏的三行 */
+/** 整个面板占的行数：各区块、区块之间的空行，加上身份栏的一行 */
 async function totalHeight(ui: Mounted<'terminal', 'Pane'>) {
   let total = 0
-  for (const id of ['cache', 'usage', 'agents', 'denials', 'messages']) total += await heightOf(ui, id)
+  for (const id of ['cache', 'agents', 'denials', 'messages']) total += await heightOf(ui, id)
   const boxes = await ui.findAll({ type: 'Box' })
   const lines = boxes.filter(one => one.key?.startsWith('identity:') || one.key?.startsWith('gap:'))
   return total + lines.length
@@ -273,19 +273,15 @@ test('框与框之间是一行细槽（不是空行），我的消息和身份�
       .filter(key => /^section:[a-z]+$/.test(key) || key.startsWith('gap:') || key.startsWith('identity:'))
     expect(keys, String(expanded)).toEqual([
       'section:cache',
-      'gap:usage',
-      'section:usage',
       'gap:agents',
       'section:agents',
       'gap:denials',
       'section:denials',
       'gap:messages',
       'section:messages',
-      'identity:git',
-      'identity:model',
       'identity:speed',
     ])
-    const gap = await ui.find({ key: 'gap:usage' })
+    const gap = await ui.find({ key: 'gap:agents' })
     expect(gap?.props.height).toBe(1)
     expect(flat(gap)).toBe('─'.repeat(70))
     await ui.unmount()
@@ -309,7 +305,7 @@ test('终端上 50、70、90 列：全文没有 tok/s、≈、已重建、压缩
   }
 })
 
-test('框宽按面板内宽：50、70、90 列下五个框和框里的每一行都不超出面板', async ($, on) => {
+test('框宽按面板内宽：50、70、90 列下四个框和框里的每一行都不超出面板', async ($, on) => {
   layoutEngine(on)
   await $.session.start(SESSION)
   await addAgents($, 2)
@@ -322,7 +318,7 @@ test('框宽按面板内宽：50、70、90 列下五个框和框里的每一行�
       const width = one.props.width
       if (typeof width === 'number') expect(width <= columns, `${columns} 列 ${one.key}`).toBe(true)
     }
-    for (const id of ['cache', 'usage', 'agents', 'denials', 'messages']) {
+    for (const id of ['cache', 'agents', 'denials', 'messages']) {
       const box = await ui.find({ key: `box:${id}` })
       expect(box?.props.width, `${columns} 列 ${id}`).toBe(columns)
       for (const row of children(box)) {
@@ -334,7 +330,7 @@ test('框宽按面板内宽：50、70、90 列下五个框和框里的每一行�
   }
 })
 
-test('自上而下：缓存、用量、子 agent、自动模式拒绝、我的消息，身份栏在最底三行', async ($, on) => {
+test('自上而下：缓存、子 agent、自动模式拒绝、我的消息，身份栏在最底一行；用量框交还 statusline', async ($, on) => {
   layoutEngine(on)
   await $.session.start(SESSION)
   await addAgents($, 2)
@@ -342,9 +338,9 @@ test('自上而下：缓存、用量、子 agent、自动模式拒绝、我的�
   await addMessages($, 2)
   for (const columns of PANEL_WIDTHS) {
     const ui = await $.ui.mount(sized(columns))
-    expect(await order(ui), `${columns} 列`).toEqual(['cache', 'usage', 'agents', 'denials', 'messages', 'identity:git', 'identity:model', 'identity:speed'])
+    expect(await order(ui), `${columns} 列`).toEqual(['cache', 'agents', 'denials', 'messages', 'identity:speed'])
     // 内容都短、放得下：哪个区块都没有截断
-    for (const id of ['cache', 'usage', 'agents', 'denials', 'messages']) {
+    for (const id of ['cache', 'agents', 'denials', 'messages']) {
       expect(flat(await ui.find({ key: `section:${id}` })), `${columns} 列 ${id}`).not.toContain('…')
     }
     await ui.unmount()
@@ -356,7 +352,7 @@ test('子 agent、自动模式拒绝在本会话还没有内容时整个框不�
   await $.session.start(SESSION)
   for (const columns of PANEL_WIDTHS) {
     const ui = await $.ui.mount(sized(columns))
-    expect(await order(ui), `${columns} 列`).toEqual(['cache', 'usage', 'messages', 'identity:git', 'identity:model', 'identity:speed'])
+    expect(await order(ui), `${columns} 列`).toEqual(['cache', 'messages', 'identity:speed'])
     expect(await ui.find({ key: 'section:agents' })).toBeUndefined()
     expect(await ui.find({ key: 'section:denials' })).toBeUndefined()
     expect(await ui.find({ key: 'list:agents' })).toBeUndefined()
@@ -369,7 +365,7 @@ test('子 agent、自动模式拒绝在本会话还没有内容时整个框不�
   // 有了第一个子 agent 才画子 agent 框；拒绝框照样不画
   await addAgents($, 1)
   const ui = await $.ui.mount(sized(70))
-  expect(await order(ui)).toEqual(['cache', 'usage', 'agents', 'messages', 'identity:git', 'identity:model', 'identity:speed'])
+  expect(await order(ui)).toEqual(['cache', 'agents', 'messages', 'identity:speed'])
   await ui.unmount()
 })
 
@@ -426,8 +422,8 @@ test('我的消息占满剩余高度，身份栏贴底：各区块加身份栏�
   await addDenials($, 2)
   await addMessages($, 60)
   for (const columns of PANEL_WIDTHS) {
-    // 40 行：我的消息恰好剩 2 行（"更早的"一行加最新一条），再矮就放不下最新一条（用量框项间空行多占 3 行）
-    for (const bodyRows of [40, 48]) {
+    // 24 行：我的消息恰好剩 2 行（"更早的"一行加最新一条），再矮就放不下最新一条
+    for (const bodyRows of [24, 48]) {
       const ui = await $.ui.mount(sized(columns, bodyRows))
       expect(await totalHeight(ui), `${columns} 列 ${bodyRows} 行`).toBe(bodyRows)
       // 最新的一条在最下面
@@ -445,15 +441,15 @@ test('面板矮、最新一条消息有两行时：先收成一行，还放不�
   await addDenials($, 3)
   for (let n = 0; n < 4; n += 1) await $.session.append(appended(`第 ${n + 1} 条：${'这是一条很长的消息，用来把我的消息撑成两行。'.repeat(4)}`))
   for (const columns of PANEL_WIDTHS) {
-    // 39 行：别的区块和身份栏占 36 行，我的消息只剩 1 行；40 行剩 2 行；41 行剩 3 行，放得下"更早的"加两行的最新一条
-    for (const [bodyRows, lines] of [[39, 1], [40, 2], [41, 3]] as const) {
+    // 23 行：别的区块和身份栏占 20 行，我的消息只剩 1 行；24 行剩 2 行；25 行剩 3 行，放得下"更早的"加两行的最新一条
+    for (const [bodyRows, lines] of [[23, 1], [24, 2], [25, 3]] as const) {
       const ui = await $.ui.mount(sized(columns, bodyRows))
       expect(await totalHeight(ui), `${columns} 列 ${bodyRows} 行`).toBe(bodyRows)
-      expect(await order(ui), `${columns} 列 ${bodyRows} 行`).toEqual(['cache', 'usage', 'agents', 'denials', 'messages', 'identity:git', 'identity:model', 'identity:speed'])
+      expect(await order(ui), `${columns} 列 ${bodyRows} 行`).toEqual(['cache', 'agents', 'denials', 'messages', 'identity:speed'])
       const rows = children(await ui.find({ key: 'box:messages' }))
       expect(rows.reduce((sum, one) => sum + (one.props?.height ?? 1), 0), `${columns} 列 ${bodyRows} 行`).toBe(lines)
       expect(flat(rows.at(-1))).toContain('第 4 条')
-      expect(flat(rows[0]).includes('更早的'), `${columns} 列 ${bodyRows} 行`).toBe(bodyRows > 39)
+      expect(flat(rows[0]).includes('更早的'), `${columns} 列 ${bodyRows} 行`).toBe(bodyRows > 23)
       await ui.unmount()
     }
   }
@@ -483,7 +479,7 @@ test('按 a 展开子 agent：用我的消息让出的空间，其余收成一�
 
   const ui = await $.ui.mount(sized(70, 48, true))
   await ui.press({ key: 'list:agents' })
-  expect(await order(ui)).toEqual(['cache', 'usage', 'agents', 'denials', 'messages', 'identity:git', 'identity:model', 'identity:speed'])
+  expect(await order(ui)).toEqual(['cache', 'agents', 'denials', 'messages', 'identity:speed'])
   expect(await heightOf(ui, 'denials')).toBe(1)
   expect(await heightOf(ui, 'messages')).toBe(1)
   // 十个都放得下，全显示

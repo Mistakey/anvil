@@ -33,8 +33,7 @@ import { cacheRows } from './cachebox'
 
 import { answer, describe } from './command'
 import { addDenial, denialContent, denialList, denialSource } from './denials'
-import { EMPTY_IDENTITY, EMPTY_TALLY, GIT, NUMSTAT, REV_PARSE, STATUS, addTally, baseName, gitView, identityRows, operationOf, parseNumstat, parseRepo, parseStatus, requestSpeed, turnDurationRow } from './identity'
-import type { RebaseFiles } from './identity'
+import { EMPTY_IDENTITY, EMPTY_TALLY, addTally, identityRows, requestSpeed, turnDurationRow } from './identity'
 import type { Listed, Subcommand } from './command'
 import { describeInput } from './describe'
 import {
@@ -62,7 +61,7 @@ import { faultedModule, glowText, isLive, liveOf, spinAfter, toCells } from './l
 import type { Span } from './live'
 import { LIGHT } from './motion'
 import { NO_MESSAGES, addMessage, contentText, isMyMessage, messageList, reconcile, settleMessages, userTexts } from './messages'
-import { PANE, PANEL_SUBCOMMAND, drawPanel, gridRow, hidesPanel, innerWidth, spacedGridRows } from './panel'
+import { PANE, PANEL_SUBCOMMAND, drawPanel, gridRow, hidesPanel, innerWidth } from './panel'
 import { isShown, readSettings, sessionHiddenFor, shownText } from './settings'
 import { normalized, normalizing } from './shape'
 import { GRID } from './style'
@@ -85,9 +84,9 @@ import {
   typed,
 } from './translate'
 import type { Translation } from './translate'
-import { EMPTY_USAGE, HISTORY_KEYS, applyReading, parseHistory, parseResetsAt, recordSample, usageRows } from './usage'
-import type { GridRow, Histories, Reading } from './usage'
-import type { Denial, GitView, KeepaliveStop, ListId, Scrolled, Settings, SpeedTally, SubAgent, TurnSpeeds } from '../types'
+import { EMPTY_USAGE, HISTORY_KEYS, applyReading, parseHistory, parseResetsAt, recordSample } from './usage'
+import type { GridRow, Reading } from './usage'
+import type { Denial, KeepaliveStop, ListId, Scrolled, Settings, SpeedTally, SubAgent, TurnSpeeds } from '../types'
 
 // 模块结构（照 flightdeck 的 register.tsx / core.ts），引擎扫描源码的规则见 AGENTS.md Pitfalls「模块结构」：
 // - 所有 on(...) 都写在下面的 register 里；用到 `$` 的辅助函数写在本文件顶层（`$` 不能跨文件传）。
@@ -99,7 +98,7 @@ import type { Denial, GitView, KeepaliveStop, ListId, Scrolled, Settings, SpeedT
 //   执行写成带 args 匹配器的 command.run（只认子命令本身，敲一次切换一次），注册在兜底的 command.run 之前。
 // - 面板的区块（panel.tsx 的 SECTIONS）由各功能填内容：在 drawAnvilPanel 里把该区块的 SectionBody
 //   放进 bodies；三个列表（我的消息、自动模式拒绝、子 agent）交 ListBody 放进 lists，按上限截、
-//   "更早的"那行、展开和收成一行由 panel.tsx 按共同规则做（list.ts）。身份栏的三行交 identity，接在区块之后。
+//   "更早的"那行、展开和收成一行由 panel.tsx 按共同规则做（list.ts）。身份栏的一行交 identity，接在区块之后。
 // - 热重载不清 `$.state`，旧代码按旧形状写下的值还在：对象、列表形状的 atom 读写时合并到现在的形状上
 //   （`normalized(x, await read($, x))`、`update($, x, normalizing(x, …))`，形状写在 shape.ts）；新加或改了形状的 atom 同样处理。
 // - 主输入框上方的 band（AbovePrompt）只画翻译框（translate.tsx），不放别的功能。
@@ -289,24 +288,22 @@ async function keepaliveNow($: EngineInterface, settings: Settings) {
 
 // ---------------------------------------------------------------- 缓存框
 
-/** 缓存框随时刻变的部分要重画：过期那一刻改写"已过期"，之后每分钟更新过期时长 */
+/** 过期那一刻重画一次：保活状态跟着变（过期时长交还 statusline 后不再每分钟重画） */
 type Redraw = { timer: { cancel: () => void } | null }
-
-const EXPIRED_REDRAW_MS = 60 * 1000
 
 async function scheduleRedraw($: EngineInterface, cache: Cache, redraw: Redraw) {
   redraw.timer?.cancel()
   redraw.timer = null
   if (cache.expiresAt === 0 || cache.compacted) return
   const now = await $.clock.now()
-  const wait = now < cache.expiresAt ? cache.expiresAt - now : EXPIRED_REDRAW_MS
-  redraw.timer = $.clock.after(wait, () => {
+  if (now >= cache.expiresAt) return
+  redraw.timer = $.clock.after(cache.expiresAt - now, () => {
+    redraw.timer = null
     try {
       $.ui.invalidate('ui.render')
     } catch {
       // 没有界面（headless、plugin test）：不用重画
     }
-    void scheduleRedraw($, cache, redraw).catch(() => undefined)
   })
 }
 
@@ -317,6 +314,8 @@ async function cacheChanged($: EngineInterface, cache: Cache, loop: Loop, redraw
 }
 
 // ---------------------------------------------------------------- 用量框
+
+// 用量框暂不画（2026-10-14 交还 statusline，用户定）：读数和 5h、7d 的存档照记，等讨论用量估算时再定去留
 
 const usage = atom({ plugin: 'anvil', key: 'usage' } as const, EMPTY_USAGE)
 
@@ -337,16 +336,6 @@ async function recordHistories($: EngineInterface, reading: Reading) {
     const history = parseHistory(await $.store.get(HISTORY_KEYS[kind]))
     await $.store.set(HISTORY_KEYS[kind], recordSample(history, kind, resetsAt, { at, percent: limit.percentUsed }))
   }
-}
-
-/** 面板重画时读存档，预测的速度现算；读不到（plugin test 没接 store）就当没有存档 */
-async function readHistories($: EngineInterface): Promise<Histories> {
-  const histories: Histories = {}
-  for (const kind of ['five_hour', 'seven_day'] as const) {
-    const history = parseHistory(await $.store.get(HISTORY_KEYS[kind]).catch(() => undefined))
-    if (history !== null) histories[kind] = history
-  }
-  return histories
 }
 
 async function readUsage($: EngineInterface) {
@@ -440,96 +429,16 @@ async function scrollToMessage($: EngineInterface, id: string) {
 
 const identity = atom({ plugin: 'anvil', key: 'identity' } as const, EMPTY_IDENTITY)
 
-/** 正在读 git 时又要读：读完再读一次，不并发 */
-type GitRefresh = { isRunning: boolean; isWanted: boolean }
-
-/** 运行一条 git 命令；不在 git 里、git 不在、超时都当没有输出 */
-async function git($: EngineInterface, args: readonly string[]): Promise<string | null> {
-  const ran = await $.process.run([...GIT, ...args], { timeoutMs: 5000 }).catch(() => null)
-  return ran !== null && ran.exitCode === 0 ? ran.stdout : null
-}
-
-async function readText($: EngineInterface, path: string): Promise<string | undefined> {
-  const text = await $.fs.read(path).catch(() => undefined)
-  return typeof text === 'string' ? text.trim() : undefined
-}
-
-/** rebase 停下时的进度和原分支 */
-async function readRebase($: EngineInterface, gitDir: string, names: ReadonlySet<string>): Promise<RebaseFiles | null> {
-  if (names.has('rebase-merge')) {
-    const dir = `${gitDir}/rebase-merge`
-    const [step, total, headName] = await Promise.all([readText($, `${dir}/msgnum`), readText($, `${dir}/end`), readText($, `${dir}/head-name`)])
-    return { dir: 'rebase-merge', step, total, headName, isAm: false }
-  }
-  if (names.has('rebase-apply')) {
-    const dir = `${gitDir}/rebase-apply`
-    const [step, total, headName, isAm] = await Promise.all([
-      readText($, `${dir}/next`),
-      readText($, `${dir}/last`),
-      readText($, `${dir}/head-name`),
-      $.fs.exists(`${dir}/applying`).catch(() => false),
-    ])
-    return { dir: 'rebase-apply', step, total, headName, isAm }
-  }
-  return null
-}
-
-/** 不在 git 里时为 null */
-async function readGit($: EngineInterface): Promise<GitView | null> {
-  const repo = await git($, REV_PARSE)
-  const paths = repo === null ? null : parseRepo(repo)
-  if (!paths) return null
-  const [status, numstat, entries] = await Promise.all([git($, STATUS), git($, NUMSTAT), $.fs.list(paths.gitDir).catch(() => [])])
-  const names = new Set(entries.map(entry => entry.name))
-  const rebase = await readRebase($, paths.gitDir, names)
-  return gitView(paths, parseStatus(status ?? ''), numstat === null ? null : parseNumstat(numstat), operationOf(names, rebase), rebase)
-}
-
-async function refreshGit($: EngineInterface, refresh: GitRefresh) {
-  if (refresh.isRunning) {
-    refresh.isWanted = true
-    return
-  }
-  refresh.isRunning = true
-  try {
-    do {
-      refresh.isWanted = false
-      const [cwd, view] = await Promise.all([$.session.cwd(), readGit($)])
-      await update($, identity, normalizing(identity, current => ({ ...current, dir: baseName(cwd), git: view })))
-    } while (refresh.isWanted)
-  } finally {
-    refresh.isRunning = false
-  }
-}
-
-/**
- * 会话开始时还没有请求：模型取会话的，effort 先不写。mod 在第一次请求前拿不到实际的 effort
- * （`--effort`、模型默认值都看不到），第一次主会话请求后以请求带的为准（noteSpeed）
- */
-async function startIdentity($: EngineInterface, refresh: GitRefresh) {
-  const model = await $.session.model().catch(() => null)
-  await update($, identity, normalizing(identity, current => ({ ...current, model: current.model ?? model })))
-  await refreshGit($, refresh)
-}
-
-/** /model 切换了主会话的模型 */
-async function switchModel($: EngineInterface, model: string) {
-  await update($, identity, normalizing(identity, current => ({ ...current, model })))
-}
-
-/** 会改文件或运行命令的工具：调用完 git 状态可能变了 */
-const CHANGES_FILES = new Set(['Bash', 'PowerShell', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit'])
-
 const NO_TURN_SPEEDS: TurnSpeeds = { current: null, lines: {} }
 const turnSpeeds = atom({ plugin: 'anvil', key: 'turnSpeeds' } as const, NO_TURN_SPEEDS)
 
 /** 记着的收尾行最多这么多段，多了丢最早的 */
 const TURN_LINES = 500
 
-/** 主会话一次请求的模型、effort 和速度：算得出就计入本会话的合计和这一段的读数 */
+/** 主会话一次请求的速度：算得出就计入本会话的合计和这一段的读数 */
 async function noteSpeed($: EngineInterface, e: TurnStepInput, speed: SpeedTally | null) {
-  await update($, identity, normalizing(identity, current => ({ ...current, model: e.model, effort: e.effort ?? null, speed: speed ? addTally(current.speed, speed) : current.speed })))
   if (!speed) return
+  await update($, identity, normalizing(identity, current => ({ ...current, speed: addTally(current.speed, speed) })))
   await update($, turnSpeeds, normalizing(turnSpeeds, current => {
     const turn = current.current?.turnId === e.turnId ? current.current : null
     return {
@@ -706,8 +615,7 @@ async function notePanelClosed($: EngineInterface, settings: Settings, e: PaneCl
 
 async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderInput<'Pane'>) {
   const els = $.ui.resolve(e)
-  const [current, list, denied, mine, folding, now, who] = await Promise.all([
-    read($, usage).then(value => normalized(usage, value)),
+  const [list, denied, mine, folding, now, who] = await Promise.all([
     read($, agents).then(value => normalized(agents, value)),
     read($, denials).then(value => normalized(denials, value)),
     read($, messages).then(value => normalized(messages, value)),
@@ -715,21 +623,19 @@ async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderI
     $.clock.now(),
     read($, identity).then(value => normalized(identity, value)),
   ])
-  const [cached, keepalive, loop, live, doing, focused, histories] = await Promise.all([
+  const [cached, keepalive, loop, live, doing, focused] = await Promise.all([
     read($, cacheView).then(value => normalized(cacheView, value)),
     keepaliveNow($, settings),
     read($, keepaliveLoop).then(value => normalized(keepaliveLoop, value)),
     liveFor($, els, e.surface, now),
     readActivity($),
     read($, focusKey),
-    readHistories($),
   ])
   // 用户进了面板要按 Enter 时，列表里不该有已撤回的消息：画完核对一遍，有变化会再画
   if (e.props.isFocused) $.clock.after(0, () => void syncMessages($).catch(() => undefined))
   const columns = e.props.bodyColumns
   const inner = innerWidth(columns)
-  const usageBody = spacedGridRows(els, usageRows(current, now, inner, histories), inner)
-  // 保活的续期请求在路上："进行中"跟着呼吸亮暗，后面接转动的图标（缓存框第三行）
+  // 保活的续期请求在路上："进行中"跟着呼吸亮暗，后面接转动的图标（缓存框第二行）
   const keepRow = (row: GridRow) => {
     if (row.key !== 'keepalive' || !loop.inFlight) return gridRow(els, row, inner)
     const text = (row.lines[0] ?? []).flatMap(segment => toCells(segment.text, segment.color, segment.bold))
@@ -741,13 +647,11 @@ async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderI
     columns,
     rows: e.props.scroll.bodyRows,
     bodies: {
-      usage: { rows: usageBody },
-      cache: { rows: cacheRows(cached, keepalive, now, inner).flatMap(keepRow) },
+      cache: { rows: cacheRows(cached, keepalive, inner).flatMap(keepRow) },
     },
     lists: {
       messages: messageList(els, mine, { inner, focused: e.props.isFocused ? focused : null, onPress: id => void scrollToMessage($, id) }),
       denials: denialList(els, denied, { detail: folding.detail, inner, onPress: id => void pressDetail($, id) }),
-      // 子 agent 的行大约从第几行起：缓存框 5 行、细槽、用量框、细槽、上边框
       agents: agentList(els, list, { detail: folding.detail, now, inner, live, focused: e.props.isFocused ? focused : null, onPress: id => void pressDetail($, id) }),
     },
     fold: folding,
@@ -862,7 +766,6 @@ export const register: Register = (on, options) => {
   const cache = cacheState.freshCache()
   const loop = freshLoop()
   const redraw: Redraw = { timer: null }
-  const gitRefresh: GitRefresh = { isRunning: false, isWanted: false }
 
   on('session.start', async ($, e, next) => {
     await publishSettings($, settings)
@@ -872,7 +775,6 @@ export const register: Register = (on, options) => {
     await startLoop($, loop)
     await cacheChanged($, cache, loop, redraw, settings)
     await readUsage($)
-    await startIdentity($, gitRefresh).catch(() => undefined)
     await startPanel($, settings)
     await registerAnvil($)
     return next(e)
@@ -889,9 +791,8 @@ export const register: Register = (on, options) => {
       await resetSpeeds($).catch(() => undefined)
     }
     await cacheChanged($, cache, loop, redraw, settings)
-    // `$.state` 换了对话就清空：用量、模型和 git 都重新读，不等第一条消息
+    // `$.state` 换了对话就清空：用量重新读，不等第一条消息
     await readUsage($)
-    await startIdentity($, gitRefresh).catch(() => undefined)
     return result
   })
 
@@ -938,7 +839,6 @@ export const register: Register = (on, options) => {
       await cacheChanged($, cache, loop, redraw, settings)
       // 本会话花费在一轮结束时重新读
       await readUsage($)
-      await refreshGit($, gitRefresh).catch(() => undefined)
       // 按 Esc 打断时引擎可能把刚发的消息撤回到主输入框
       await syncMessages($).catch(() => undefined)
     } else {
@@ -956,16 +856,7 @@ export const register: Register = (on, options) => {
   on('tool.call', async ($, e, next) => {
     const ran = await next(e)
     if (e.agentId) await noteAgentCall($, e, e.agentId, ran).catch(() => undefined)
-    // 不等它读完，工具结果先交回去；子 agent 改的文件也算
-    if (CHANGES_FILES.has(String(e.tool))) void refreshGit($, gitRefresh).catch(() => undefined)
     return ran
-  })
-
-  // /model 切换：模型马上换，不等下一次请求；effort 照旧等请求带来
-  on('classic.PostModelSwitch', async ($, e, next) => {
-    const result = await next(e)
-    await switchModel($, e.to_model).catch(() => undefined)
-    return result
   })
 
   on('classic.PermissionDenied', async ($, e, next) => {
@@ -1006,8 +897,6 @@ export const register: Register = (on, options) => {
   on('prompt.submit', async ($, e, next) => {
     // 先补开面板，再过守卫：用户按了 Enter 就算用户请求，守卫拦下这条时面板照样打开（缓存框正好说明为什么拦）
     await reopenPanel($, settings, e).catch(() => undefined)
-    // 用户可能在别处运行过 git；不等它读完
-    void refreshGit($, gitRefresh).catch(() => undefined)
     if (settings.guard) {
       const drop = await guardSubmission($, cache, e, settings.threshold)
       if (drop !== null) return { drop }

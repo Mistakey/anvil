@@ -18,7 +18,7 @@ const GROUNDS = ['#262626', '#282a36']
 
 test('文字用的颜色在面板底色上都不低于 4.5:1；图标不低于 3:1；线比图标暗', () => {
   for (const ground of GROUNDS) {
-    for (const name of ['secondary', 'ok', 'warn', 'high', 'danger', 'cache', 'usage', 'agents', 'denials', 'branch', 'active'] as const) {
+    for (const name of ['secondary', 'ok', 'warn', 'high', 'danger', 'cache', 'usage', 'agents', 'denials', 'active'] as const) {
       expect(contrast(COLOR[name], ground), `${name} / ${ground}`).toBeGreaterThanOrEqual(4.5)
     }
     expect(contrast(COLOR.icon, ground), ground).toBeGreaterThanOrEqual(3)
