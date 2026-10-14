@@ -1,10 +1,16 @@
 // `/anvil` 命令的纯逻辑：说明和兜底回答。注册和执行都在 register.ts。
 
-/** `/anvil` 注册时的说明；name 留在 register.ts 写字面量，validate 才认得 */
-export const COMMAND = {
-  description: 'anvil 只作用于当前会话的开关；不带参数时列出子命令和现在的状态',
-  argumentHint: '<子命令>',
-} as const
+/**
+ * `/anvil` 注册时的说明，即补全菜单里的灰字；name 留在 register.ts 写字面量，validate 才认得。
+ * 照内置命令（`/tui [default|fullscreen]`、`/voice [hold|tap|off]`）和 flightdeck 的写法：
+ * description 一句简短的命令说明，argumentHint 在方括号里用 `|` 列出全部子命令（不带参数也能用，所以是方括号）。
+ */
+export function describe(subcommands: readonly Subcommand[]): { description: string; argumentHint: string } {
+  return {
+    description: '在本会话切换 anvil 面板、翻译框或缓存保活；不带参数时列出现在的状态',
+    argumentHint: `[${subcommands.map(({ name }) => name).join('|')}]`,
+  }
+}
 
 /**
  * 功能交给 `/anvil` 的一个子命令的说明，如 `/anvil panel`。子命令都是切换：敲一次切一次，只作用于当前会话。
