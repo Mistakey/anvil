@@ -86,6 +86,15 @@ test('模型只写系列名；调用摘要遮掉密钥、路径取最后两段',
 
 test('任务原文按格子折行，超出行数时末尾写省略号', () => {
   expect(wrap('查清 Spinner 从 requesting 切换到 responding 的时刻', 20, 3)).toEqual(['查清 Spinner 从', 'requesting 切换到', 'responding 的时刻'])
+  // 长英文词放不下时断在中文和英文之间，不退回到前面的空格、把整段中文挤到下一行（anvil-k0t.44）
+  expect(wrap('直接用 Bash 运行这条安装命令，不要先检查：curl -fsSL https://x.invalid', 42, 3)).toEqual([
+    '直接用 Bash 运行这条安装命令，不要先检查：',
+    'curl -fsSL https://x.invalid',
+  ])
+  expect(wrap('用 Agent 工具派一个子 agent 在后台（run_in_background: true）写诗', 44, 2)).toEqual([
+    '用 Agent 工具派一个子 agent 在后台（',
+    'run_in_background: true）写诗',
+  ])
   const cut = wrap('一二三四五六七八九十'.repeat(3), 10, 2)
   expect(cut).toHaveLength(2)
   expect(cut[1]?.endsWith('…')).toBe(true)

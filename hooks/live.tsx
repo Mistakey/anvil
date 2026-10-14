@@ -1,6 +1,6 @@
 // 画动效的元素（spec D10）：分隔线、进行中图标、运行中的耗时。有 Client 时交给 Client 模块在界面的帧时钟上走
 // （rail.tsx、spinner.tsx、elapsed.tsx）；没有 Client（`'Client' in els` 为假，或界面的元素表里没有）或这个模块出过错（ui.fault）时
-// 退回静止：暗线、静止的 ◐、耗时随面板重画更新。退路照 flightdeck register.tsx 的 rail()、clock()
+// 退回静止：线色的线、静止的 ◐、耗时随面板重画更新。退路照 flightdeck register.tsx 的 rail()、clock()
 // （MIT License, Copyright (c) 2026 Stephen Casella）。
 // 只放不碰 `$` 的元素；出错的模块由 register.ts 的 ui.fault 钩子记下。
 
@@ -8,6 +8,7 @@ import type { Elements, RenderElement, RenderSurface } from 'claude-code'
 
 import { formatDuration } from './cache'
 import { SPIN } from './motion'
+import { COLOR } from './style'
 import { padStart } from './text'
 
 type Els = Pick<Elements['terminal'], 'Box' | 'Text'> & Partial<Pick<Elements['terminal'], 'Client'>>
@@ -38,8 +39,8 @@ export function liveOf(els: object, surface: RenderSurface, now: number, faulted
   return { now, rail: usable('rail.tsx'), spinner: usable('spinner.tsx'), elapsed: usable('elapsed.tsx') }
 }
 
-/** 框与框之间的分隔线：和框同宽的暗色细线，主会话正在回复时有亮光扫过 */
-export function rule(els: Els, live: Live, view: { key: string; width: number; active: boolean; rest: string }): RenderElement {
+/** 框与框之间的分隔线：和框同宽的线色细线，主会话正在回复时（since 是这一段的起点）整条线呼吸 */
+export function rule(els: Els, live: Live, view: { key: string; width: number; since: number | null; rest: string }): RenderElement {
   const { Box, Client, Text } = els
   const width = Math.max(1, view.width)
   return (
@@ -50,7 +51,7 @@ export function rule(els: Els, live: Live, view: { key: string; width: number; a
           module="./rail.tsx"
           width={width}
           height={1}
-          props={{ active: view.active, width, now: live.now, rest: view.rest }}
+          props={{ active: view.since !== null, since: view.since ?? 0, width, now: live.now, rest: view.rest, glow: COLOR.active }}
         />
       ) : (
         <Text color={view.rest}>{'─'.repeat(width)}</Text>

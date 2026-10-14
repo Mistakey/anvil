@@ -152,10 +152,10 @@ export type StatusInput = { settings: Settings; override: boolean | null; contex
  * 已停止：空闲到上限为灰，读数不达标和出错为红；其余开着为绿，没开为灰。
  */
 export function keepaliveStatus({ settings, override, context, loop }: StatusInput): Segment {
-  if (override === false) return { text: '已关闭（本会话）', color: COLOR.muted }
-  if (loop.stopped) return { text: `已停止（${loop.stopped.reason}）`, color: loop.stopped.kind === 'limit' ? COLOR.muted : COLOR.danger }
-  if (override === null && !settings.autoKeepalive) return { text: '未启用（自动开启已关闭）', color: COLOR.muted }
-  if (override === null && context < settings.threshold) return { text: `未启用（低于 ${formatTokens(settings.threshold)}）`, color: COLOR.muted }
+  if (override === false) return { text: '已关闭（本会话）', color: COLOR.secondary }
+  if (loop.stopped) return { text: `已停止（${loop.stopped.reason}）`, color: loop.stopped.kind === 'limit' ? COLOR.secondary : COLOR.danger }
+  if (override === null && !settings.autoKeepalive) return { text: '未启用（自动开启已关闭）', color: COLOR.secondary }
+  if (override === null && context < settings.threshold) return { text: `未启用（低于 ${formatTokens(settings.threshold)}）`, color: COLOR.secondary }
   const mark = override ? '（本会话）' : ''
   return { text: `${loop.renewing ? '进行中' : '已启用'}${mark}`, color: COLOR.ok }
 }

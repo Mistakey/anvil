@@ -98,7 +98,7 @@ describe('自动开启', () => {
     await turn($, { usage: small })
     await w.clock.advance(2 * HOUR)
     expect(w.forks).toHaveLength(0)
-    expect(await keepaliveRow($)).toEqual({ text: '未启用（低于 50k）', color: COLOR.muted })
+    expect(await keepaliveRow($)).toEqual({ text: '未启用（低于 50k）', color: COLOR.secondary })
   })
 
   test('/config 关掉自动开启后不开', { options: { autoKeepalive: false } }, async ($, on) => {
@@ -168,7 +168,7 @@ describe('/anvil keepalive', () => {
 
     const off = await $.command.run(anvil('keepalive'))
     expect(off.text).toBe('缓存保活已关闭（本会话）')
-    expect(await keepaliveRow($)).toEqual({ text: '已关闭（本会话）', color: COLOR.muted })
+    expect(await keepaliveRow($)).toEqual({ text: '已关闭（本会话）', color: COLOR.secondary })
     await w.clock.advance(50 * MIN)
     expect(w.forks).toHaveLength(0)
     // 关着的时候，新的一轮也不开
@@ -267,7 +267,7 @@ describe('停下', () => {
     expect((await keepaliveRow($)).text).toBe('进行中')
 
     await w.clock.advance(1 * SEC)
-    expect(await keepaliveRow($)).toEqual({ text: '已停止（空闲超过 12 小时）', color: COLOR.muted })
+    expect(await keepaliveRow($)).toEqual({ text: '已停止（空闲超过 12 小时）', color: COLOR.secondary })
     await w.clock.advance(3 * HOUR)
     expect(w.forks).toHaveLength(14)
   })
@@ -293,7 +293,7 @@ describe('停下', () => {
     expect(w.forks).toHaveLength(28)
     expect((await keepaliveRow($)).text).toBe('进行中（本会话）')
     await w.clock.advance(1 * SEC)
-    expect(await keepaliveRow($)).toEqual({ text: '已停止（空闲超过 12 小时）', color: COLOR.muted })
+    expect(await keepaliveRow($)).toEqual({ text: '已停止（空闲超过 12 小时）', color: COLOR.secondary })
     await w.clock.advance(3 * HOUR)
     expect(w.forks).toHaveLength(28)
   })
@@ -449,20 +449,20 @@ describe('缓存框', () => {
     expect([59, 60, 61, 552].map(minutes => formatExpired(minutes * MIN + 30 * SEC))).toEqual(['59 分钟', '1 小时 0 分钟', '1 小时 1 分钟', '9 小时 12 分钟'])
   })
 
-  test('还没有请求、刚压缩完：命中率写 —，● 那一行照画，暗色"● —"，框始终三行', () => {
+  test('还没有请求、刚压缩完：命中率写 —，● 那一行照画，"● —"（● 图标色、— 次要色），框始终三行', () => {
     for (const rows of [cacheRows(view(freshCache()), ENABLED, at(13, 20), 66), cacheRows(sample({ compacted: true }), ENABLED, at(13, 22, 50), 66)]) {
       expect(rows.map(row => row.key)).toEqual(['cache', 'state', 'keepalive'])
       const state = rows[1]
-      expect(state?.label).toEqual([{ text: '●', color: COLOR.label }])
-      expect(state?.lines[0]).toEqual([{ text: '—', color: COLOR.label }])
+      expect(state?.label).toEqual([{ text: '●', color: COLOR.icon }])
+      expect(state?.lines[0]).toEqual([{ text: '—', color: COLOR.secondary }])
     }
     expect(valueOf(cacheRows(view(freshCache()), ENABLED, at(13, 20), 66), 'cache')).toBe('—')
   })
 
-  test('命中率：低于 80% 变黄、低于 50% 变红，图标暗色；不写"命中率"和上一条', () => {
+  test('命中率：低于 80% 变黄、低于 50% 变红，图标是图标色；不写"命中率"和上一条', () => {
     expect([1, 0.8, 0.79, 0.5, 0.49, 0].map(hitColor)).toEqual([undefined, undefined, COLOR.warn, COLOR.warn, COLOR.danger, COLOR.danger])
     const [hit] = cacheRows(sample({ hitRate: { last: 0.31, session: 0.72 } }), ENABLED, at(13, 20), 66)
-    expect(hit?.label).toEqual([{ text: ICON.cache, color: COLOR.label }])
+    expect(hit?.label).toEqual([{ text: ICON.cache, color: COLOR.icon }])
     expect(hit?.lines[0]).toEqual([{ text: '72%', color: COLOR.warn }])
     const all = cacheRows(sample(), ENABLED, at(13, 23), 66).flatMap(row => [text(row.label), ...row.lines.map(text)]).join('\n')
     for (const word of ['命中率', '上一条', '重建', '≈', 'tokens']) expect(all).not.toContain(word)
@@ -497,15 +497,15 @@ describe('缓存框', () => {
     const base = { settings: SETTINGS, override: null, context: 151000, loop: idle }
     expect(keepaliveStatus(base)).toEqual({ text: '已启用', color: COLOR.ok })
     expect(keepaliveStatus({ ...base, loop: { stopped: null, renewing: true, inFlight: false } })).toEqual({ text: '进行中', color: COLOR.ok })
-    expect(keepaliveStatus({ ...base, override: false })).toEqual({ text: '已关闭（本会话）', color: COLOR.muted })
-    expect(keepaliveStatus({ ...base, context: 32000 })).toEqual({ text: '未启用（低于 50k）', color: COLOR.muted })
+    expect(keepaliveStatus({ ...base, override: false })).toEqual({ text: '已关闭（本会话）', color: COLOR.secondary })
+    expect(keepaliveStatus({ ...base, context: 32000 })).toEqual({ text: '未启用（低于 50k）', color: COLOR.secondary })
     expect(keepaliveStatus({ ...base, settings: { ...SETTINGS, autoKeepalive: false } })).toEqual({
       text: '未启用（自动开启已关闭）',
-      color: COLOR.muted,
+      color: COLOR.secondary,
     })
     expect(keepaliveStatus({ ...base, loop: { stopped: { kind: 'limit', reason: '空闲超过 12 小时' }, renewing: true, inFlight: false } })).toEqual({
       text: '已停止（空闲超过 12 小时）',
-      color: COLOR.muted,
+      color: COLOR.secondary,
     })
     expect(keepaliveStatus({ ...base, loop: { stopped: { kind: 'reading', reason: '续期时缓存已过期' }, renewing: false, inFlight: false } })).toEqual({
       text: '已停止（续期时缓存已过期）',

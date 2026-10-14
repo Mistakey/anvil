@@ -52,6 +52,18 @@ export function padStart(text: string, width: number): string {
   return ' '.repeat(Math.max(0, width - cells(text))) + text
 }
 
+const isWide = (char: string) => cellsOf(char.codePointAt(0) ?? 0) === 2
+
+/** 一行字里最后一个能断开的位置（断在第 k 个字之前）：前一个是空格，或前后有一个是中文（全角）字；没有为 0 */
+function lastBreak(chars: readonly string[]): number {
+  for (let k = chars.length - 1; k > 0; k -= 1) {
+    const before = chars[k - 1] ?? ''
+    const after = chars[k] ?? ''
+    if (before === ' ' || isWide(before) || isWide(after)) return k
+  }
+  return 0
+}
+
 /**
  * 按格子折成至多 maxLines 行，空白压成一个空格；放不下时最后一行末尾换成 `…`。
  * 中文逐字折，英文单词尽量不拆开（单词比一行还长时照样拆）。
@@ -79,13 +91,17 @@ export function wrap(text: string, width: number, maxLines: number): string[] {
       used += size
       index += 1
     }
-    // 断在英文单词中间时退回到上一个空格
+    // 断在英文单词中间时退回到上一个能断的地方：空格后面，或中文（全角）字的前后。
+    // 只退到空格会把空格前的一大段中文也挤到下一行，上一行后半截空着（anvil-k0t.44）
     const next = chars[index] ?? ''
     const breaksWord = /\S/.test(next) && /[\x21-\x7e]$/.test(line) && /[\x21-\x7e]/.test(next)
-    const space = line.lastIndexOf(' ')
-    if (breaksWord && space > 0) {
-      index = [...line.slice(0, space)].length + 1
-      line = line.slice(0, space)
+    if (breaksWord) {
+      const kept = chars.slice(0, index)
+      const at = lastBreak(kept)
+      if (at > 0) {
+        index = at
+        line = kept.slice(0, at).join('')
+      }
     }
     lines.push(line.trimEnd())
     rest = chars.slice(index).join('').trimStart()

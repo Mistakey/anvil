@@ -3,6 +3,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { apiEndpoint, appendText, countWords, failed, startTranslating, typed, EMPTY_BOX } from '../hooks/translate'
+import { COLOR } from '../hooks/style'
 import { cells } from '../hooks/text'
 import { SESSION, anvil, world } from './world'
 import type { WorldOptions } from './world'
@@ -404,6 +405,11 @@ test('各种宽度下框占满 band、不超宽；框里有字时状态在输入
     // 只有上下两条边框：引擎按整个 band 宽给 Input 排版，左右边框会让长句放不下
     expect((await ui.find({ key: 'title:translate' }))?.text).toMatch(/^── .*中→英 ─+$/)
     expect(cells((await ui.find({ key: 'title:translate' }))?.text ?? '')).toBe(columns)
+    // 标题是正文色加粗，不沿用边框的颜色；失败时边框是调暗的红
+    const title = (await ui.findAll({ type: 'Text' })).find(one => one.text.endsWith('中→英'))
+    expect(title?.props.bold).toBe(true)
+    expect(title?.props.color).toBeUndefined()
+    expect((await ui.find({ key: 'rule:translate' }))?.children?.[0]).toMatchObject({ props: { color: COLOR.dangerLine } })
     expect(cells((await ui.find({ key: 'rule:translate' }))?.text ?? '')).toBe(columns)
     const status = await ui.find({ key: 'status:translate' })
     // 挪到下面时折成几行，原因不截断

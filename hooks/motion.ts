@@ -1,27 +1,42 @@
 // 面板的动效（spec D10）：动只表示"正在发生"，没事时完全静止。
-// 分隔线上的扫光、进行中图标的转动、运行中子 agent 的耗时，都交给 Client 在界面自己的帧时钟上走，
+// 分隔线的呼吸、进行中图标的转动、运行中子 agent 的耗时，都交给 Client 在界面自己的帧时钟上走，
 // 只重画这一小块，面板不跟着重画。做法照 flightdeck 的 hooks/rail.tsx、hooks/elapsed.tsx
 // （MIT License, Copyright (c) 2026 Stephen Casella）。偏离：
-// - 相位按时钟算，不是各个 Client 自己数帧：钩子画面板时给同一个 now，几条线同一时刻扫在同一位置；
+// - 相位按时钟算，不是各个 Client 自己数帧：钩子画面板时给同一个 now，几条线同一时刻同一个颜色；
 // - 钩子给了新的 now 就把帧时钟的计时从这一刻重新起（follow）：flightdeck 只起一次计时，重画后多数出来的
 //   不到一拍会让耗时先多走一秒、下次重画再退回去（anvil-k0t.39 伪终端实测 8s → 7s）；
-// - 扫光是一段两端渐暗的亮光，不是 flightdeck 的「•●」点。
+// - 分隔线不跑点：整条线的颜色在线色和 Claude 橙之间慢慢起伏（呼吸，anvil-k0t.44 从三个候选里选定，
+//   取代原来的扫光），不是 flightdeck 的「•●」点。
 // 这里只放纯逻辑，Client 模块（rail.tsx、spinner.tsx、elapsed.tsx）和测试都从这里取。
 
-/** 扫光：一段 length 格的亮光，每 stepMs 往右走一格，扫出右端后从左端重来 */
-export const SWEEP = { stepMs: 110, length: 6 } as const
+/**
+ * 呼吸：主会话回复时，整条分隔线的颜色在线色和 Claude 橙之间起伏，periodMs 一个来回，stepMs 换一次颜色。
+ * 从线色起步、余弦缓动，颜色分 levels 级，相邻两帧颜色一样时不必重画
+ */
+export const BREATH = { stepMs: 100, periodMs: 2400, levels: 12 } as const
+
+/** clock 这一刻亮到几成（0 是线色，1 是 Claude 橙），按级取整；几条线同一时刻同一个值 */
+export function breathLevel(clock: number): number {
+  const phase = (Math.max(0, clock) % BREATH.periodMs) / BREATH.periodMs
+  const level = (1 - Math.cos(2 * Math.PI * phase)) / 2
+  return Math.round(level * BREATH.levels) / BREATH.levels
+}
+
+const channels = (hex: string) => [1, 3, 5].map(at => Number.parseInt(hex.slice(at, at + 2), 16))
+
+/** 两个 #rrggbb 之间取 t（0–1）处的颜色 */
+export function mix(from: string, to: string, t: number): string {
+  const a = channels(from)
+  const b = channels(to)
+  const amount = Math.min(1, Math.max(0, t))
+  return `#${a.map((value, index) => Math.round(value + ((b[index] ?? value) - value) * amount).toString(16).padStart(2, '0')).join('')}`
+}
+
+/** 分隔线在 clock 这一刻的颜色：rest 是线色，glow 是亮到最高时的颜色 */
+export const breathColor = (rest: string, glow: string, clock: number) => mix(rest, glow, breathLevel(clock))
 
 /** 进行中图标：四个半圆轮流，约 120ms 一格 */
 export const SPIN = { frames: ['◐', '◓', '◑', '◒'], stepMs: 120 } as const
-
-/** Claude 橙：引擎认主题色名 `claude`（伪终端里画成 #d77757），亮光的中段和最亮处用它 */
-export const GLOW = 'claude'
-
-/**
- * 亮光两端的暗橙：#d77757 和暗线 #5b5f67 各半。主题色名只有一档，Text 的 dimColor 在引擎里画成灰色 #999999
- * （anvil-k0t.39 伪终端实测），不是暗一些的橙，所以两端用固定色
- */
-export const GLOW_FADE = '#996b5f'
 
 /**
  * Client 里的时钟。钩子画面板时给 now（`$.clock.now()`）；两次重画之间 Client 每走一拍加一拍的时长。
@@ -53,43 +68,3 @@ export function spinGlyph(clock: number): string {
   return frames[Math.floor(Math.max(0, clock) / SPIN.stepMs) % frames.length] ?? frames[0]
 }
 
-/** 一格的亮度：rest 是暗线，low、mid、peak 由暗到亮 */
-export type Glow = 'rest' | 'low' | 'mid' | 'peak'
-
-/** 亮光自左到右各格的亮度：中间最亮、两端渐暗 */
-const SHAPE: readonly Glow[] = ['low', 'mid', 'peak', 'peak', 'mid', 'low']
-
-/**
- * 分隔线在 clock 这一刻各格的亮度。亮光的右端走到第 p 格（p 从 0 起，按拍数对一圈取余），
- * 一圈是 width + length 拍：亮光从左端外面进来，整段扫出右端后再从左端重来。
- */
-export function sweep(width: number, clock: number): Glow[] {
-  const cells: Glow[] = Array.from({ length: Math.max(0, width) }, () => 'rest')
-  const cycle = cells.length + SHAPE.length
-  if (cells.length === 0) return cells
-  const head = Math.floor(Math.max(0, clock) / SWEEP.stepMs) % cycle
-  SHAPE.forEach((glow, index) => {
-    const at = head - (SHAPE.length - 1) + index
-    if (at >= 0 && at < cells.length) cells[at] = glow
-  })
-  return cells
-}
-
-/** 连续同亮度的格子合成一段，一帧只有几个 Text */
-export function runs(cells: readonly Glow[]): { glow: Glow; size: number }[] {
-  const out: { glow: Glow; size: number }[] = []
-  for (const glow of cells) {
-    const last = out[out.length - 1]
-    if (last && last.glow === glow) last.size += 1
-    else out.push({ glow, size: 1 })
-  }
-  return out
-}
-
-/** 一种亮度画成什么样：暗线用 rest 色；亮光用 Claude 橙，两端暗橙、中间加粗 */
-export function glowStyle(glow: Glow, rest: string): { color: string; bold?: true } {
-  if (glow === 'rest') return { color: rest }
-  if (glow === 'low') return { color: GLOW_FADE }
-  if (glow === 'peak') return { color: GLOW, bold: true }
-  return { color: GLOW }
-}

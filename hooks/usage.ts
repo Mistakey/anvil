@@ -77,7 +77,7 @@ export type GridSpec = { key: string; label: string | Segment[]; value: Piece[];
  */
 export function layoutRow(spec: GridSpec, inner: number, labelWidth: number = GRID.label, detailWidth?: number): GridRow {
   const width = valueWidth(inner, labelWidth)
-  const label = typeof spec.label === 'string' ? [{ text: spec.label, color: COLOR.label }] : spec.label
+  const label = typeof spec.label === 'string' ? [{ text: spec.label, color: COLOR.secondary }] : spec.label
   const room = detailWidth ?? width
   const detail = spec.detail ? flow(spec.detail, room, room) : []
   return { key: spec.key, label, labelWidth, lines: [...flow(spec.value, width, width), ...detail] }
@@ -88,8 +88,8 @@ const WINDOWS: Record<string, { label: string; ms: number }> = {
   seven_day: { label: '7d', ms: 7 * DAY },
 }
 
-/** 第二行的细节暗色 */
-const minor = (text: string): Segment => ({ text, color: COLOR.label })
+/** 第二行的细节：次要色 */
+const minor = (text: string): Segment => ({ text, color: COLOR.secondary })
 
 /** 进度条加右对齐的百分比，同色；三条进度条一样长，百分比上下对齐 */
 const meter = (percent: number, text: string, inner: number): Piece =>
@@ -264,7 +264,7 @@ function replayDay(percent: number, resetsAt: number, now: number, samples: read
   return now + ((100 - percent) * rate.span) / rate.used
 }
 
-/** 第二行左列"󰑐 重置时刻"的宽度：按最长的"󰑐 00:00 00-00"留，5h、7d 的右列起点相同 */
+/** 第二行左列"󰑐 重置时刻"的宽度：按最长的"󰑐 00:00 00-00"留，5h、7d 的右列起点相同；图标用图标色，时刻是次要文字 */
 const RESET_WIDTH = cells(`${ICON.reset} 00:00 00-00`)
 
 /**
@@ -278,7 +278,7 @@ function forecast(percent: number, resetsAt: number, empty: number | null, now: 
   return { text: `${ICON.batteryAlert} ${formatWhen(empty, now)}`, color: COLOR.danger }
 }
 
-/** 5h、7d：进度条 百分比；第二行两列：暗色"󰑐 重置时刻" | 预测"图标 时刻" */
+/** 5h、7d：进度条 百分比；第二行两列："󰑐 重置时刻"（次要色） | 预测"图标 时刻" */
 function limitRow(kind: 'five_hour' | 'seven_day', limits: readonly RateLimit[], now: number, inner: number, histories: Histories): GridSpec {
   const { label } = WINDOWS[kind] ?? { label: kind }
   const limit = limits.find(one => one.kind === kind)
@@ -291,7 +291,7 @@ function limitRow(kind: 'five_hour' | 'seven_day', limits: readonly RateLimit[],
   const { samples, base } = forecastSamples(kind, histories[kind], resetsAt)
   const empty = emptyAt(kind, percent, resetsAt, now, samples, base)
   const detail: Piece[] = [
-    piece([minor(padEnd(`${ICON.reset} ${formatWhen(resetsAt, now)}`, RESET_WIDTH))]),
+    piece([{ text: `${ICON.reset} `, color: COLOR.icon }, minor(padEnd(formatWhen(resetsAt, now), RESET_WIDTH - cells(`${ICON.reset} `)))]),
     piece([forecast(percent, resetsAt, empty, now, firstFull(samples, base)?.at)], minor(' '.repeat(GRID.gap))),
   ]
   return { key: kind, label, value: [meter(percent, `${Math.round(percent)}%`, inner)], detail }

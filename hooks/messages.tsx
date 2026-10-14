@@ -82,7 +82,7 @@ export const messageCount = (list: MyMessages) => [{ text: `${list.items.length}
 const messageLines = (text: string, inner: number) => wrap(text, Math.max(1, inner - COLUMN.seq - COLUMN.gap), COLUMN.lines)
 
 /**
- * 一条消息：整条是一个 Button，焦点移上去反白，Enter 让对话滚到这条消息。序号暗色、右对齐成一列；
+ * 一条消息：整条是一个 Button，焦点移上去反白，Enter 让对话滚到这条消息。序号次要色、右对齐成一列；
  * 第二行和正文对齐（悬挂缩进）。Button 里的字是连着排的，换行后从行首起，缩进只能自己补空格。
  */
 function messageRow(els: Els, message: MyMessage, seq: number, lines: string[], inner: number, onPress: () => void): RenderElement {
@@ -91,8 +91,8 @@ function messageRow(els: Els, message: MyMessage, seq: number, lines: string[], 
   return (
     <Box key={`row:message:${message.id}`} width={inner} height={lines.length} flexShrink={0}>
       <Button key={`message:${message.id}`} label={`第 ${seq} 条消息`} plain onPress={onPress}>
-        <Text color={COLOR.label}>{`${padStart(String(seq), COLUMN.seq)} `}</Text>
-        <Text color={COLOR.text}>{lines.join(`\n${indent}`)}</Text>
+        <Text color={COLOR.secondary}>{`${padStart(String(seq), COLUMN.seq)} `}</Text>
+        <Text>{lines.join(`\n${indent}`)}</Text>
       </Button>
     </Box>
   )
@@ -103,8 +103,12 @@ export function messageList(els: Els, list: MyMessages, view: { inner: number; o
   const items: ListItem[] = list.items.map((message, index) => {
     const lines = messageLines(message.text, view.inner)
     const shown = lines.length > 0 ? lines : ['']
-    const row = messageRow(els, message, list.dropped + index + 1, shown, view.inner, () => view.onPress(message.id))
-    return { key: message.id, rows: [row], height: shown.length }
+    const seq = list.dropped + index + 1
+    const press = () => view.onPress(message.id)
+    const row = messageRow(els, message, seq, shown, view.inner, press)
+    // 面板太矮、连最新一条的两行都放不下时，收成一行
+    const short = shown.length > 1 ? messageRow(els, message, seq, wrap(message.text, Math.max(1, view.inner - COLUMN.seq - COLUMN.gap), 1), view.inner, press) : undefined
+    return { key: message.id, rows: [row], height: shown.length, ...(short ? { short } : {}) }
   })
   return { status: messageCount(list), unit: '条', lead: COLUMN.seq, items, limit: 'fill', empty: '本会话还没有发过消息' }
 }

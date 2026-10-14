@@ -261,7 +261,7 @@ test('解析：rev-parse、status、numstat', () => {
   expect(parseNumstat(WORKING.numstat ?? '')).toEqual({ added: 312, deleted: 48 })
 })
 
-test('第一行配色：目录蓝、分支紫、领先琥珀、落后蓝、冲突红加粗、已暂存绿、⏸ 橙、行数绿红', () => {
+test('第一行配色：图标是图标色，分支紫；领先、落后、已修改黄，冲突红加粗、已暂存绿、⏸ 橙、行数绿红，状态色一种颜色一个意思', () => {
   const identity: Identity = {
     dir: 'anvil',
     git: {
@@ -271,17 +271,17 @@ test('第一行配色：目录蓝、分支紫、领先琥珀、落后蓝、冲�
     model: null, effort: null, tokensPerSecond: null, firstTokenMs: null, requestMs: null,
   }
   const colorOf = (needle: string) => gitLine(identity).find(segment => segment.text.includes(needle))
-  expect(colorOf(D)?.color).toBe(COLOR.usage)
+  expect(colorOf(D)?.color).toBe(COLOR.icon)
   expect(colorOf('main')?.color).toBe(COLOR.branch)
-  expect(colorOf('↑1')?.color).toBe(COLOR.ahead)
-  expect(colorOf('↓2')?.color).toBe(COLOR.usage)
+  expect(colorOf('↑1')?.color).toBe(COLOR.warn)
+  expect(colorOf('↓2')?.color).toBe(COLOR.warn)
   expect(colorOf('=1')).toMatchObject({ color: COLOR.danger, bold: true })
   expect(colorOf('+1')?.color).toBe(COLOR.ok)
-  expect(colorOf('!1')?.color).toBe(COLOR.ahead)
-  expect(colorOf('?1')?.color).toBe(COLOR.muted)
+  expect(colorOf('!1')?.color).toBe(COLOR.warn)
+  expect(colorOf('?1')?.color).toBe(COLOR.secondary)
   expect(colorOf('merge')).toMatchObject({ color: COLOR.high, bold: true })
-  expect(colorOf('+3')?.color).toBe(COLOR.added)
-  expect(colorOf('−4')?.color).toBe(COLOR.deleted)
+  expect(colorOf('+3')?.color).toBe(COLOR.ok)
+  expect(colorOf('−4')?.color).toBe(COLOR.danger)
 })
 
 // ---------------------------------------------------------------- 第二行：模型、effort；第三行：速度
@@ -311,17 +311,23 @@ test('token/s：输出 ÷ 首字到结束；缺时刻、跨度为零、没有输
   expect(tokensPerSecond(0, 0, 1000)).toBe(null)
 })
 
-test('第二行只有模型 · effort；第三行 token/s · 首字 · 用时，数值不着色', () => {
+test('第二行只有模型 · effort；第三行 token/s · 首字 · 用时，数值不着色、右对齐到定宽', () => {
   expect(text(modelLine(IDENTITY))).toBe(`${M} Opus 5.5 · high`)
   const line = speedLine(IDENTITY)
-  expect(text(line)).toBe(`${V} 68 token/s · 首字 1.5s · 用时 12.7s`)
-  for (const value of ['68', '1.5s', '12.7s']) expect(line.find(segment => segment.text === value)?.color).toBeUndefined()
+  expect(text(line)).toBe(`${V}  68 token/s · 首字  1.5s · 用时 12.7s`)
+  for (const value of [' 68', ' 1.5s', '12.7s']) expect(line.find(segment => segment.text === value)?.color).toBeUndefined()
+  // 数字变长变短时，"首字""用时"不挪位置
+  const at = (identity: Identity, word: string) => text(speedLine(identity)).indexOf(word)
+  for (const other of [{ ...IDENTITY, tokensPerSecond: 312, firstTokenMs: 12_700 }, { ...IDENTITY, tokensPerSecond: 9, firstTokenMs: 95_400 }]) {
+    expect(at(other, '首字')).toBe(at(IDENTITY, '首字'))
+    expect(at(other, '用时')).toBe(at(IDENTITY, '用时'))
+  }
 })
 
 test('第三行：还没有请求时写 —；缺的项不写', () => {
   const none: Identity = { ...IDENTITY, tokensPerSecond: null, firstTokenMs: null, requestMs: null }
   expect(text(speedLine(none))).toBe(`${V} —`)
-  expect(text(speedLine({ ...IDENTITY, tokensPerSecond: null }))).toBe(`${V} 首字 1.5s · 用时 12.7s`)
+  expect(text(speedLine({ ...IDENTITY, tokensPerSecond: null }))).toBe(`${V} 首字  1.5s · 用时 12.7s`)
 })
 
 test('秒数：不到 60 秒一位小数，60 秒起按 1m35s', () => {
@@ -355,17 +361,17 @@ test('会话开始时只有模型；每次主会话请求后写 effort、从首�
 
   // 首字前等了 2 秒不算进速度：400 tokens ÷ 8 秒；整次 10 秒
   await step($, clock, { turnId: 't1', index: 0, model: 'claude-opus-5-5', effort: 'high', messageCount: 3 })
-  expect(await lowerLines($)).toEqual([`${M} Opus 5.5 · high`, `${V} 50 token/s · 首字 2.0s · 用时 10.0s`])
+  expect(await lowerLines($)).toEqual([`${M} Opus 5.5 · high`, `${V}  50 token/s · 首字  2.0s · 用时 10.0s`])
 
   // 子 agent 的请求不计入：模型、effort、速度都不变
   timing.current = { firstMs: 500, streamMs: 1000, output: 900 }
   await step($, clock, { turnId: 't2', index: 0, model: 'claude-haiku-5-5', effort: 'low', messageCount: 3, agentId: 'ag1' })
-  expect(await lowerLines($)).toEqual([`${M} Opus 5.5 · high`, `${V} 50 token/s · 首字 2.0s · 用时 10.0s`])
+  expect(await lowerLines($)).toEqual([`${M} Opus 5.5 · high`, `${V}  50 token/s · 首字  2.0s · 用时 10.0s`])
 
   // 下一次主会话请求换了模型和 effort
   timing.current = { firstMs: 1500, streamMs: 4000, output: 360 }
   await step($, clock, { turnId: 't3', index: 0, model: 'claude-sonnet-5-5', effort: 'max', messageCount: 5 })
-  expect(await lowerLines($)).toEqual([`${M} Sonnet 5.5 · max`, `${V} 90 token/s · 首字 1.5s · 用时 5.5s`])
+  expect(await lowerLines($)).toEqual([`${M} Sonnet 5.5 · max`, `${V}  90 token/s · 首字  1.5s · 用时 5.5s`])
 })
 
 test('第二行：一启动就从会话设置写 effort（当前模型自己的设置优先），第一次请求后以请求的为准', async ($, on) => {
@@ -422,8 +428,10 @@ test('身份栏三行在面板最底（我的消息下面）；各种宽度下�
     const root = await ui.find({ key: 'identity:git' })
     expect(root?.props.width).toBe(columns)
     for (const key of ['identity:git', 'identity:model', 'identity:speed']) {
+      // 左边空 2 格：图标和框里的名称列、序号从同一列起；右边空 1 格，和框的右边线对齐
+      expect((await ui.find({ key }))?.props, key).toMatchObject({ paddingLeft: 2, paddingRight: 1 })
       const shown = flat(await ui.find({ key }))
-      expect(cells(shown) <= columns - 2, `${columns} 列 ${key}：${shown}`).toBe(true)
+      expect(cells(shown) <= columns - 3, `${columns} 列 ${key}：${shown}`).toBe(true)
     }
     const order = (await ui.findAll({ type: 'Box' })).map(one => one.key).filter(key => key?.startsWith('section:') || key?.startsWith('identity:'))
     expect(order.slice(-4)).toEqual(['section:messages', 'identity:git', 'identity:model', 'identity:speed'])

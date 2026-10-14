@@ -303,8 +303,8 @@ declare module 'claude-code' {
       translateHidden: boolean
       /** 翻译框的状态 */
       translate: TranslateBox
-      /** 主会话正在回复（这一轮的第一次请求到这一轮结束）：面板的分隔线上有亮光扫过 */
-      replying: boolean
+      /** 主会话正在回复（这一轮的第一次请求到这一轮结束）时，这一段从哪一刻起（`$.clock.now()` 的毫秒）：面板的分隔线从这一刻起呼吸；没在回复时为 null */
+      replying: number | null
       /** 面板里焦点所在元素的 key（ui.focus 的 element）；面板没有焦点时不看它 */
       focusKey: string | null
       /** 出过错（ui.fault）的 Client 模块文件名，如 `rail.tsx`；之后不再用它，退回静止 */

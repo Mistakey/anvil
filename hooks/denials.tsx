@@ -123,9 +123,9 @@ function denialRow(els: Els, denial: Denial, inner: number, onPress: () => void)
   return (
     <Box key={`row:denial:${denial.id}`} width={inner} flexShrink={0}>
       <Button key={`denial:${denial.id}`} label={`${denial.tool} ${text}`} plain onPress={onPress}>
-        <Text color={COLOR.dim}>{padEnd(clockTime(denial.at), COLUMN.time + COLUMN.gap)}</Text>
+        <Text color={COLOR.secondary}>{padEnd(clockTime(denial.at), COLUMN.time + COLUMN.gap)}</Text>
         <Text bold>{padEnd(fit(denial.tool, COLUMN.tool), COLUMN.tool + COLUMN.gap)}</Text>
-        <Text color={COLOR.muted}>{text}</Text>
+        <Text color={COLOR.secondary}>{text}</Text>
       </Button>
     </Box>
   )
@@ -138,7 +138,7 @@ function detailRow(els: Els, key: string, label: string, content: string, inner:
   return (
     <Box key={key} width={inner} flexShrink={0} paddingLeft={DETAIL.indent} columnGap={DETAIL.gap}>
       <Box width={DETAIL.label} flexShrink={0}>
-        <Text color={COLOR.muted}>{label}</Text>
+        <Text color={COLOR.secondary}>{label}</Text>
       </Box>
       <Box width={rest} flexShrink={0}>
         <Text wrap="truncate">{content}</Text>

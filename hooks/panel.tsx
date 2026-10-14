@@ -65,18 +65,19 @@ export function bordered(
 export type SectionId = ListId | 'usage' | 'cache'
 
 /** hotkey：列表的展开键（spec D9 的 a / d / m），只有三个列表有 */
-type Section = { id: SectionId; icon: string; title: string; color: string; border: string; hotkey?: string }
+/** color：标题的颜色，不给时是正文色（我的消息是中性的） */
+type Section = { id: SectionId; icon: string; title: string; color?: string; border: string; hotkey?: string }
 
 /**
  * 自上而下的固定顺序，框与框之间一条分隔线；我的消息占满剩余高度，最下面还有三行身份栏（不带框），占原 statusline 的位置。
- * 缓存、用量、子 agent、拒绝的边框和标题同色（标题加粗）；我的消息是中性的，边框用 muted
+ * 缓存、用量、子 agent、拒绝的边框和标题同色（标题加粗）；我的消息是中性的：标题正文色，边框次要色
  */
 export const SECTIONS: readonly Section[] = [
   { id: 'cache', icon: ICON.cache, title: '缓存', color: COLOR.cache, border: COLOR.cache },
   { id: 'usage', icon: ICON.usage, title: '用量', color: COLOR.usage, border: COLOR.usage },
   { id: 'agents', icon: ICON.agents, title: '子 agent', color: COLOR.agents, border: COLOR.agents, hotkey: 'a' },
   { id: 'denials', icon: ICON.denials, title: '自动模式拒绝', color: COLOR.denials, border: COLOR.denials, hotkey: 'd' },
-  { id: 'messages', icon: ICON.messages, title: '我的消息', color: COLOR.text, border: COLOR.muted, hotkey: 'm' },
+  { id: 'messages', icon: ICON.messages, title: '我的消息', border: COLOR.secondary, hotkey: 'm' },
 ]
 
 /** 框的边框和左右内边距各占 1 格 */
@@ -88,8 +89,9 @@ export type SectionBody = { status?: Segment[]; rows: RenderElement[] }
 /**
  * 列表的一项：第一行是它自己，展开详情时后面跟着详情的几行。
  * height：这一项占的行数，不给时是 rows 的个数（一个元素画成两行的消息给 2）。
+ * short：收成一行的画法（我的消息）；占满剩余高度的列表连最新一条都放不下时用它，免得把身份栏挤出面板。
  */
-export type ListItem = { key: string; rows: RenderElement[]; height?: number }
+export type ListItem = { key: string; rows: RenderElement[]; height?: number; short?: RenderElement }
 
 const heightOf = (item: ListItem) => Math.max(1, item.height ?? item.rows.length)
 
@@ -126,8 +128,8 @@ export type PanelView = {
   identity?: RenderElement[]
   /** 动效怎么画（live.tsx）；不给时一律静止 */
   live?: Live
-  /** 主会话正在回复：分隔线上有亮光扫过 */
-  isReplying?: boolean
+  /** 主会话正在回复时，这一段从哪一刻起：分隔线从这一刻起呼吸；没在回复时为 null */
+  replyingSince?: number | null
   /** 按了列表的展开键，或焦点在标题、"更早的"那行上按了 Enter */
   onToggle: (id: ListId) => void
 }
@@ -211,7 +213,7 @@ function frame(els: Els, section: Section, body: SectionBody | undefined, column
     grow: isFill,
     box,
     head: TITLE_IN_BORDER ? inBorder : null,
-    status: status.length > 0 ? <Text color={COLOR.muted}>{segments(els, status)}</Text> : null,
+    status: status.length > 0 ? <Text color={COLOR.secondary}>{segments(els, status)}</Text> : null,
   })
 }
 
@@ -233,7 +235,7 @@ function folded(els: Els, section: Section, body: ListBody | undefined, columns:
           {shownHead}
         </Text>
         <Text color={section.border}>{'─'.repeat(line)}</Text>
-        <Text color={COLOR.muted}>{shownTail}</Text>
+        <Text color={COLOR.secondary}>{shownTail}</Text>
       </Button>
     </Box>
   )
@@ -243,7 +245,7 @@ function folded(els: Els, section: Section, body: ListBody | undefined, columns:
 function earlierRow(els: Els, section: Section, body: ListBody, count: number, inner: number, isExpanded: boolean, onPress: () => void) {
   const { Box, Button, Text } = els
   const text = fit(`${padStart('▴', body.lead)} ${earlierText(count, body.unit, section.hotkey ?? '', isExpanded)}`, inner)
-  const line = <Text color={COLOR.muted}>{text}</Text>
+  const line = <Text color={COLOR.secondary}>{text}</Text>
   return (
     <Box key={`row:earlier:${section.id}`} width={inner} flexShrink={0}>
       {isExpanded ? (
@@ -257,21 +259,35 @@ function earlierRow(els: Els, section: Section, body: ListBody, count: number, i
   )
 }
 
+/**
+ * 占满剩余高度的列表只有 room 行时：最新一条放不下就收成一行（short），还放不下就不画"更早的"那一行。
+ * fitRows 至少画一项、哪怕它比 room 还高，超出的部分会把身份栏挤出面板（anvil-k0t.44 伪终端实测）
+ */
+function squeeze(items: readonly ListItem[], hasEarlier: boolean, room: number): { items: ListItem[]; hasEarlier: boolean } {
+  const total = (list: readonly ListItem[], earlier: boolean) => list.reduce((sum, item) => sum + heightOf(item), 0) + (earlier ? 1 : 0)
+  let shown = [...items]
+  const last = shown[shown.length - 1]
+  if (last?.short && heightOf(last) > 1 && total(shown, hasEarlier) > room) shown = [...shown.slice(0, -1), { key: last.key, rows: [last.short], height: 1 }]
+  return { items: shown, hasEarlier: hasEarlier && total(shown, hasEarlier) <= room }
+}
+
 /** 列表框里的行：按上限或剩余高度截，截掉的条数写在顶部；固定高度的列表收起时不满就在下面留空行 */
-function listRows(els: Els, section: Section, body: ListBody, fitted: Fit, inner: number, isExpanded: boolean, onPress: () => void): RenderElement[] {
+function listRows(els: Els, section: Section, body: ListBody, fitted: Fit, inner: number, isExpanded: boolean, onPress: () => void, room?: number): RenderElement[] {
   const { Box, Text } = els
   if (body.items.length === 0) {
     return [
-      <Text key={`empty:${section.id}`} color={COLOR.muted}>
+      <Text key={`empty:${section.id}`} color={COLOR.secondary}>
         {fit(body.empty, inner)}
       </Text>,
     ]
   }
-  const items = body.items.slice(fitted.start, fitted.end)
+  const sliced = body.items.slice(fitted.start, fitted.end)
+  const { items, hasEarlier } = room === undefined ? { items: sliced, hasEarlier: fitted.start > 0 } : squeeze(sliced, fitted.start > 0, room)
   const shown = items.flatMap(item => item.rows)
-  const rows = fitted.start > 0 ? [earlierRow(els, section, body, fitted.start, inner, isExpanded, onPress), ...shown] : shown
-  const drawn = items.reduce((sum, item) => sum + heightOf(item), 0) + (fitted.start > 0 ? 1 : 0)
-  const blank = Math.max(0, listHeight(body, fitted, isExpanded) - drawn)
+  const rows = hasEarlier ? [earlierRow(els, section, body, fitted.start, inner, isExpanded, onPress), ...shown] : shown
+  const drawn = items.reduce((sum, item) => sum + heightOf(item), 0) + (hasEarlier ? 1 : 0)
+  // 占满剩余高度的列表靠框的 flexGrow 撑满，不补空行
+  const blank = room === undefined ? Math.max(0, listHeight(body, fitted, isExpanded) - drawn) : 0
   const pads = Array.from({ length: blank }, (_, index) => <Box key={`pad:${section.id}:${index}`} width={inner} height={1} flexShrink={0} />)
   return [...rows, ...pads]
 }
@@ -325,7 +341,7 @@ export function spacedGridRows(els: Els, rows: readonly GridRow[], inner: number
  * 每个列表这次画出哪几项。占满剩余高度的只有一个：展开的列表；没有展开时是我的消息。
  * 其余区块的高度先算出来（没画的占 0 行，收成一行的占 1 行，框占内容加 2 行边框，区块之间的分隔线各占 1 行），剩下的给它。
  */
-function fitLists(view: PanelView, expanded: ListId | null, fillId: SectionId): Map<ListId, Fit> {
+function fitLists(view: PanelView, expanded: ListId | null, fillId: SectionId): { fits: Map<ListId, Fit>; room: number } {
   const fits = new Map<ListId, Fit>()
   const shown = SECTIONS.filter(section => !isHidden(section.id, isList(section.id) ? view.lists[section.id as ListId] : undefined))
   let used = (view.identity?.length ?? 0) + Math.max(0, shown.length - 1)
@@ -346,15 +362,15 @@ function fitLists(view: PanelView, expanded: ListId | null, fillId: SectionId): 
     used += (view.bodies[id]?.rows.length ?? 0) + 2
   }
   const fill = isList(fillId) ? view.lists[fillId] : undefined
+  const room = Math.max(1, view.rows - used - 2)
   if (isList(fillId) && fill) {
-    const room = Math.max(1, view.rows - used - 2)
     const isExpanded = expanded === fillId
     fits.set(
       fillId,
       !isExpanded && typeof fill.limit === 'number' ? fitFixed(fill, fill.limit) : fitRows(itemHeights(fill), room, isExpanded ? view.fold.scrolled : 0),
     )
   }
-  return fits
+  return { fits, room }
 }
 
 export function drawPanel(els: Els, view: PanelView): RenderElement {
@@ -365,7 +381,7 @@ export function drawPanel(els: Els, view: PanelView): RenderElement {
   const opened = view.fold.expanded
   const expanded = opened !== null && !isHidden(opened, view.lists[opened]) ? opened : null
   const fillId: SectionId = expanded ?? 'messages'
-  const fits = fitLists(view, expanded, fillId)
+  const { fits, room } = fitLists(view, expanded, fillId)
 
   const drawn = SECTIONS.map(section => {
     const id = section.id
@@ -380,7 +396,9 @@ export function drawPanel(els: Els, view: PanelView): RenderElement {
     if (!list) return frame(els, section, undefined, columns, isFill, title, toggle)
     const fitted = fits.get(id) ?? { start: 0, end: list.items.length }
     const status = isExpanded ? [...list.status, { text: ` · 按 ${section.hotkey} 收起` }] : list.status
-    const body = { status, rows: listRows(els, section, list, fitted, inner, isExpanded, toggle) }
+    // 我的消息收起时占满剩余高度：按 room 收紧，不把身份栏挤出去
+    const squeezed = isFill && !isExpanded && list.limit === 'fill' ? room : undefined
+    const body = { status, rows: listRows(els, section, list, fitted, inner, isExpanded, toggle, squeezed) }
     return frame(els, section, body, columns, isFill, title, toggle)
   })
 
@@ -388,7 +406,7 @@ export function drawPanel(els: Els, view: PanelView): RenderElement {
   const live = view.live ?? still(0)
   const spaced = drawn.flatMap((element, index) => {
     if (element === null) return []
-    const line = rule(els, live, { key: `rule:${SECTIONS[index]?.id}`, width: columns, active: view.isReplying === true, rest: COLOR.faint })
+    const line = rule(els, live, { key: `rule:${SECTIONS[index]?.id}`, width: columns, since: view.replyingSince ?? null, rest: COLOR.line })
     return [line, element]
   })
   return (
