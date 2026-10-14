@@ -48,13 +48,19 @@
   - `props` 里有 `undefined` 时整个 `ui.render` 被拒（"props holds undefined"），可选项不给就不带这个键。
   - `<Client module="./x.tsx">` 写在功能文件（非入口）里也认，validate 列在 surface modules；Client 模块可以 import 插件里别的文件（`spinner.tsx` 用 `motion.ts`）。plugin test 里 `find` 到的 `props.module` 是插件目录下的路径（`hooks/spinner.tsx`），`ui.drawn({ in: key })` 读它画的树，`ui.advance(ms)` 走它的帧时钟。
   - Button 里放不了 `Client`：绝对定位的 Box 放在 Button 之后能压在它的格子上，但焦点反白只反 Button 自己的字，压上去的 Client 不反白；用 `ui.focus` 钩子（`e.element` 是焦点落到的 key）记下焦点，让 Client 自己 `inverse`。
-  - flightdeck 的计时（`surface.every` 只在第一次起）配上每次重画给的新 now，耗时会先多走一秒、下次重画再退回（8s → 7s）；新 now 时把 `every` 停掉重起（`motion.ts` 的 `follow`）。
+  - surface 模块（Client 的 `module`）只在会话启动时载入：热重载不会补上新加的 Client 模块，屏幕上出现「Client hooks/x.tsx: the plugin loaded no surface module at that path」、退回静止。新加 Client 模块要开新会话验收（anvil-k0t.48，.47 的 rail.tsx 就是这样没加载上）。
+  - 计时照 flightdeck：`surface.every` 只在挂载时（state 还没有时）起一次，之后按固定节拍走。不要在钩子给了新的 now 时把 `every` 停掉重起（.39 到 .47 的 `follow`）：回复中面板重画频繁又不规律，计时一直被清零重起，动效卡住、跳（anvil-k0t.48）。flightdeck 的耗时在新 now 时重新数，计时没对齐 now，会先多走一秒、下次重画再退回（8s → 7s，anvil-k0t.39）；anvil 的耗时取墙上的第几秒。
+  - Client 里 `Date.now()`、`performance.now()` 都能用；真实会话里 `Date.now()` 和钩子的 `$.clock.now()` 是同一个时钟（伪终端探针，anvil-k0t.48）。plugin test 的 `mock.clock` 和 `ui.advance` 都不动 `Date`：Client 要按墙上时钟算时，先核对钩子给的 now 和 `Date.now()` 对得上，对不上（测试的假时钟）就只数拍。
+  - 几个 Client 模块 import 同一个文件时共用它的模块级状态（rail.tsx 和 spinner.tsx 改的是同一个对象，伪终端探针，anvil-k0t.48）：几处同一拍靠的就是 `motion.ts` 里共用的 pulse。
+  - 帧时钟把 `every(ms)` 凑成整帧：伪终端里 `every(110)` 实测约 123ms 一拍，只数拍会比墙上时钟慢 12%，后挂载的 Client 就和先挂载的不同相（anvil-k0t.48）。
+  - 引擎自己会整屏卡住：回复中从思考切到工具调用等时刻，Claude Code 自己的 spinner 和秒数也停 0.5–3 秒，Client 的 `every` 这时不走，mod 补不回来。伪终端里不加载插件跑同一条消息作对照，引擎自己的 spinner 一样有 0.5 秒的停顿（anvil-k0t.48）。
   - 主题色名 `claude` 能用（画成 #d77757）；`Text` 的 `dimColor` 画成灰色 #999999，不是调暗原来的颜色。
   - plugin test 的 `$` 没有 `ui.fault`，造不出 Client 出错，退路只能测纯逻辑。
   - Agent 工具默认在后台跑子 agent：主会话那一轮在子 agent 运行时就结束了。
   - 引擎的边框只有一种颜色（`borderColor`，没有分边的颜色）：要画渐变的上边框，在带边框的 Box 之后放一个绝对定位、`top={0} left={0}` 的整行 Text 压住引擎画的那一行，标题、计数再压在它上面（anvil-k0t.47，伪终端实测画得出）。
-  - Client 每格一个颜色、40ms 一拍在伪终端里画得出、跟得上（rail.tsx 一行 51–70 格、四五个 Client 同时走，anvil-k0t.47）；相邻同色并段、颜色取到固定档数，一帧只有十几个节点。
+  - Client 每格一个颜色、40ms 一拍在伪终端里画得出、跟得上（rail.tsx 一行 51–70 格、四五个 Client 同时走，anvil-k0t.47）；相邻同色并段、颜色取到固定档数，一帧只有十几个节点。anvil 现在 110ms 一拍（.48）。
   - plugin test 里 `ui.advance(ms)` 按 Client 自己 `every` 的拍子走整拍：40ms 一拍时走 144ms 只走 3 拍（120ms），断言帧要按拍子的整数倍算。
+  - plugin test 在机器忙（别的会话在跑）时会随机有测试 5 秒超时，每次挂的不是同一个；重跑一次核对（anvil-k0t.48）。
   - plugin test 的 `ui.find({ key })` 找不到带 key 的 Text（Box、Button、Client 找得到）：要核对的元素包一层带 key 的 Box，或找 Client。
   - 宽字后面占位的那一格要带上宽字的颜色和粗体：相邻同样式并段时，占位格样式不同会把一段字（如"中→英"）拆成几个 Text。
 

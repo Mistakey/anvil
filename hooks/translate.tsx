@@ -175,11 +175,11 @@ export type BandView = {
   onInput: (value: string) => void
   /** 动效怎么画（live.tsx）；不给时静止 */
   live?: Live
-  /** 这一次翻译的起止：翻译中上边框扫过亮光、"正在翻译"上滚过微光 */
+  /** 这一次翻译的起止：翻译中上边框和"正在翻译"跟着呼吸亮暗 */
   span?: Span | null
 }
 
-/** 翻译框的光：线亮一档（Claude Code 给主输入框的线也有这一档 promptBorderShimmer），字亮一档 */
+/** 翻译框的呼吸：线亮一档（Claude Code 给主输入框的线也有这一档 promptBorderShimmer），字亮一档 */
 const SHINE = { line: '#bdbdbd', text: '#d5d9e0' } as const
 
 const TITLE = `${ICON.translate} 中→英`
@@ -228,7 +228,7 @@ function statusText(els: Pick<Els, 'Text'>, key: string, text: string, color: st
 
 /**
  * 上边框：标题嵌在里面，和面板各框的标题对齐（`── 标题 ─…`）。标题是正文色加粗，不放进带线色的 Text 里
- * （嵌套的 Text 会沿用外层的颜色，标题就成了线色）；翻译中一点亮光扫过这条线（rail.tsx 的 glint）
+ * （嵌套的 Text 会沿用外层的颜色，标题就成了线色）；翻译中这条线从标题后面亮起、跟着呼吸涨落（rail.tsx 的 glint）
  */
 function topRule(els: Els, columns: number, color: string, live: Live, span: Span | null): RenderElement {
   const { Box } = els
@@ -237,7 +237,7 @@ function topRule(els: Els, columns: number, color: string, live: Live, span: Spa
   const line: Cell[] = [...toCells(lead, color), ...toCells(TITLE, undefined, true), ...toCells(` ${'─'.repeat(rest)}`, color)]
   return (
     <Box key="title:translate" width={columns} flexShrink={0}>
-      {glintLine(els, live, { key: 'line:translate', cells: line, columns, span, tint: SHINE.line })}
+      {glintLine(els, live, { key: 'line:translate', cells: line, columns, span, tint: SHINE.line, center: cells(lead) + cells(TITLE) + 1 })}
     </Box>
   )
 }
@@ -270,11 +270,8 @@ export function drawTranslateBox(els: Els, view: BandView): RenderElement {
           // 开头的符号另上色；正在翻译的 ◐ 原地换成转动的，后面的字宽度不变
           const live = view.live ?? still(0)
           const working = view.box.phase === 'working'
-          // 状态在输入框右侧时从这一列起，挪到下面时从行首起：光按 band 的格子走
-          const x = beside ? columns - cells(shown.text) : 0
-          const place = { row: beside ? 1 : 2, x, width: columns }
           const icon = working ? (
-            spin(els, live, { key: 'spin:translate', place })
+            spin(els, live, { key: 'spin:translate' })
           ) : (
             <Text key="head:translate" color={head.color}>
               {head.text}
@@ -288,9 +285,8 @@ export function drawTranslateBox(els: Els, view: BandView): RenderElement {
                 ? glowText(els, live, {
                     key: 'glow:translate',
                     cells: toCells(rest, shown.color),
-                    place: { ...place, x: x + cells(head.text) },
                     span: view.span ?? null,
-                    mode: 'shimmer',
+                    mode: 'breathe',
                     shine: SHINE.text,
                   })
                 : statusText(els, `status:${index}`, rest, shown.color)}

@@ -1,18 +1,17 @@
-// 面板的动效（spec D10，anvil-k0t.47「流光」）：事情正在发生时，一道光按同一个时钟从左往右扫过，
-// 经过的地方各自亮一下——框间的细槽上是一道会伸缩的流光（主会话回复中），正在干活的名字
-// （模型名、运行中的子 agent 任务、"进行中"、"正在翻译"）上滚过一段微光，进行中的图标在光到时亮一下，
-// 翻译框的上边框上扫过一点亮光；回复结束时速度行的读数和图标从 Claude 的微光色落回原色。没事时完全静止。
-// 光是一道斜的波前：每往下一行晚 10ms 出发，从上往下依次扫过。几处共用一个相位零点（主事件开始的时刻）。
-// 参照（anvil-k0t.47 调研）：
-// - Claude Code 的 spinner：微光是比本色亮一档的颜色（claude #d77757 → claudeShimmer #f59575），一段窗口滚过字，
-//   回复中 200ms 一字地慢慢走；颜色插值取到固定的档数，相邻帧颜色相同就不重画。
-// - Material 的不定进度条：头和尾用两条不同的缓动，走到中间时被拉长、到两头收短，像有速度的光。
-// - Charm harmonica / bubbles：起落都有缓动，出现、消失、落定都不是一下子；这里都用 ease-out。
-// - btop：渐变按位置着色（进度条的热度）；flightdeck rail：光走在一条暗线上，只重画在动的那一块（Client）。
-// Client 在界面自己的帧时钟上走，做法照 flightdeck 的 hooks/rail.tsx、hooks/elapsed.tsx
-// （MIT License, Copyright (c) 2026 Stephen Casella）。偏离：相位按时钟算（钩子给同一个 now 和 epoch），
-// 几块 Client 同一时刻同一相位；钩子给了新的 now 就从这一刻重新数（follow，anvil-k0t.39 的 8s → 7s）；
-// 动完就停掉自己的计时（halt），不空转。
+// 面板的动效（spec D10，anvil-k0t.48「呼吸」）：事情正在发生时，几处按同一口气一起呼吸，
+// 不歇、不断，固定节奏一直走，结束后静止——框间的细槽上一团 Claude 橙的光从中间涨开、收拢
+// （主会话回复中），正在干活的名字（模型名、运行中的子 agent 任务、"进行中"、"正在翻译"）从中间亮起、暗回，
+// 进行中的图标跟着亮暗，翻译框的上边框从标题处亮起；回复结束时速度行的读数和图标从 Claude 的微光色落回原色。
+// 取代 .47 的流光：流光一圈要歇 720ms、两头从框外进出，细槽上很长时间什么都没有，用户看着时有时停。
+// 参照：
+// - 呼吸灯：吸气快、呼气慢（吸 40%、呼 60%），两头都是缓的（升余弦），最低处不灭，看着一直在喘气；
+// - Claude Code 的 spinner：亮的一档是同色更亮（claude #d77757 → claudeShimmer #f59575），颜色插值取到固定档数；
+// - btop：沿线按位置着色——中间最亮、往两头渐暗进细槽，吸气时光铺开、线变粗，呼气时收拢。
+// 计时照 flightdeck 的 hooks/rail.tsx、hooks/elapsed.tsx（MIT License, Copyright (c) 2026 Stephen Casella）：
+// 每个 Client 挂载时起一次帧计时（`surface.every`），之后按固定节拍自己走，钩子重画不清零、不重起；
+// 时刻是挂载时钩子给的 now 加走过的拍数，相位按这个绝对时刻算，几处同相。偏离：节拍 110ms 同 flightdeck，
+// 一口气正好 24 拍，每拍相位前进一样多；真实会话里几个 Client 共用一个跟着墙上时钟的拍子（pulseTick），
+// 帧时钟慢了、引擎卡过之后一拍一拍追上，后挂载的 Client 也同一拍。
 // 这里只放纯逻辑，Client 模块（rail.tsx、glow.tsx、spinner.tsx、elapsed.tsx）、钩子和测试都从这里取。
 
 import { mix } from './color'
@@ -21,84 +20,69 @@ import { mix } from './color'
 export type Cell = { ch: string; color?: string; bold?: boolean; lit?: boolean }
 
 /**
- * 节奏。一圈 2880ms：光用 2160ms 从左扫到右，歇 720ms（伪终端实测，歇 1080ms 时加上缓入缓出的头尾，
- * 近一半时间细槽上什么都没有）；进行中图标 144ms 一格，一圈正好 20 格。
- * 帧时钟 40ms 一拍（25 帧/秒）：光一拍走一到三格，看着是连着的。
+ * 节奏。帧时钟 110ms 一拍（flightdeck 的 rail 也是）；一口气 2640ms，正好 24 拍，吸 40%、呼 60%。
+ * 出现、消失、落定都是整拍：440ms 亮起，660ms 暗下去、落定。
  */
-export const FLOW = {
-  stepMs: 40,
-  cycleMs: 2880,
-  sweepMs: 2160,
-  /** 流光的尾比头晚出发多少（占一趟的比例）：头尾两条缓动错开，走到中间时拉长 */
-  lag: 0.18,
-  /** 每往下一行晚出发多少：一道斜的波前 */
-  rowMs: 10,
-  /** 光从框外多远处出发、走到框外多远处 */
-  pad: 3,
-  /** 出现、消失、落定的时长 */
-  inMs: 360,
-  outMs: 480,
-  settleMs: 720,
-  /** 微光滚过一个词、图标亮一下的时长 */
-  shimmerMs: 1000,
-  pulseMs: 480,
+export const BREATH = {
+  stepMs: 110,
+  cycleMs: 2640,
+  inhale: 0.4,
+  inMs: 440,
+  outMs: 660,
+  settleMs: 660,
 } as const
 
-/** 进行中图标：四个半圆轮流，144ms 一格 */
-export const SPIN = { frames: ['◐', '◓', '◑', '◒'], stepMs: 144 } as const
+/** 进行中图标：四个半圆轮流，两拍一格（220ms），一口气正好转三圈 */
+export const SPIN = { frames: ['◐', '◓', '◑', '◒'], stepMs: 220 } as const
 
-/** 流光和微光的颜色：本色是 Claude 橙（"正在进行"），亮的一档同 Claude Code 自己的 claudeShimmer */
+/** 呼吸的颜色：本色是 Claude 橙（"正在进行"），亮一档同 Claude Code 自己的 claudeShimmer，最亮是光芯 */
 export const LIGHT = { body: '#d77757', shine: '#f59575', core: '#ffc6ad' } as const
 
 const clamp = (t: number) => Math.min(1, Math.max(0, t))
 const mod = (a: number, n: number) => ((a % n) + n) % n
 
-export const easeInOut = (t: number) => {
-  const x = clamp(t)
-  return x < 0.5 ? 4 * x * x * x : 1 - (-2 * x + 2) ** 3 / 2
-}
-
 export const easeOut = (t: number) => 1 - (1 - clamp(t)) ** 3
 
-/** 这一刻光在第 row 行走到哪：0 到 1 在走，null 在歇 */
-export function travel(clock: number, row: number): number | null {
-  const t = mod(clock - row * FLOW.rowMs, FLOW.cycleMs)
-  return t < FLOW.sweepMs ? t / FLOW.sweepMs : null
-}
+/** 这一刻在一口气里的哪里（0 到 1）：按绝对时刻算，几处同相 */
+export const phaseOf = (clock: number) => mod(clock, BREATH.cycleMs) / BREATH.cycleMs
 
-/** 走到 u 时光在第几格（可以是小数，可以在框外）：中间快、两头慢 */
-export const frontAt = (u: number, width: number) => -FLOW.pad + (width + 2 * FLOW.pad) * easeInOut(u)
-
-/** 流光的头尾：头先走，尾晚 lag 出发，两条缓动错开，中间最长 */
-export function streakAt(u: number, width: number): { tail: number; head: number } {
-  const span = 1 - FLOW.lag
-  return { head: frontAt(u / span, width), tail: frontAt((u - FLOW.lag) / span, width) }
+/**
+ * 这一刻吸到多满（0 到 1）：吸气 40%、呼气 60%，两段都是升余弦，顶上和底下都是缓的，接缝处不折
+ */
+export function breath(clock: number): number {
+  const t = phaseOf(clock)
+  const w = t < BREATH.inhale ? (0.5 * t) / BREATH.inhale : 0.5 + (0.5 * (t - BREATH.inhale)) / (1 - BREATH.inhale)
+  return (1 - Math.cos(2 * Math.PI * w)) / 2
 }
 
 /**
- * 出现和消失：since 起 360ms 亮起来，until 起 480ms 暗下去（都是 ease-out）；
+ * 沿线的明暗：center 处最亮，往两边按高斯渐暗。吸满时最亮处到 1、光铺开（σ 是 reach 的 44%）；
+ * 呼尽时最亮处还有 0.62、收拢到 20%：一直亮着，不灭（k0t.48 伪终端看过：0.42 时呼尽那几拍细槽几乎看不见）
+ */
+export function swell(x: number, center: number, reach: number, level: number): number {
+  const sigma = Math.max(0.5, (0.2 + 0.24 * level) * reach)
+  const peak = 0.62 + 0.38 * level
+  const d = (x + 0.5 - center) / sigma
+  return peak * Math.exp(-d * d)
+}
+
+/**
+ * 出现和消失：since 起 440ms 亮起来，until 起 660ms 暗下去（都是 ease-out）；
  * 没有 since 当作早就亮着，没有 until 当作还在发生
  */
 export function envelope(clock: number, since: number | null, until: number | null): number {
-  const rise = since === null ? 1 : easeOut((clock - since) / FLOW.inMs)
-  const fall = until === null ? 1 : 1 - easeOut((clock - until) / FLOW.outMs)
+  const rise = since === null ? 1 : easeOut((clock - since) / BREATH.inMs)
+  const fall = until === null ? 1 : 1 - easeOut((clock - until) / BREATH.outMs)
   return clamp(Math.min(rise, fall))
 }
 
 /** 还在动：没结束，或结束后还没暗完 */
-export const isMoving = (clock: number, until: number | null) => until === null || clock < until + FLOW.outMs
+export const isMoving = (clock: number, until: number | null) => until === null || clock < until + BREATH.outMs
 
-/** 落定：until 起 720ms 里从 1 落到 0（ease-out），之外是 0 */
+/** 落定：until 起 660ms 里从 1 落到 0（ease-out），之外是 0 */
 export function settle(clock: number, until: number | null): number {
   if (until === null || clock < until) return 0
-  return 1 - easeOut((clock - until) / FLOW.settleMs)
-}
-
-/** 光经过 x 时这一格亮多少：前沿陡、拖尾长（彗星），0 到 1 */
-function glow(x: number, front: number, ahead: number, behind: number): number {
-  const d = x - front
-  const sigma = d > 0 ? ahead : behind
-  return Math.exp(-((d / sigma) ** 2))
+  return 1 - easeOut((clock - until) / BREATH.settleMs)
 }
 
 /** 框间细槽（静止时就这么画）：中间略亮、两端隐进底色，看着是一道浅浅的刻痕，不是第三条横线 */
@@ -111,92 +95,72 @@ export function groove(width: number, background: string): Cell[] {
   })
 }
 
+/** 亮度到颜色：细槽 → Claude 橙（0.5）→ 微光色（0.82）→ 光芯（1） */
+function ember(from: string, k: number): string {
+  if (k < 0.5) return mix(from, LIGHT.body, k / 0.5)
+  if (k < 0.82) return mix(LIGHT.body, LIGHT.shine, (k - 0.5) / 0.32)
+  return mix(LIGHT.shine, LIGHT.core, (k - 0.82) / 0.18)
+}
+
+/** 亮过这一档的格子画粗线：呼尽时中间也留三四格粗线 */
+const HEAVY = 0.6
+
 /**
- * 细槽上的流光：头是粗线、亮，往尾渐细渐暗，两端用半格（╸ ╶）收，走得比一格细。
- * base 是静止的细槽，x0 是这一行在面板里的起点（光按面板的格子走），env 是出现 / 消失的程度。
+ * 细槽上的呼吸：中间一团 Claude 橙的光，吸气时涨开、变亮，粗线 `━` 从三四格铺到三十来格（两头用 `╼` `╾`
+ * 接回细线），光芯到 #ffc6ad；呼气时收拢回中间短短一截亮橙的粗线，不灭。base 是静止的细槽，env 是出现 / 消失的程度。
  */
-export function streakCells(base: readonly Cell[], clock: number, row: number, env: number, x0 = 0, width = base.length): Cell[] {
-  const u = travel(clock, row)
-  if (u === null || env <= 0) return [...base]
-  const { head, tail } = streakAt(u, width)
-  const length = Math.max(0.001, head - tail)
-  return base.map((cell, i) => {
-    const x = x0 + i
-    const from = cell.color ?? LIGHT.body
-    // 头前面一格多的地方先被照亮一点
-    if (x >= head) {
-      const lit = 0.4 * glow(x + 0.5, head, 1.2, 1)
-      return lit > 0.02 ? { ...cell, color: mix(from, LIGHT.body, lit * env) } : cell
-    }
-    if (x + 1 <= tail) return cell
-    const inHead = head - x
-    const inTail = x + 1 - tail
-    if (inHead < 0.25 || inTail < 0.25) return cell
-    const s = clamp((x + 0.5 - tail) / length)
-    let ch = s > 0.55 ? '━' : '─'
-    if (inHead < 0.75 && inTail >= 1) ch = '╸'
-    else if (inTail < 0.75 && inHead >= 1) ch = s > 0.55 ? '╺' : '╶'
-    const lit = s < 0.5 ? mix(from, LIGHT.body, s / 0.5) : s < 0.9 ? mix(LIGHT.body, LIGHT.shine, (s - 0.5) / 0.4) : mix(LIGHT.shine, LIGHT.core, (s - 0.9) / 0.1)
-    return { ch: env < 0.5 ? cell.ch : ch, color: mix(from, lit, env) }
+export function breatheCells(base: readonly Cell[], clock: number, env: number): Cell[] {
+  if (env <= 0) return [...base]
+  const width = base.length
+  const level = breath(clock)
+  const heavy = base.map((_, x) => env >= 0.5 && swell(x, width / 2, width, level) >= HEAVY)
+  return base.map((cell, x) => {
+    const k = swell(x, width / 2, width, level) * env
+    if (k < 0.02) return cell
+    const ch = heavy[x] ? '━' : heavy[x + 1] ? '╼' : heavy[x - 1] ? '╾' : cell.ch
+    return { ...cell, ch, color: ember(cell.color ?? LIGHT.body, k) }
   })
 }
 
 const LINE = new Set(['─', '━', '╭', '╮'])
 
-/** 线上的闪光（翻译框的上边框）：光经过的线变成亮一档的颜色（tint），字形不变；标题等字不碰 */
-export function glintCells(base: readonly Cell[], clock: number, row: number, env: number, tint: string, x0 = 0, width = base.length): Cell[] {
-  const u = travel(clock, row)
-  if (u === null || env <= 0) return [...base]
-  const front = frontAt(u, width)
-  return base.map((cell, i) => {
+/**
+ * 线上的呼吸（翻译框的上边框）：从 center（标题后面那一格）起亮一档（tint），往右渐暗，跟着呼吸涨落；
+ * 字形不变，标题等字不碰
+ */
+export function glintCells(base: readonly Cell[], clock: number, env: number, tint: string, center: number): Cell[] {
+  if (env <= 0) return [...base]
+  const level = breath(clock)
+  const reach = Math.min(base.length, 80)
+  return base.map((cell, x) => {
     if (!LINE.has(cell.ch) || cell.color === undefined) return cell
-    const k = glow(x0 + i + 0.5, front, 1.2, 4.5)
-    return k > 0.02 ? { ...cell, color: mix(cell.color, tint, k * env) } : cell
+    const k = swell(x, center, reach, level) * env
+    return k > 0.02 ? { ...cell, color: mix(cell.color, tint, k) } : cell
   })
-}
-
-/** 波前走到第 x 格是一趟里的哪一刻（0 到 1）：frontAt 的反函数 */
-export function arrival(x: number, width: number): number {
-  let lo = 0
-  let hi = 1
-  for (let i = 0; i < 24; i += 1) {
-    const mid = (lo + hi) / 2
-    if (frontAt(mid, width) < x) lo = mid
-    else hi = mid
-  }
-  return (lo + hi) / 2
-}
-
-/** 波前到了之后，从到达那一刻起过了多久（毫秒，一圈之内） */
-function since(clock: number, row: number, x: number, width: number): number {
-  return mod(clock - row * FLOW.rowMs - arrival(x, width) * FLOW.sweepMs, FLOW.cycleMs)
 }
 
 /**
- * 字上的微光：波前到了这个词，一段亮光用 1 秒从词头滚到词尾（Claude Code 的微光也这么慢），
- * 经过的字变成亮一档的颜色。base 是逐格的（宽字后面跟一格空串），每格的颜色是本色
+ * 字上的呼吸：从这段字的中间亮起、往两头渐暗，吸满时整段都染上 shine、中间最亮，呼尽时只剩中间一点。
+ * base 是逐格的（宽字后面跟一格空串），每格的颜色是本色
  */
-export function shimmerCells(base: readonly Cell[], clock: number, row: number, env: number, shine: string, x0 = 0, width = base.length): Cell[] {
-  const t = since(clock, row, x0, width)
-  if (env <= 0 || t >= FLOW.shimmerMs) return [...base]
-  const front = -2 + (base.length + 4) * easeInOut(t / FLOW.shimmerMs)
-  return base.map((cell, i) => {
+export function wordCells(base: readonly Cell[], clock: number, env: number, shine: string): Cell[] {
+  if (env <= 0) return [...base]
+  const level = breath(clock)
+  const reach = Math.max(4, base.length) * 1.6
+  return base.map((cell, x) => {
     if (cell.color === undefined) return cell
-    const k = glow(i + 0.5, front, 1, 2.4)
-    return k > 0.02 ? { ...cell, color: mix(cell.color, shine, k * env) } : cell
+    const k = swell(x, base.length / 2, reach, level) * env
+    return k > 0.02 ? { ...cell, color: mix(cell.color, shine, k) } : cell
   })
 }
 
-/** 波前经过第 x 格时进行中图标亮一下：到达后 480ms 里先亮后暗，0 到 1 */
-export function pulseAt(clock: number, row: number, x: number, width: number): number {
-  const t = since(clock, row, x, width)
-  return t < FLOW.pulseMs ? Math.sin((Math.PI * t) / FLOW.pulseMs) ** 2 : 0
-}
+/** 进行中图标的颜色：Claude 橙，吸气时亮到光芯 */
+export const spinColor = (clock: number) => mix(LIGHT.body, LIGHT.core, breath(clock))
 
 /** 进行中图标在 clock 这一刻是哪一格 */
 export function spinGlyph(clock: number): string {
   const frames = SPIN.frames
-  return frames[Math.floor(Math.max(0, clock) / SPIN.stepMs) % frames.length] ?? frames[0]
+  return frames[Math.floor(mod(clock, SPIN.stepMs * frames.length) / SPIN.stepMs)] ?? frames[0]
 }
 
 /** 相邻同色的格子并成一段：一行十几个节点，不是几十个 */
@@ -211,31 +175,80 @@ export function runs(cells: readonly Cell[]): Cell[] {
 }
 
 /**
- * Client 里的时钟。钩子画面板时给 now（`$.clock.now()`）；两次重画之间 Client 每走一拍加一拍的时长。
- * stop：帧时钟上正在走的计时；没在走时为 null。lastNow：上次跟上的 now，还没跟过是 NaN。
+ * Client 里的时钟：base 加上走过的拍数。moving：这一拍要不要重画，每次画的时候按最新的 props 换掉
+ * （flightdeck rail 的 `ref.active = props.active`）。
+ * wall：墙上时钟；钩子的 now 不是墙上时钟（plugin test 的假时钟）时为 null，这时 base 是挂载时的 now、一拍走一拍；
+ * 是墙上时钟时 base 为 0，ticks 是绝对的第几拍（共用的拍子 pulse，耗时是墙上的第几秒）
  */
-export type Ticking = { base: number; ticks: number; lastNow: number; stop: (() => void) | null }
+export type Beat = { base: number; ticks: number; moving: (clock: number) => boolean; wall: (() => number) | null }
 
-export const ticking = (now: number): Ticking => ({ base: now, ticks: 0, lastNow: Number.NaN, stop: null })
+export const clockOf = (ref: Beat, stepMs: number) => ref.base + ref.ticks * stepMs
+
+/** 钩子的 now 和墙上时钟差得比这多，就当它不是墙上时钟（真实会话里两者是同一个时钟，k0t.48 伪终端实测） */
+const SKEW_MS = 60_000
+
+/** 拍子多久没人走就当它停了：下一个挂载的 Client 直接从墙上时刻起 */
+const STALE_MS = 1000
+
+/** 几个 Client 共用的拍子（Client 模块共用这一份 motion.ts，k0t.48 伪终端实测）：第几拍、最近一次走它的墙上时刻 */
+export type Pulse = { tick: number; wall: number }
+
+const pulse: Pulse = { tick: 0, wall: Number.NEGATIVE_INFINITY }
 
 /**
- * 跟上钩子给的 now：第一次和 now 变了时从它重新数，帧时钟的计时也从这一刻重新起，
- * 拍子对齐 now，不会比真实时刻多走；同一次重画里的几块 Client 同一拍走。now 没变时什么都不做。
+ * 落后 behind 拍时这一拍走几拍。帧时钟把 110ms 凑成整帧（伪终端实测约 123ms 一拍），光数拍会越走越慢；
+ * 引擎卡住几秒（它自己的 spinner 也停）时拍子会丢。落后整口气的部分一次补上（相位不变，看不出来）；
+ * 剩下不到一口气的，落后就多走一拍、超前就这一拍不走，一拍一拍地追，不跳
  */
-export function follow(ref: Ticking, now: number, every: (ms: number, fn: () => void) => () => void, stepMs: number, tick: () => void) {
-  if (now === ref.lastNow) return
-  ref.base = now
-  ref.ticks = 0
-  ref.lastNow = now
-  ref.stop?.()
-  ref.stop = every(stepMs, tick)
+export function catchUp(behind: number, cycle: number): number {
+  const part = mod(behind + cycle / 2, cycle) - cycle / 2
+  return 1 + (behind - part) + Math.sign(part)
 }
 
-/** 停掉帧时钟上的计时：动完了就不再空转，钩子下次给新的 now 时再起 */
-export function halt(ref: Ticking) {
-  ref.stop?.()
-  ref.stop = null
+/**
+ * 共用的拍子这一刻是第几拍（绝对的：墙上时刻 / 110ms）。advance：帧时钟走了一拍（不是挂载时读一下）。
+ * 同一帧里已经有 Client 走过（半拍之内），照抄，几处同一拍。挂载时拍子停了太久（没有别的 Client 在走）
+ * 就直接从墙上时刻起；在走的 Client 隔了很久才走下一拍（引擎卡住）时照常一拍一拍追，不跳
+ */
+export function pulseTick(wallNow: number, advance: boolean, p: Pulse = pulse): number {
+  const target = Math.round(wallNow / BREATH.stepMs)
+  if (!advance && wallNow - p.wall > STALE_MS) {
+    p.tick = target
+    p.wall = wallNow
+    return p.tick
+  }
+  if (!advance || wallNow - p.wall < BREATH.stepMs / 2) return p.tick
+  p.tick += catchUp(target - (p.tick + 1), BREATH.cycleMs / BREATH.stepMs)
+  p.wall = wallNow
+  return p.tick
 }
 
-/** 现在的时刻：最近一次给的 now 加上之后走过的拍数 */
-export const clockOf = (ref: Ticking, stepMs: number) => ref.base + ref.ticks * stepMs
+/** 画的时候要用到的那点 surface（ClientSurface 的子集，测试可以自己造） */
+export type Ticker = {
+  readonly state: { ref: Beat } | undefined
+  setState: (next: { ref: Beat }) => void
+  every: (ms: number, fn: () => void) => () => void
+}
+
+/**
+ * 挂载时起一次帧计时，之后每拍走一拍、要动时重画；再画（钩子给了新的 now、新的 props）不清零、不重起，
+ * 只换 moving。照 flightdeck 的 rail.tsx：`every` 只在 state 还没有时起。
+ * 钩子的 now 是墙上时钟时（真实会话），呼吸的拍子用共用的 pulse（几处同一拍，跟着墙上时钟不漂），
+ * 耗时（stepMs 不是呼吸的一拍）直接取墙上的第几秒；wall 在 Client 里是 Date.now（k0t.48 伪终端实测可用）
+ */
+export function beat(surface: Ticker, now: number, stepMs: number, moving: (clock: number) => boolean, wall: () => number = Date.now, p: Pulse = pulse): Beat {
+  const held = surface.state?.ref
+  if (held) {
+    held.moving = moving
+    return held
+  }
+  const synced = Math.abs(wall() - now) < SKEW_MS
+  const read = (advance: boolean) => (stepMs === BREATH.stepMs ? pulseTick(wall(), advance, p) : Math.floor(wall() / stepMs))
+  const ref: Beat = synced ? { base: 0, ticks: read(false), moving, wall } : { base: now, ticks: 0, moving, wall: null }
+  surface.setState({ ref })
+  surface.every(stepMs, () => {
+    ref.ticks = ref.wall ? read(true) : ref.ticks + 1
+    if (ref.moving(clockOf(ref, stepMs))) surface.setState({ ref })
+  })
+  return ref
+}

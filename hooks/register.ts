@@ -539,7 +539,7 @@ async function foldForDrawing($: EngineInterface, isFocused: boolean) {
 // ---------------------------------------------------------------- 动效（spec D10）：进行中图标、运行中的耗时
 
 /**
- * 正在发生的几件事各自的起止（spec D10「流光」）：主会话回复（这一轮的第一次请求到这一轮结束；子 agent 的不算）、
+ * 正在发生的几件事各自的起止（spec D10「呼吸」）：主会话回复（这一轮的第一次请求到这一轮结束；子 agent 的不算）、
  * 保活的续期请求、翻译。结束后留着结束的时刻：落定、暗下去要用；下一次开始时换掉
  */
 type Activity = { reply: Span | null; keep: Span | null; translate: Span | null }
@@ -584,16 +584,9 @@ async function noteFocus($: EngineInterface, element: string | null) {
   if ((await read($, focusKey)) !== element) await update($, focusKey, () => element)
 }
 
-/**
- * 这次绘制里动效怎么画。相位的零点（epoch）：主会话回复优先，其次保活续期、翻译、最早还在运行的子 agent；
- * 面板和翻译框用同一个，几处的光同相
- */
+/** 这次绘制里动效怎么画：相位按绝对时刻算，面板和翻译框不用对零点也同相 */
 async function liveFor($: EngineInterface, els: object, surface: RenderSurface, now: number) {
-  const [doing, list, faulted] = await Promise.all([readActivity($), read($, agents), read($, faults)])
-  const running = list.filter(agent => agent.status === 'running').map(agent => agent.spawnedAt)
-  const lead = [doing.reply, doing.keep, doing.translate].find(span => isLive(span, now)) ?? null
-  const epoch = lead?.since ?? (running.length > 0 ? Math.min(...running) : 0)
-  return liveOf(els, surface, now, faulted, epoch)
+  return liveOf(els, surface, now, await read($, faults))
 }
 
 // ---------------------------------------------------------------- anvil 面板
@@ -662,13 +655,12 @@ async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderI
   const columns = e.props.bodyColumns
   const inner = innerWidth(columns)
   const usageBody = spacedGridRows(els, usageRows(current, now, inner, histories), inner)
-  // 保活的续期请求在路上："进行中"上滚过微光，后面接转动的图标（缓存框第三行：面板第 3 行，值从第 10 列起）
+  // 保活的续期请求在路上："进行中"跟着呼吸亮暗，后面接转动的图标（缓存框第三行）
   const keepRow = (row: GridRow) => {
     if (row.key !== 'keepalive' || !loop.inFlight) return gridRow(els, row, inner)
-    const place = { row: 3, x: 2 + GRID.label + GRID.gap, width: columns }
     const text = (row.lines[0] ?? []).flatMap(segment => toCells(segment.text, segment.color, segment.bold))
-    const first = glowText(els, live, { key: 'glow:keepalive', cells: text, place, span: doing.keep, mode: 'shimmer', shine: LIGHT.shine })
-    const tail = spinAfter(els, live, { key: 'spin:keepalive', place: { ...place, x: place.x + text.length + 1 } })
+    const first = glowText(els, live, { key: 'glow:keepalive', cells: text, span: doing.keep, mode: 'breathe', shine: LIGHT.shine })
+    const tail = spinAfter(els, live, { key: 'spin:keepalive' })
     return gridRow(els, row, inner, tail, first)
   }
   return drawPanel(els, {
@@ -682,10 +674,10 @@ async function drawAnvilPanel($: EngineInterface, settings: Settings, e: RenderI
       messages: messageList(els, mine, { inner, onPress: id => void scrollToMessage($, id) }),
       denials: denialList(els, denied, { detail: folding.detail, inner, onPress: id => void pressDetail($, id) }),
       // 子 agent 的行大约从第几行起：缓存框 5 行、细槽、用量框、细槽、上边框
-      agents: agentList(els, list, { detail: folding.detail, now, inner, live, top: 5 + 1 + usageBody.length + 2 + 1 + 1, focused: e.props.isFocused ? focused : null, onPress: id => void pressDetail($, id) }),
+      agents: agentList(els, list, { detail: folding.detail, now, inner, live, focused: e.props.isFocused ? focused : null, onPress: id => void pressDetail($, id) }),
     },
     fold: folding,
-    identity: identityRows(els, who, columns, { reply: doing.reply, live, rows: e.props.scroll.bodyRows }),
+    identity: identityRows(els, who, columns, { reply: doing.reply, live }),
     motion: { live, reply: doing.reply },
     onToggle: id => void pressList($, id),
   })

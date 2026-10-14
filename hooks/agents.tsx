@@ -138,9 +138,6 @@ type Els = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'> & Partial<Pick<
 /** 一行的列宽（设计稿 .ag）：序号 2 | 状态 2 | 任务 | 模型 6 | 耗时 6，列间空 1 格；状态列从第 3 格起（序号加列间） */
 const COLUMN = { seq: 2, mark: 2, model: 6, time: 6, gap: 1 } as const
 
-/** 框的边框加内边距：框里的第一格在面板的第 2 列 */
-const FRAME = 2
-
 /** 任务一列从框里的第几格起：序号、列间、状态、列间 */
 const TASK_AT = COLUMN.seq + COLUMN.gap + COLUMN.mark + COLUMN.gap
 
@@ -174,7 +171,7 @@ function texts(els: Els, segments: readonly Segment[]) {
  * 转动的图标和走的耗时是 Client，绝对定位压在 Button 那两格上；Button 里照样写静止的 ◐ 和按 now 算的耗时，
  * 没有 Client 时就是它们。焦点在这一行时引擎只反白 Button 自己的字，压在上面的两块跟着反白（isFocused）。
  */
-function agentRow(els: Els, agent: SubAgent, now: number, inner: number, onPress: () => void, live: Live, isFocused: boolean, row: number): RenderElement {
+function agentRow(els: Els, agent: SubAgent, now: number, inner: number, onPress: () => void, live: Live, isFocused: boolean): RenderElement {
   const { Box, Button } = els
   const isOver = agent.status !== 'running'
   const width = taskWidth(inner)
@@ -202,7 +199,7 @@ function agentRow(els: Els, agent: SubAgent, now: number, inner: number, onPress
       </Button>
       {isRunning && live.spinner ? (
         <Box key={`over:mark:${agent.id}`} position="absolute" top={0} left={COLUMN.seq + COLUMN.gap}>
-          {spin(els, live, { key: `spin:agent:${agent.id}`, place: { row, x: FRAME + COLUMN.seq + COLUMN.gap, width: inner + 2 * FRAME }, inverse: isFocused })}
+          {spin(els, live, { key: `spin:agent:${agent.id}`, inverse: isFocused })}
         </Box>
       ) : null}
       {isRunning && live.glow ? (
@@ -210,9 +207,8 @@ function agentRow(els: Els, agent: SubAgent, now: number, inner: number, onPress
           {glowText(els, live, {
             key: `glow:agent:${agent.id}`,
             cells: toCells(task),
-            place: { row, x: FRAME + TASK_AT, width: inner + 2 * FRAME },
             span: { since: agent.spawnedAt, until: null },
-            mode: 'shimmer',
+            mode: 'breathe',
             shine: LIGHT.shine,
             inverse: isFocused,
           })}
@@ -279,16 +275,13 @@ export function agentDetail(els: Els, agent: SubAgent, inner: number): RenderEle
 export function agentList(
   els: Els,
   list: readonly SubAgent[],
-  view: { detail: string | null; now: number; inner: number; onPress: (agentId: string) => void; live?: Live; focused?: string | null; top?: number },
+  view: { detail: string | null; now: number; inner: number; onPress: (agentId: string) => void; live?: Live; focused?: string | null },
 ): ListBody {
   const live = view.live ?? still(view.now)
-  // 列表在面板里大约从第几行起（register.ts 按上面几个框的高度算）：光按它算出发的先后
-  const top = view.top ?? 0
-  const shown = Math.max(0, list.length - AGENT_LIMIT)
-  const items: ListItem[] = list.map((agent, index) => ({
+  const items: ListItem[] = list.map(agent => ({
     key: agent.id,
     rows: [
-      agentRow(els, agent, view.now, view.inner, () => view.onPress(agent.id), live, view.focused === agentKey(agent.seq), top + (shown > 0 ? 1 : 0) + Math.max(0, index - shown)),
+      agentRow(els, agent, view.now, view.inner, () => view.onPress(agent.id), live, view.focused === agentKey(agent.seq)),
       ...(view.detail === agent.id ? agentDetail(els, agent, view.inner) : []),
     ],
   }))

@@ -5,28 +5,27 @@ import type { Engine, Mounted } from 'claude-code/testing'
 import { contrast, mix } from '../hooks/color'
 import { faultedModule, liveOf } from '../hooks/live'
 import {
-  FLOW,
+  BREATH,
   LIGHT,
   SPIN,
-  arrival,
+  beat,
+  breath,
+  breatheCells,
+  catchUp,
   clockOf,
   envelope,
-  follow,
-  frontAt,
+  glintCells,
   groove,
-  halt,
   isMoving,
-  pulseAt,
+  phaseOf,
   runs,
   settle,
-  shimmerCells,
+  spinColor,
   spinGlyph,
-  streakAt,
-  streakCells,
-  ticking,
-  travel,
+  swell,
+  wordCells,
 } from '../hooks/motion'
-import type { Cell as Square } from '../hooks/motion'
+import type { Beat, Pulse, Cell as Square } from '../hooks/motion'
 import { PING_AFTER_MS } from '../hooks/keepalive'
 import { COLOR, ICON } from '../hooks/style'
 import { cells } from '../hooks/text'
@@ -34,59 +33,93 @@ import { SESSION, drain, flat, spawnInput, stepInput, turnInput, world } from '.
 
 const NOW = 10 * 3_600_000
 
-/** 帧时钟一拍 40ms：走过一格图标（144ms）要 4 拍 */
-const TURN = 4 * FLOW.stepMs
+const STEP = BREATH.stepMs
+
+const SECOND = 1000
+
+/** 进行中图标走一格：两拍 */
+const TURN = SPIN.stepMs
+
+/** 吸满的那一刻（一口气里） */
+const PEAK = BREATH.cycleMs * BREATH.inhale
+
+/** 静止细槽中间的颜色 */
+const GROOVE_PEAK = '#4a4c51'
+
+/** 从 clock 起走几拍到吸得最满的那一拍 */
+const toPeak = (clock: number) => {
+  const ticks = Array.from({ length: BREATH.cycleMs / STEP }, (_, k) => k)
+  return ticks.reduce((best, k) => (breath(clock + k * STEP) > breath(clock + best * STEP) ? k : best), 0)
+}
 
 // ---------------------------------------------------------------- 纯逻辑（Client 模块共用，motion.ts）
 
-test('节奏：一圈 2880ms，光扫 2160ms、歇 720ms；◐◓◑◒ 144ms 一格，一圈正好 20 格；帧时钟 40ms 一拍', () => {
-  expect(FLOW.cycleMs / SPIN.stepMs).toBe(20)
-  expect(FLOW.stepMs).toBe(40)
-  expect([0, 144, 288, 432, 576].map(spinGlyph)).toEqual(['◐', '◓', '◑', '◒', '◐'])
-  expect(spinGlyph(143)).toBe('◐')
-  expect(travel(0, 0)).toBe(0)
-  expect(travel(1080, 0)).toBe(0.5)
-  expect(travel(2160, 0)).toBe(null)
-  expect(travel(FLOW.cycleMs + 540, 0)).toBe(0.25)
-  // 每往下一行晚 10ms 出发：一道斜的波前
-  expect(travel(1080, 10)).toBe((1080 - 100) / 2160)
+test('节奏：帧时钟 110ms 一拍（同 flightdeck），一口气 2640ms 正好 24 拍；◐◓◑◒ 两拍一格，一口气转三圈', () => {
+  expect(STEP).toBe(110)
+  expect(BREATH.cycleMs / STEP).toBe(24)
+  expect(SPIN.stepMs / STEP).toBe(2)
+  expect(BREATH.cycleMs / (SPIN.stepMs * SPIN.frames.length)).toBe(3)
+  expect([0, 220, 440, 660, 880].map(spinGlyph)).toEqual(['◐', '◓', '◑', '◒', '◐'])
+  expect(spinGlyph(219)).toBe('◐')
+  // 出现、消失、落定都是整拍
+  for (const ms of [BREATH.inMs, BREATH.outMs, BREATH.settleMs]) expect(ms % STEP).toBe(0)
 })
 
-test('波前：中间快、两头慢，从框外走到框外；反函数 arrival 找得到每一格', () => {
+test('相位按绝对时刻算：每拍前进一样多（1/24），一口气之后回到原处；几处同一时刻同一相位', () => {
+  for (const start of [0, NOW, NOW + 37]) {
+    const phases = Array.from({ length: 49 }, (_, k) => phaseOf(start + k * STEP))
+    for (let k = 1; k < phases.length; k += 1) {
+      const step = ((phases[k] ?? 0) - (phases[k - 1] ?? 0) + 1) % 1
+      expect(Math.abs(step - 1 / 24)).toBeLessThan(1e-9)
+    }
+    expect(breath(start + BREATH.cycleMs)).toBe(breath(start))
+  }
+})
+
+test('呼吸：吸 40%、呼 60%，两头是缓的；每一拍都在变，不停住、不跳', () => {
+  expect(breath(0)).toBe(0)
+  expect(breath(PEAK)).toBe(1)
+  // 吸气一路涨、呼气一路落
+  const at = (t: number) => breath(t * BREATH.cycleMs)
+  for (let t = 0; t < 0.38; t += 0.02) expect(at(t + 0.02) >= at(t), `${t}`).toBe(true)
+  for (let t = 0.4; t < 0.98; t += 0.02) expect(at(t + 0.02) <= at(t), `${t}`).toBe(true)
+  // 吸得比呼快：涨到一半在 20%，落回一半在 70%
+  expect(Math.abs(at(0.2) - 0.5)).toBeLessThan(1e-9)
+  expect(Math.abs(at(0.7) - 0.5)).toBeLessThan(1e-9)
+  // 逐拍：每拍都不一样（不停住），相邻两拍差得不多（不跳）
+  const levels = Array.from({ length: 25 }, (_, k) => breath(NOW + k * STEP))
+  for (let k = 1; k < levels.length; k += 1) {
+    const d = Math.abs((levels[k] ?? 0) - (levels[k - 1] ?? 0))
+    expect(d, `${k}`).toBeGreaterThan(0)
+    expect(d, `${k}`).toBeLessThan(0.2)
+  }
+})
+
+test('沿线的明暗：中间最亮、往两边暗，吸气时铺开变亮，呼尽时收拢但不灭', () => {
   const width = 51
-  expect(frontAt(0, width)).toBe(-FLOW.pad)
-  expect(frontAt(1, width)).toBe(width + FLOW.pad)
-  // expect 没有 toBeCloseTo（AGENTS.md Pitfalls）
-  expect(Math.abs(frontAt(0.5, width) - width / 2)).toBeLessThan(0.01)
-  // 中间一段走得比开头一段多
-  expect(frontAt(0.55, width) - frontAt(0.45, width)).toBeGreaterThan(frontAt(0.1, width) - frontAt(0, width))
-  for (const x of [0, 10, 25, 50]) expect(Math.abs(frontAt(arrival(x, width), width) - x)).toBeLessThan(0.01)
+  const center = width / 2
+  // 呼尽：最亮处还有 0.62，两端几乎是 0
+  expect(swell(25, center, width, 0)).toBeGreaterThan(0.6)
+  expect(swell(0, center, width, 0)).toBeLessThan(0.02)
+  // 吸满：最亮处到 1，两端也亮起来
+  expect(swell(25, center, width, 1)).toBeGreaterThan(0.99)
+  expect(swell(0, center, width, 1)).toBeGreaterThan(0.1)
+  // 左右对称
+  expect(swell(10, center, width, 0.5)).toBe(swell(40, center, width, 0.5))
 })
 
-test('流光：头先走、尾晚出发，走到中间最长、两头收短', () => {
-  const width = 51
-  const lengths = [0.15, 0.3, 0.5, 0.7, 0.85].map(u => {
-    const { head, tail } = streakAt(u, width)
-    expect(head).toBeGreaterThanOrEqual(tail)
-    return head - tail
-  })
-  expect(Math.max(...lengths)).toBe(lengths[2])
-  expect(lengths[2]).toBeGreaterThan(lengths[0] ?? 0)
-  expect(lengths[2]).toBeGreaterThan(lengths[4] ?? 0)
-})
-
-test('出现、消失、落定：360ms 亮起，结束后 480ms 暗下去、720ms 落定，之后不再动', () => {
+test('出现、消失、落定：440ms 亮起，结束后 660ms 暗下去、落定，之后不再动', () => {
   expect(envelope(0, 0, null)).toBe(0)
-  expect(envelope(FLOW.inMs, 0, null)).toBe(1)
+  expect(envelope(BREATH.inMs, 0, null)).toBe(1)
   expect(envelope(5000, null, null)).toBe(1)
   expect(envelope(5000, 0, 5000)).toBe(1)
-  expect(envelope(5000 + FLOW.outMs, 0, 5000)).toBe(0)
-  expect(isMoving(5000 + FLOW.outMs - 1, 5000)).toBe(true)
-  expect(isMoving(5000 + FLOW.outMs, 5000)).toBe(false)
+  expect(envelope(5000 + BREATH.outMs, 0, 5000)).toBe(0)
+  expect(isMoving(5000 + BREATH.outMs - 1, 5000)).toBe(true)
+  expect(isMoving(5000 + BREATH.outMs, 5000)).toBe(false)
   expect(settle(5000, null)).toBe(0)
   expect(settle(5000, 5000)).toBe(1)
-  expect(settle(5000 + FLOW.settleMs / 2, 5000)).toBeGreaterThan(0)
-  expect(settle(5000 + FLOW.settleMs, 5000)).toBe(0)
+  expect(settle(5000 + BREATH.settleMs / 2, 5000)).toBeGreaterThan(0)
+  expect(settle(5000 + BREATH.settleMs, 5000)).toBe(0)
 })
 
 test('细槽：中间略亮、两端隐进面板底色，左右对称；不承载信息，比线暗', () => {
@@ -100,48 +133,61 @@ test('细槽：中间略亮、两端隐进面板底色，左右对称；不承�
   expect(at(25)).toBeLessThan(contrast(COLOR.line, COLOR.pane))
 })
 
-test('细槽上的流光：歇着时就是细槽；走着时头是粗线、亮，尾渐细渐暗，两端用半格收', () => {
-  const base = groove(51, COLOR.pane)
-  // 歇着
-  expect(streakCells(base, 2400, 0, 1)).toEqual(base)
-  // 还没亮起来
-  expect(streakCells(base, 1080, 0, 0)).toEqual(base)
-  const lit = streakCells(base, 1080, 0, 1)
-  const glyphs = lit.map(cell => cell.ch).join('')
-  expect(glyphs).toMatch(/━/)
-  expect(glyphs).toMatch(/─━/)
-  // 头最亮：粗线段的最后一格是 Claude 的微光色一带，比本色亮
-  const heavy = lit.map((cell, x) => ({ ...cell, x })).filter(cell => cell.ch === '━' || cell.ch === '╸')
-  const head = heavy[heavy.length - 1]
-  expect(contrast(head?.color ?? COLOR.pane, COLOR.pane)).toBeGreaterThan(contrast(LIGHT.body, COLOR.pane))
-  // 尾巴在头的左边：从左往右走
-  const first = lit.findIndex((cell, x) => cell.color !== base[x]?.color)
-  expect(first).toBeLessThan(head?.x ?? 0)
-  // 一路上半格的字形都可能出现，但只出现在两端
-  for (const [x, cell] of lit.entries()) {
-    if (cell.ch === '╸') expect(lit[x + 1]?.ch, `${x}`).toBe(base[x + 1]?.ch)
+test('细槽上的呼吸：呼尽时中间留短短一截亮橙的粗线；吸满时粗线铺开、光芯最亮，两头用 ╼ ╾ 接回细线', () => {
+  for (const width of [51, 70]) {
+    const base = groove(width, COLOR.pane)
+    // 还没亮起来
+    expect(breatheCells(base, PEAK, 0)).toEqual(base)
+    // 呼尽：中间三四格粗线，比 Claude 橙亮，两端还是细槽
+    const low = breatheCells(base, 0, 1)
+    expect(low.map(cell => cell.ch).join(''), `${width}`).toMatch(/^─+╼━{2,6}╾─+$/)
+    const mid = Math.floor(width / 2)
+    expect(contrast(low[mid]?.color ?? '', COLOR.pane)).toBeGreaterThan(contrast(LIGHT.body, COLOR.pane))
+    expect(low[0]?.color).toBe(base[0]?.color)
+    // 吸满：中间一大段粗线，两头接口，宽度不变
+    const high = breatheCells(base, PEAK, 1)
+    const glyphs = high.map(cell => cell.ch).join('')
+    expect(glyphs, `${width}`).toMatch(/^─+╼━{20,}╾─+$/)
+    expect(cells(glyphs)).toBe(width)
+    expect(high[mid]?.color).toBe(LIGHT.core)
+    // 左右对称：明暗按位置
+    expect(high[5]?.color).toBe(high[width - 6]?.color)
+    // 吸满时比呼尽时铺得开：亮过 Claude 橙的格子多
+    const lit = (line: Square[]) => line.filter(cell => contrast(cell.color ?? COLOR.pane, COLOR.pane) >= contrast(LIGHT.body, COLOR.pane)).length
+    expect(lit(high)).toBeGreaterThan(lit(low) + 10)
   }
 })
 
-test('字上的微光：波前到了这个词，亮光用 1 秒滚过；之外是本色', () => {
-  const word: Square[] = [...'Opus 5.5'].map(ch => ({ ch, color: LIGHT.body }))
-  const width = 51
-  const reach = arrival(4, width) * FLOW.sweepMs
-  // 波前还没到
-  expect(shimmerCells(word, reach - 100, 0, 1, LIGHT.core, 4, width)).toEqual(word)
-  // 到了之后半秒：中间几个字亮了
-  const mid = shimmerCells(word, reach + FLOW.shimmerMs / 2, 0, 1, LIGHT.core, 4, width)
-  expect(mid.some(cell => cell.color !== LIGHT.body)).toBe(true)
-  // 滚完了
-  expect(shimmerCells(word, reach + FLOW.shimmerMs + 10, 0, 1, LIGHT.core, 4, width)).toEqual(word)
+test('翻译框上边框的呼吸：从标题后面亮起、往右渐暗，字形不变，标题不碰', () => {
+  const line: Square[] = [
+    ...[...'── '].map(ch => ({ ch, color: COLOR.promptLine })),
+    ...[...'中→英'].map(ch => ({ ch, bold: true })),
+    ...[...` ${'─'.repeat(40)}`].map(ch => ({ ch, color: COLOR.promptLine })),
+  ]
+  const lit = glintCells(line, PEAK, 1, '#bdbdbd', 7)
+  expect(lit.map(cell => cell.ch)).toEqual(line.map(cell => cell.ch))
+  expect(lit.slice(3, 6)).toEqual(line.slice(3, 6))
+  expect(lit[7]?.color).toBe('#bdbdbd')
+  expect(contrast(lit[7]?.color ?? '', '#282a36')).toBeGreaterThan(contrast(lit[40]?.color ?? '', '#282a36'))
+  expect(glintCells(line, PEAK, 0, '#bdbdbd', 7)).toEqual(line)
 })
 
-test('进行中图标随波前亮一下：到达后 480ms 里先亮后暗', () => {
-  const width = 51
-  const reach = arrival(2, width) * FLOW.sweepMs
-  expect(pulseAt(reach - 50, 0, 2, width)).toBe(0)
-  expect(pulseAt(reach + FLOW.pulseMs / 2, 0, 2, width)).toBeGreaterThan(0.9)
-  expect(pulseAt(reach + FLOW.pulseMs + 1, 0, 2, width)).toBe(0)
+test('字上的呼吸：从中间亮起、往两头渐暗，吸满时比呼尽时亮；之外是本色', () => {
+  const word: Square[] = [...'Opus 5.5'].map(ch => ({ ch, color: LIGHT.body }))
+  expect(wordCells(word, PEAK, 0, LIGHT.core)).toEqual(word)
+  const high = wordCells(word, PEAK, 1, LIGHT.core)
+  const low = wordCells(word, 0, 1, LIGHT.core)
+  const light = (cell: Square | undefined) => contrast(cell?.color ?? COLOR.pane, COLOR.pane)
+  expect(light(high[4])).toBeGreaterThan(light(high[0]))
+  expect(light(high[4])).toBeGreaterThan(light(low[4]))
+  expect(light(high[0])).toBeGreaterThan(light(low[0]))
+  // 呼尽时中间也比本色亮一点：一直在发光
+  expect(light(low[4])).toBeGreaterThan(light(word[4]))
+})
+
+test('进行中图标：Claude 橙，吸满时亮到光芯', () => {
+  expect(spinColor(0)).toBe(LIGHT.body)
+  expect(spinColor(PEAK)).toBe(LIGHT.core)
 })
 
 test('颜色在 OKLab 里插值、取到 1/16 档；相邻同色的格子并成一段', () => {
@@ -151,46 +197,142 @@ test('颜色在 OKLab 里插值、取到 1/16 档；相邻同色的格子并成�
   expect(runs([{ ch: 'a', color: '#111111' }, { ch: 'b', color: '#111111' }, { ch: 'c' }])).toEqual([{ ch: 'ab', color: '#111111' }, { ch: 'c' }])
 })
 
-test('相位按时钟算：钩子给了新的 now 就从它重新数、计时重起；动完 halt 停掉计时，不空转', () => {
-  const timers: string[] = []
-  const every = (ms: number) => {
-    const id = `t${timers.length + 1}:${ms}`
-    timers.push(id)
-    return () => void timers.splice(timers.indexOf(id), 1, `${id} 停`)
+test('计时照 flightdeck：挂载时起一次，之后每拍加一拍；再画（新的 now）不清零、不重起，只换要不要重画', () => {
+  const timers: (() => void)[] = []
+  const redraws: number[] = []
+  const surface = {
+    state: undefined as { ref: Beat } | undefined,
+    setState(next: { ref: Beat }) {
+      surface.state = next
+      redraws.push(clockOf(next.ref, STEP))
+    },
+    every(ms: number, fn: () => void) {
+      expect(ms).toBe(STEP)
+      timers.push(fn)
+      return () => undefined
+    },
   }
-  const a = ticking(NOW)
-  const b = ticking(NOW)
-  follow(a, NOW, every, FLOW.stepMs, () => undefined)
-  follow(b, NOW, every, FLOW.stepMs, () => undefined)
-  expect(timers).toEqual(['t1:40', 't2:40'])
-  a.ticks = 3
-  b.ticks = 3
-  expect(clockOf(a, FLOW.stepMs)).toBe(NOW + 3 * FLOW.stepMs)
-  expect(spinGlyph(clockOf(a, FLOW.stepMs))).toBe(spinGlyph(clockOf(b, FLOW.stepMs)))
-  // 同一个 now：不重数，也不重起计时
-  follow(a, NOW, every, FLOW.stepMs, () => undefined)
-  expect(a.ticks).toBe(3)
-  expect(timers).toHaveLength(2)
-  // 新的 now：从它重新数，旧的计时停掉、从这一刻重起
-  follow(a, NOW + 5000, every, FLOW.stepMs, () => undefined)
-  expect(clockOf(a, FLOW.stepMs)).toBe(NOW + 5000)
-  expect(timers).toEqual(['t1:40 停', 't2:40', 't3:40'])
-  // 动完了：停掉，同一个 now 不再重起
-  halt(a)
-  expect(timers).toEqual(['t1:40 停', 't2:40', 't3:40 停'])
-  follow(a, NOW + 5000, every, FLOW.stepMs, () => undefined)
-  expect(timers).toHaveLength(3)
+  const tick = () => timers.forEach(fn => fn())
+  let until: number | null = null
+  const ref = beat(surface, NOW, STEP, clock => isMoving(clock, until))
+  expect(timers).toHaveLength(1)
+  expect(clockOf(ref, STEP)).toBe(NOW)
+  tick()
+  tick()
+  tick()
+  expect(clockOf(ref, STEP)).toBe(NOW + 3 * STEP)
+  // 钩子重画给了新的 now：不清零、不重起
+  const again = beat(surface, NOW + 5000, STEP, clock => isMoving(clock, until))
+  expect(again).toBe(ref)
+  expect(timers).toHaveLength(1)
+  expect(clockOf(ref, STEP)).toBe(NOW + 3 * STEP)
+  tick()
+  expect(clockOf(ref, STEP)).toBe(NOW + 4 * STEP)
+  // 结束了：暗完之后照样计拍，但不再重画
+  until = NOW + 4 * STEP
+  beat(surface, NOW + 6000, STEP, clock => isMoving(clock, until))
+  const before = redraws.length
+  for (let k = 0; k < 10; k += 1) tick()
+  expect(redraws.length - before).toBe(BREATH.outMs / STEP - 1)
+  expect(clockOf(ref, STEP)).toBe(NOW + 14 * STEP)
+})
+
+/** 造一个 Client 的 surface：every 记下计时，tick() 走一拍 */
+function fakeSurface() {
+  const timers: (() => void)[] = []
+  const surface = {
+    state: undefined as { ref: Beat } | undefined,
+    setState(next: { ref: Beat }) {
+      surface.state = next
+    },
+    every(_ms: number, fn: () => void) {
+      timers.push(fn)
+      return () => undefined
+    },
+  }
+  return { surface, tick: () => timers.forEach(fn => fn()), timers }
+}
+
+test('跟墙上时钟对拍：落后整口气一次补上，剩下的一拍一拍追（多走一拍或这一拍不走），不跳', () => {
+  const cycle = BREATH.cycleMs / STEP
+  expect(catchUp(0, cycle)).toBe(1)
+  // 落后一拍：这一拍走两拍；超前一拍：这一拍不走
+  expect(catchUp(1, cycle)).toBe(2)
+  expect(catchUp(-1, cycle)).toBe(0)
+  // 引擎卡了 27 拍：整口气（24 拍）一次补上，相位不变，再多走一拍，剩下的下几拍追
+  expect(catchUp(27, cycle)).toBe(1 + 24 + 1)
+})
+
+test('真实会话里几个 Client 共用一个拍子：同一帧照抄，跟着墙上时钟不漂；引擎卡过也一拍一拍追上', () => {
+  // 墙上时钟（真实会话里钩子的 now 和它是同一个时钟）
+  const T0 = 1_760_000_000_000
+  let wall = T0
+  const p: Pulse = { tick: 0, wall: Number.NEGATIVE_INFINITY }
+  const a = fakeSurface()
+  const b = fakeSurface()
+  const ra = beat(a.surface, T0, STEP, () => true, () => wall, p)
+  // 挂载：拍子停着，直接从墙上时刻起
+  expect(ra.wall).not.toBe(null)
+  expect(clockOf(ra, STEP)).toBe(Math.round(T0 / STEP) * STEP)
+  // 帧时钟比 110ms 慢（伪终端实测约 123ms 一拍）：一直跟着墙上时钟，差不过一拍；每拍至多多走一拍
+  let last = clockOf(ra, STEP)
+  for (let k = 0; k < 200; k += 1) {
+    wall += 123
+    a.tick()
+    const clock = clockOf(ra, STEP)
+    expect(clock - last, `${k}`).toBeLessThanOrEqual(2 * STEP)
+    expect(clock - last, `${k}`).toBeGreaterThanOrEqual(STEP)
+    expect(Math.abs(clock - wall), `${k}`).toBeLessThanOrEqual(STEP)
+    last = clock
+  }
+  // 后挂载的 Client（钩子的 now 是几秒前画面板时的）：和在走的同一拍
+  const rb = beat(b.surface, wall - 3000, STEP, () => true, () => wall, p)
+  expect(clockOf(rb, STEP)).toBe(clockOf(ra, STEP))
+  // 同一帧里两个都走：先走的定下这一拍，后走的照抄
+  for (let k = 0; k < 50; k += 1) {
+    wall += 123
+    a.tick()
+    wall += 3
+    b.tick()
+    expect(clockOf(rb, STEP), `${k}`).toBe(clockOf(ra, STEP))
+  }
+  // 引擎卡了 3 秒：相位不跳（这一拍至多多走一拍，整口气的部分看不出），十来拍之内追上
+  last = clockOf(ra, STEP)
+  wall += 3000
+  a.tick()
+  const step = (((phaseOf(clockOf(ra, STEP)) - phaseOf(last)) % 1) + 1) % 1
+  expect(step).toBeLessThanOrEqual(2 / 24 + 1e-9)
+  for (let k = 0; k < 12; k += 1) {
+    wall += 123
+    a.tick()
+  }
+  expect(Math.abs(clockOf(ra, STEP) - wall)).toBeLessThanOrEqual(STEP)
+
+  // 耗时：墙上的第几秒，钩子重画给的 now 不管
+  const c = fakeSurface()
+  const rc = beat(c.surface, wall, SECOND, () => true, () => wall, p)
+  expect(clockOf(rc, SECOND)).toBe(Math.floor(wall / SECOND) * SECOND)
+  wall += 2500
+  c.tick()
+  expect(clockOf(rc, SECOND)).toBe(Math.floor(wall / SECOND) * SECOND)
+
+  // plugin test 的假时钟（钩子的 now 和墙上时钟差得远）：不校正，一拍走一拍
+  const d = fakeSurface()
+  const rd = beat(d.surface, NOW, STEP, () => true, () => wall, p)
+  expect(rd.wall).toBe(null)
+  d.tick()
+  expect(clockOf(rd, STEP)).toBe(NOW + STEP)
 })
 
 test('有 Client、模块没出过错才用它；ui.fault 报的路径按文件名认', () => {
   const els = { Client: () => null }
-  const all = { now: 5, epoch: 2, spinner: true, elapsed: true, rail: true, glow: true }
-  expect(liveOf(els, 'terminal', 5, [], 2)).toEqual(all)
-  expect(liveOf(els, 'desktop', 5, [], 2)).toEqual(all)
-  expect(liveOf(els, 'terminal', 5, ['rail.tsx', 'glow.tsx'], 2)).toEqual({ ...all, rail: false, glow: false })
-  expect(liveOf({}, 'terminal', 5, [])).toEqual({ now: 5, epoch: 0, spinner: false, elapsed: false, rail: false, glow: false })
+  const all = { now: 5, spinner: true, elapsed: true, rail: true, glow: true }
+  expect(liveOf(els, 'terminal', 5, [])).toEqual(all)
+  expect(liveOf(els, 'desktop', 5, [])).toEqual(all)
+  expect(liveOf(els, 'terminal', 5, ['rail.tsx', 'glow.tsx'])).toEqual({ ...all, rail: false, glow: false })
+  expect(liveOf({}, 'terminal', 5, [])).toEqual({ now: 5, spinner: false, elapsed: false, rail: false, glow: false })
   // VS Code 的 resolve 也给 Client，但它的元素表里没有，画出来是空的
-  expect(liveOf(els, 'vscode', 5, [])).toEqual({ now: 5, epoch: 0, spinner: false, elapsed: false, rail: false, glow: false })
+  expect(liveOf(els, 'vscode', 5, [])).toEqual({ now: 5, spinner: false, elapsed: false, rail: false, glow: false })
   expect(faultedModule('hooks/rail.tsx')).toBe('rail.tsx')
   expect(faultedModule('hooks\\glow.tsx')).toBe('glow.tsx')
   expect(faultedModule('./spinner.tsx')).toBe('spinner.tsx')
@@ -228,7 +370,7 @@ function textsOf(node: unknown, inherited?: unknown): { text: string; color?: un
   return type === 'Text' && own !== '' ? [{ text: own, color }, ...nested] : nested
 }
 
-/** 回复中：第二轮的第一次请求已经开始、还没结束（这一刻是相位的零点） */
+/** 回复中：第二轮的第一次请求已经开始、还没结束 */
 async function replying($: Engine, clock: { advance: (ms: number) => Promise<void> }) {
   await drain($.turn.step(stepInput()))
   await $.turn.complete(turnInput())
@@ -258,45 +400,58 @@ test('框与框之间是一道细槽（不是空行、也不是线）；没有�
   }
 })
 
-test('主会话回复中：细槽上走流光、模型名变成 Claude 橙并有微光滚过、速度行图标转动，几处同一个相位零点', async ($, on) => {
+test('主会话回复中：细槽、模型名、速度行的图标一起呼吸，几处同相；钩子重画不清零、不重起', async ($, on) => {
   const { clock } = engine(on)
   await $.session.start(SESSION)
   await replying($, clock)
   const since = NOW + 1000
-  await clock.advance(300)
+  await clock.advance(500)
+  const now = since + 500
   const ui = await $.ui.mount(sized(70))
-  // 细槽：rail.tsx，带回复开始的时刻
+  // 细槽：rail.tsx，带回复开始的时刻和画的时刻，没有相位零点、行号
   const rail = await ui.find({ key: 'rail:usage' })
-  expect(rail?.props).toMatchObject({ module: 'hooks/rail.tsx', width: 70, props: { now: since + 300, epoch: since, since, width: 70 } })
-  expect((rail?.props.props as { until?: number }).until).toBeUndefined()
-  // 细槽在面板第 5 行（缓存框 5 行之后），下一道在用量框之后：越往下出发越晚
-  const rows = await Promise.all(['rail:usage', 'rail:messages'].map(async key => ((await ui.find({ key }))?.props.props as { row: number }).row))
-  expect(rows[0]).toBe(5)
-  expect(rows[1]).toBeGreaterThan(rows[0] ?? 0)
-  // 走进第一趟的中段：粗线、亮的头
-  await ui.advance(600)
-  const drawn = await ui.drawn({ in: 'rail:usage' })
-  expect(flat(drawn)).toMatch(/━/)
-  expect(flat(drawn)).toHaveLength(70)
+  expect(rail?.props).toMatchObject({ module: 'hooks/rail.tsx', width: 70, props: { now, since, width: 70 } })
+  expect(Object.keys((rail?.props.props as object) ?? {}).sort()).toEqual(['now', 'since', 'width'])
 
-  // 模型名：glow.tsx，lit 是 Claude 橙，光是更亮的一档
+  // 走到吸得最满的那一拍：细槽中段是粗线，宽度不变；两道细槽同一时刻画得一模一样（同相）
+  await ui.advance(toPeak(now) * STEP)
+  const drawn = flat(await ui.drawn({ in: 'rail:usage' }))
+  expect(drawn).toMatch(/^─+╼━+╾─+$/)
+  expect(cells(drawn)).toBe(70)
+  expect(textsOf(await ui.drawn({ in: 'rail:messages' }))).toEqual(textsOf(await ui.drawn({ in: 'rail:usage' })))
+
+  // 模型名：glow.tsx，lit 是 Claude 橙，亮的一档是光芯
   const model = await ui.find({ key: 'glow:model' })
-  expect(model?.props).toMatchObject({ module: 'hooks/glow.tsx', props: { mode: 'shimmer', lit: LIGHT.body, shine: LIGHT.core, epoch: since, x: 4 } })
+  expect(model?.props).toMatchObject({ module: 'hooks/glow.tsx', props: { mode: 'breathe', lit: LIGHT.body, shine: LIGHT.core, now, since } })
   expect(flat(await ui.drawn({ in: 'glow:model' }))).toBe('Opus 5.5')
 
-  // 速度行：转动的 ◐，读数退到次要色
+  // 速度行：转动的 ◐，颜色跟着呼吸；读数退到次要色
   const spin = await ui.find({ key: 'spin:speed' })
-  expect(spin?.props).toMatchObject({ module: 'hooks/spinner.tsx', width: 1, props: { epoch: since, x: 2, row: 48 - 1 } })
-  expect(flat(await ui.drawn({ in: 'spin:speed' }))).toBe(spinGlyph(900))
+  expect(spin?.props).toMatchObject({ module: 'hooks/spinner.tsx', width: 1, props: { now } })
+  const at = now + toPeak(now) * STEP
+  expect(textsOf(await ui.drawn({ in: 'spin:speed' }))).toEqual([{ text: spinGlyph(at), color: spinColor(at) }])
   await ui.advance(TURN)
-  expect(flat(await ui.drawn({ in: 'spin:speed' }))).toBe(spinGlyph(900 + TURN))
+  expect(flat(await ui.drawn({ in: 'spin:speed' }))).toBe(spinGlyph(at + TURN))
   const numbers = textsOf(await ui.find({ key: 'identity:speed' })).filter(one => /\d|—/.test(one.text))
   expect(numbers.length).toBeGreaterThan(0)
   for (const one of numbers) expect(one.color, one.text).toBe(COLOR.secondary)
+
+  // 钩子过了 5 秒才重画：Client 照自己的拍子接着走，不跳到新的 now
+  await clock.advance(5000)
+  await ui.redraw()
+  expect(((await ui.find({ key: 'spin:speed' }))?.props.props as { now: number }).now).toBe(now + 5000)
+  expect(flat(await ui.drawn({ in: 'spin:speed' }))).toBe(spinGlyph(at + TURN))
+  await ui.advance(TURN)
+  expect(flat(await ui.drawn({ in: 'spin:speed' }))).toBe(spinGlyph(at + 2 * TURN))
+
+  // 一口气之后回到原样：周期固定
+  const first = textsOf(await ui.drawn({ in: 'rail:usage' }))
+  await ui.advance(BREATH.cycleMs)
+  expect(textsOf(await ui.drawn({ in: 'rail:usage' }))).toEqual(first)
   await ui.unmount()
 })
 
-test('回复结束：流光暗下去，模型名落回正文色，新的读数和闪电图标从微光色落回原色；落定后一个 Client 都不剩', async ($, on) => {
+test('回复结束：细槽暗下去，模型名落回正文色，新的读数和闪电图标从微光色落回原色；落定后一个 Client 都不剩', async ($, on) => {
   const { clock } = engine(on)
   await $.session.start(SESSION)
   await replying($, clock)
@@ -319,7 +474,7 @@ test('回复结束：流光暗下去，模型名落回正文色，新的读数�
   expect((await ui.find({ key: 'glow:model' }))?.props).toMatchObject({ props: { until: ended } })
   expect((await ui.find({ key: 'rail:usage' }))?.props).toMatchObject({ props: { until: ended } })
   // Client 自己走完落定：画回原色
-  await ui.advance(FLOW.settleMs + 40)
+  await ui.advance(BREATH.settleMs + STEP)
   const settled = textsOf(await ui.drawn({ in: 'glow:speed' }))
   expect(settled[0]).toMatchObject({ text: ICON.speed, color: COLOR.icon })
   expect(textsOf(await ui.drawn({ in: 'glow:model' })).map(one => one.color)).toEqual([undefined])
@@ -344,7 +499,7 @@ test('子 agent 的回复不算主会话在回复', async ($, on) => {
   await ui.unmount()
 })
 
-test('子 agent 运行中：状态列的 ◐ 转动、任务上滚过微光、耗时每秒走；结束后固定', async ($, on) => {
+test('子 agent 运行中：状态列的 ◐ 转动、任务跟着呼吸亮暗、耗时每秒走；结束后固定', async ($, on) => {
   const { clock } = engine(on)
   await $.session.start(SESSION)
   await $.agent.spawn(spawnInput('核对读数'))
@@ -354,16 +509,15 @@ test('子 agent 运行中：状态列的 ◐ 转动、任务上滚过微光、�
   expect((await ui.find({ key: 'over:mark:ag1' }))?.props).toMatchObject({ position: 'absolute', top: 0, left: 3 })
   expect((await ui.find({ key: 'over:task:ag1' }))?.props).toMatchObject({ position: 'absolute', top: 0, left: 6 })
   expect((await ui.find({ key: 'over:time:ag1' }))?.props).toMatchObject({ position: 'absolute', top: 0, left: 70 - 4 - 6 })
-  // 只有子 agent 在跑：相位的零点是它开始的时刻
-  expect((await ui.find({ key: 'spin:agent:ag1' }))?.props).toMatchObject({ module: 'hooks/spinner.tsx', width: 1, props: { epoch: NOW, x: 5 } })
-  expect((await ui.find({ key: 'glow:agent:ag1' }))?.props).toMatchObject({ module: 'hooks/glow.tsx', props: { mode: 'shimmer', shine: LIGHT.shine, x: 8, since: NOW } })
+  expect((await ui.find({ key: 'spin:agent:ag1' }))?.props).toMatchObject({ module: 'hooks/spinner.tsx', width: 1, props: { now: NOW + 5000 } })
+  expect((await ui.find({ key: 'glow:agent:ag1' }))?.props).toMatchObject({ module: 'hooks/glow.tsx', props: { mode: 'breathe', shine: LIGHT.shine, since: NOW } })
   expect(flat(await ui.drawn({ in: 'glow:agent:ag1' }))).toBe('核对读数')
   expect((await ui.find({ key: 'clock:agent:ag1' }))?.props).toMatchObject({ module: 'hooks/elapsed.tsx', width: 6 })
 
-  expect(flat(await ui.drawn({ in: 'spin:agent:ag1' }))).toBe(spinGlyph(5000))
+  expect(flat(await ui.drawn({ in: 'spin:agent:ag1' }))).toBe(spinGlyph(NOW + 5000))
   expect(flat(await ui.drawn({ in: 'clock:agent:ag1' }))).toBe('    5s')
   await ui.advance(TURN)
-  expect(flat(await ui.drawn({ in: 'spin:agent:ag1' }))).toBe(spinGlyph(5000 + TURN))
+  expect(flat(await ui.drawn({ in: 'spin:agent:ag1' }))).toBe(spinGlyph(NOW + 5000 + TURN))
   await ui.advance(1000 - TURN)
   expect(flat(await ui.drawn({ in: 'clock:agent:ag1' }))).toBe('    6s')
   await ui.advance(60_000)
@@ -381,7 +535,7 @@ test('子 agent 运行中：状态列的 ◐ 转动、任务上滚过微光、�
   await ui.unmount()
 })
 
-test('缓存框保活：续期请求在路上时"进行中"上滚过微光、后面接转动的 ◐，请求结束就去掉', async ($, on) => {
+test('缓存框保活：续期请求在路上时"进行中"跟着呼吸亮暗、后面接转动的 ◐，请求结束就去掉', async ($, on) => {
   let release: () => void = () => undefined
   const gate = new Promise<void>(resolve => (release = resolve))
   // 排在 world 的 fork 之前：这一次续期请求停在路上，放行后读到整段缓存
@@ -397,13 +551,13 @@ test('缓存框保活：续期请求在路上时"进行中"上滚过微光、后
 
   const ui = await $.ui.mount(sized(70))
   const glow = await ui.find({ key: 'glow:keepalive' })
-  // 缓存框第三行，值从第 10 列起；续期开始的时刻是相位的零点
-  expect(glow?.props).toMatchObject({ module: 'hooks/glow.tsx', props: { mode: 'shimmer', shine: LIGHT.shine, row: 3, x: 10, epoch: NOW + PING_AFTER_MS } })
+  const now = NOW + PING_AFTER_MS
+  expect(glow?.props).toMatchObject({ module: 'hooks/glow.tsx', props: { mode: 'breathe', shine: LIGHT.shine, now, since: now } })
   expect(flat(await ui.drawn({ in: 'glow:keepalive' }))).toBe('进行中')
-  expect((await ui.find({ key: 'spin:keepalive' }))?.props).toMatchObject({ module: 'hooks/spinner.tsx', props: { row: 3, x: 17 } })
-  expect(flat(await ui.drawn({ in: 'spin:keepalive' }))).toBe(spinGlyph(0))
+  expect((await ui.find({ key: 'spin:keepalive' }))?.props).toMatchObject({ module: 'hooks/spinner.tsx', props: { now } })
+  expect(flat(await ui.drawn({ in: 'spin:keepalive' }))).toBe(spinGlyph(now))
   await ui.advance(TURN)
-  expect(flat(await ui.drawn({ in: 'spin:keepalive' }))).toBe(spinGlyph(TURN))
+  expect(flat(await ui.drawn({ in: 'spin:keepalive' }))).toBe(spinGlyph(now + TURN))
 
   release()
   await clock.settle()
@@ -418,7 +572,7 @@ test('缓存框保活：续期请求在路上时"进行中"上滚过微光、后
 
 const BAND = { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 120, scroll: { offset: 0, bodyRows: 10 }, view: {} }
 
-test('翻译框正在翻译：上边框扫过亮光、"正在翻译"上滚过微光、◐ 原地转动，后面的字不动', async ($, on) => {
+test('翻译框正在翻译：上边框从标题后面亮起、"正在翻译"跟着呼吸亮暗、◐ 原地转动，后面的字不动', async ($, on) => {
   let release: () => void = () => undefined
   const gate = new Promise<void>(resolve => (release = resolve))
   on('model.complete', async () => {
@@ -433,9 +587,9 @@ test('翻译框正在翻译：上边框扫过亮光、"正在翻译"上滚过微
   await ui.input({ key: input?.key ?? '', text: '把函数改成异步的' })
   await clock.settle()
   await ui.redraw()
-  // 上边框：rail.tsx 的 glint，带着整条线（标题加粗、不上色）和亮一档的线色
+  // 上边框：rail.tsx 的 glint，带着整条线（标题加粗、不上色）、亮一档的线色和最亮处（标题后面那一格）
   const line = await ui.find({ key: 'line:translate' })
-  expect(line?.props).toMatchObject({ module: 'hooks/rail.tsx', width: 120, props: { tint: '#bdbdbd', row: 0 } })
+  expect(line?.props).toMatchObject({ module: 'hooks/rail.tsx', width: 120, props: { tint: '#bdbdbd', center: 3 + cells(`${ICON.translate} 中→英`) + 1 } })
   const rule = (line?.props.props as { cells: Square[] }).cells
   expect(rule.map(cell => cell.ch).join('')).toMatch(/^── .* ─+$/)
   expect(cells(flat(await ui.drawn({ in: 'line:translate' })))).toBe(120)
@@ -443,10 +597,10 @@ test('翻译框正在翻译：上边框扫过亮光、"正在翻译"上滚过微
   expect(flat(await ui.drawn({ in: 'glow:translate' }))).toBe(' 正在翻译')
   const spin = await ui.find({ key: 'spin:translate' })
   expect(spin?.props).toMatchObject({ module: 'hooks/spinner.tsx' })
-  const props = spin?.props.props as { now: number; epoch: number }
-  expect(flat(await ui.drawn({ in: 'spin:translate' }))).toBe(spinGlyph(props.now - props.epoch))
+  const props = spin?.props.props as { now: number }
+  expect(flat(await ui.drawn({ in: 'spin:translate' }))).toBe(spinGlyph(props.now))
   await ui.advance(TURN)
-  expect(flat(await ui.drawn({ in: 'spin:translate' }))).toBe(spinGlyph(props.now - props.epoch + TURN))
+  expect(flat(await ui.drawn({ in: 'spin:translate' }))).toBe(spinGlyph(props.now + TURN))
   release()
   await ui.unmount()
 })

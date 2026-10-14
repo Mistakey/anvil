@@ -1,11 +1,13 @@
 // 运行中子 agent 的耗时（Client 模块，spec D8）：每秒走一次，结束后固定；写法和列宽同列表里的耗时。
 // 照 flightdeck 的 hooks/elapsed.tsx 改写（MIT License, Copyright (c) 2026 Stephen Casella）：
-// since、now 来自钩子的 `$.clock`，两次重画之间 Client 自己加秒；偏离见 motion.ts 的 follow。
+// since、now 来自钩子的 `$.clock`，挂载时起一次 1 秒的计时，之后自己加秒。偏离：钩子重画给了新的 now
+// 也不从它重新数（flightdeck 会，计时没对齐 now，耗时会先多走一秒、下次重画再退回，anvil-k0t.39）；
+// 真实会话里按墙上的第几秒算（motion.ts 的 beat），引擎卡过、帧时钟慢了也不落后。
 import type { ClientModule } from 'claude-code'
 
 import { formatDuration } from './cache'
-import { clockOf, follow, ticking } from './motion'
-import type { Ticking } from './motion'
+import { beat, clockOf } from './motion'
+import type { Beat } from './motion'
 import { padStart } from './text'
 
 type Props = {
@@ -20,22 +22,14 @@ type Props = {
   inverse?: boolean
 }
 
-type Ref = Ticking & { isRunning: boolean }
-type State = { ref: Ref }
+type State = { ref: Beat }
 
 const SECOND = 1000
 
 const Elapsed: ClientModule<Props, State> = (props, surface) => {
   const { Text } = surface.elements
-  const ref: Ref = surface.state?.ref ?? { ...ticking(props.now), isRunning: props.endAt === null }
-  ref.isRunning = props.endAt === null
-  follow(ref, props.now, (ms, fn) => surface.every(ms, fn), SECOND, () => {
-    if (ref.isRunning) {
-      ref.ticks += 1
-      surface.setState({ ref })
-    }
-  })
-  if (surface.state === undefined) surface.setState({ ref })
+  const isRunning = props.endAt === null
+  const ref = beat(surface, props.now, SECOND, () => isRunning)
   const at = props.endAt ?? clockOf(ref, SECOND)
   return (
     <Text color={props.color} inverse={props.inverse === true}>
