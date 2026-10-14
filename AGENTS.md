@@ -42,6 +42,7 @@
 - 伪终端截图的几个坑（anvil-k0t.46）：从 PowerShell 起脚本时 claude 一格颜色都不画（pyte 读到的全是 default），从 Git Bash 起（有 `COLORTERM=truecolor`）才有颜色；打完一长串字马上写回车，回车可能被当成粘贴里的换行，写回车前等 1 秒多；派了后台子 agent 之后主会话在等它，这时敲的斜杠命令会排队不执行，往状态里塞记录的一次性命令要放在派子 agent 之前；主会话忙时点翻译框可能点不中，打的中文会进主输入框被发出去。
 - 引擎给 Pane 画固定底色 #262626（伪终端里每格的背景都是它，不跟终端主题）；AbovePrompt band 在终端自己的底色上。面板的对比度按 #262626 量（anvil-k0t.44）。
 - 嵌套的 `Text` 沿用外层的 `color`：要用终端前景色（不设 color）的字不能包在带颜色的 Text 里，写成兄弟节点（anvil-k0t.44，翻译框标题曾因此变成线色）。
+- 斜杠命令的补全菜单（2.1.299 伪终端实测）：敲 `/anvil` 时菜单那行只画命令名和 `description`，`argumentHint` 不画在菜单里；敲下 `/anvil `（带空格）后才在输入行的命令后面画成灰字。flightdeck 也一样（anvil-k0t.50）。
 - 渲染点里没有 statusLine：`$.ui.status` 是插件自己的一行，mod 读不到、也改不了用户 statusLine 脚本的输出。
 - `Client`（面板里自己在帧时钟上重画的一小块，anvil 的转动图标、耗时；anvil-k0t.39 实测）：
   - `$.ui.resolve(e)` 在 VS Code 上也给 `Client`（`'Client' in els` 为真），画出来是空的 Box；元素表里有 `Client` 的只有终端和桌面，按 `e.surface` 判断。
