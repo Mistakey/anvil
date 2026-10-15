@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code 2.1.296+](https://img.shields.io/badge/Claude%20Code-2.1.296%2B%20mod-d97757.svg)](https://docs.claude.com/en/docs/claude-code)
-[![UI: Chinese](https://img.shields.io/badge/UI-%E4%B8%AD%E6%96%87-c0392b.svg)](#language)
+[![UI: English](https://img.shields.io/badge/UI-English-c0392b.svg)](#language)
 
 English | [简体中文](README.zh-CN.md)
 
@@ -17,7 +17,7 @@ English | [简体中文](README.zh-CN.md)
 - **Cache keepalive.** When a session with a large context sits idle, anvil sends one background request shortly before the prompt cache expires. The request reads the cache, stays out of the transcript, and keeps your next message from paying for a full rebuild. It runs for up to 12 hours per idle stretch.
 - **Cold-send guard.** If the cache has already expired and the context is large, anvil holds back your next message once and tells you what sending it will cost (tokens and an API-price estimate). Press Enter again to send it, or `/clear` to start fresh.
 - **A line above the prompt.** Directory · git · 5-hour usage · 7-day usage · session cost. Git shows the branch with ahead/behind, a paused merge or rebase, conflicts, staged, modified, untracked, stashes and uncommitted lines. Each usage window has a 10-cell heat bar, the percentage and its reset time.
-- **Each reply's speed.** Output tokens per second and time to first token are added to the end of Claude Code's "Worked for …" line.
+- **Each reply's speed.** Output tokens per second and time to first token (TTFT) are added to the end of Claude Code's "Worked for …" line.
 
 Model, effort, context and the cache's real expiry belong to the line below the prompt, your own [status line](#the-line-below-the-prompt). anvil writes its keepalive state to a small file the status line can read.
 
@@ -29,7 +29,7 @@ Model, effort, context and the cache's real expiry belong to the line below the 
 
 ### Language
 
-The interface is in Chinese for now. Support for other languages is planned.
+The interface is in English. It is a handful of short labels, so there are no plans to translate it.
 
 ## Install
 
@@ -75,7 +75,7 @@ The installer may say config options aren't set; the defaults are fine, and [`/c
 | Part | Shows |
 | --- | --- |
 | directory | the repository's name (bold), a linked worktree's name, the subdirectory you're in; outside git, the session's directory |
-| git | branch, `↑` ahead and `↓` behind, `无上游` (no upstream), a paused `merge` or `rebase 2/5`, `=` conflicts, `+` staged, `!` modified, `?` untracked, stashes, uncommitted `+lines −lines` |
+| git | branch, `↑` ahead and `↓` behind, `no upstream`, a paused `merge` or `rebase 2/5`, `=` conflicts, `+` staged, `!` modified, `?` untracked, stashes, uncommitted `+lines −lines` |
 | 5h, 7d | a 10-cell heat bar, the percentage used, and the reset time (`22:00`, or `09:00 10-15` on another day); `—` until the window starts |
 | cost | the session cost Claude Code reports (`/cost`) |
 
@@ -101,7 +101,7 @@ A new session starts from the defaults you set in `/config`.
 
 ### How the guard works
 
-- When the cache has expired and the context is at or above the threshold, anvil drops your next message once, puts it back in the prompt, and shows a line like: *anvil：缓存已过期 1h10m，发送这条消息要重建 152k tokens（约 $3.04）……* (cache expired 1h10m ago; sending this message rebuilds 152k tokens, about $3.04).
+- When the cache has expired and the context is at or above the threshold, anvil drops your next message once, puts it back in the prompt, and shows a line like: *anvil: the cache expired 1h10m ago; sending this message rebuilds 152k tokens (~$3.04). …*
 - Press Enter again to send it, or use `/clear` if you don't need the old context.
 - Slash commands and messages sent by plugins pass straight through. Nothing is blocked right after a compaction or a `/clear`.
 
@@ -114,7 +114,7 @@ The status line is your own script ([`statusLine`](https://docs.claude.com/en/do
 { "renews": true, "error": null, "expiresAt": 1791998610193, "at": 1791995010193 }
 ```
 
-`session_id` is the one in the status line's input. `renews` is true while the keepalive is on and hasn't stopped; `error` is the reason it stopped on a failed renewal (12 hours idle isn't an error); `expiresAt` is anvil's estimate of the expiry (Unix milliseconds, renewals included), which anvil reads back itself when the session is resumed. anvil only writes these files; clean up the ones older than a week from your script if you like. With it, a cache segment can read `󰆼 94% · 有效 · 自动续期` (valid, renewing), `󰆼 94% · 有效至 21:40` (valid until 21:40) or `󰆼 94% · 21:40 已失效` (expired at 21:40), colored by state: green when it will renew, yellow when it lasts only until a set time, red once expired.
+`session_id` is the one in the status line's input. `renews` is true while the keepalive is on and hasn't stopped; `error` is the reason it stopped on a failed renewal (12 hours idle isn't an error); `expiresAt` is anvil's estimate of the expiry (Unix milliseconds, renewals included), which anvil reads back itself when the session is resumed. anvil only writes these files; clean up the ones older than a week from your script if you like. With it, a cache segment can read `󰆼 94% · valid · renewing`, `󰆼 94% · valid until 21:40` or `󰆼 94% · expired 21:40`, colored by state: green when it will renew, yellow when it lasts only until a set time, red once expired.
 
 ## Configure
 

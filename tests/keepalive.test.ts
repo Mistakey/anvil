@@ -37,7 +37,7 @@ async function turn($: Engine, over = {}) {
 /** `/anvil` 列表里保活的状态 */
 async function keepaliveRow($: Engine) {
   const listed = (await $.command.run(anvil(''))).text ?? ''
-  return { text: /\/anvil keepalive .*（现在：(.*)）$/m.exec(listed)?.[1] ?? '' }
+  return { text: /\/anvil keepalive .*\(now: (.*)\)$/m.exec(listed)?.[1] ?? '' }
 }
 
 describe('自动开启', () => {
@@ -65,7 +65,7 @@ describe('自动开启', () => {
     await turn($, { usage: small })
     await w.clock.advance(2 * HOUR)
     expect(w.forks).toHaveLength(0)
-    expect(await keepaliveRow($)).toEqual({ text: '未启用（低于 50k）' })
+    expect(await keepaliveRow($)).toEqual({ text: 'not on (context below 50k)' })
   })
 
   test('/config 关掉自动开启后不开', { options: { autoKeepalive: false } }, async ($, on) => {
@@ -74,7 +74,7 @@ describe('自动开启', () => {
     await turn($)
     await w.clock.advance(2 * HOUR)
     expect(w.forks).toHaveLength(0)
-    expect((await keepaliveRow($)).text).toBe('未启用（自动开启已关闭）')
+    expect((await keepaliveRow($)).text).toBe('not on (auto-enable is off)')
   })
 
   test('/config 改的阈值传到保活', { options: { threshold: 200000 } }, async ($, on) => {
@@ -83,7 +83,7 @@ describe('自动开启', () => {
     await turn($)
     await w.clock.advance(2 * HOUR)
     expect(w.forks).toHaveLength(0)
-    expect((await keepaliveRow($)).text).toBe('未启用（低于 200k）')
+    expect((await keepaliveRow($)).text).toBe('not on (context below 200k)')
   })
 
   test('新的一轮重新计时；子 agent 的轮次不动计时', async ($, on) => {
@@ -134,8 +134,8 @@ describe('/anvil keepalive', () => {
     await w.clock.advance(10 * MIN)
 
     const off = await $.command.run(anvil('keepalive'))
-    expect(off.text).toBe('缓存保活已关闭（本会话）')
-    expect(await keepaliveRow($)).toEqual({ text: '已关闭（本会话）' })
+    expect(off.text).toBe('Cache keepalive off (this session)')
+    expect(await keepaliveRow($)).toEqual({ text: 'off (this session)' })
     await w.clock.advance(50 * MIN)
     expect(w.forks).toHaveLength(0)
     // 关着的时候，新的一轮也不开
@@ -144,21 +144,21 @@ describe('/anvil keepalive', () => {
     expect(w.forks).toHaveLength(0)
 
     const back = await $.command.run(anvil(' keepalive '))
-    expect(back.text).toBe('缓存保活已开启（本会话）')
-    expect(await keepaliveRow($)).toEqual({ text: '已启用（本会话）' })
+    expect(back.text).toBe('Cache keepalive on (this session)')
+    expect(await keepaliveRow($)).toEqual({ text: 'on (this session)' })
     // 这段空闲已过 50 分钟、缓存还有效：马上补一次
     await w.clock.advance(1 * SEC)
     expect(w.forks).toHaveLength(1)
-    expect(await keepaliveRow($)).toEqual({ text: '进行中（本会话）' })
+    expect(await keepaliveRow($)).toEqual({ text: 'renewing (this session)' })
   })
 
   test('/config 关掉自动开启时，切换一次就在本会话开启，按时发 fork', { options: { autoKeepalive: false } }, async ($, on) => {
     const w = engine(on, { forks: [WARM, WARM] })
     await $.session.start(SESSION)
     await turn($)
-    expect((await keepaliveRow($)).text).toBe('未启用（自动开启已关闭）')
+    expect((await keepaliveRow($)).text).toBe('not on (auto-enable is off)')
 
-    expect((await $.command.run(anvil('keepalive'))).text).toBe('缓存保活已开启（本会话）')
+    expect((await $.command.run(anvil('keepalive'))).text).toBe('Cache keepalive on (this session)')
     await w.clock.advance(49 * MIN)
     expect(w.forks).toHaveLength(0)
     await w.clock.advance(1 * MIN)
@@ -167,7 +167,7 @@ describe('/anvil keepalive', () => {
     await w.clock.advance(50 * MIN)
     expect(w.forks).toHaveLength(2)
 
-    expect((await $.command.run(anvil('keepalive'))).text).toBe('缓存保活已关闭（本会话）')
+    expect((await $.command.run(anvil('keepalive'))).text).toBe('Cache keepalive off (this session)')
     await w.clock.advance(2 * HOUR)
     expect(w.forks).toHaveLength(2)
   })
@@ -177,10 +177,10 @@ describe('/anvil keepalive', () => {
     const w = engine(on, { forks: [WARM], reply: { usage: small } })
     await $.session.start(SESSION)
     await turn($, { usage: small })
-    expect((await keepaliveRow($)).text).toBe('未启用（低于 50k）')
+    expect((await keepaliveRow($)).text).toBe('not on (context below 50k)')
 
-    expect((await $.command.run(anvil('keepalive'))).text).toBe('缓存保活已开启（本会话）')
-    expect(await keepaliveRow($)).toEqual({ text: '已启用（本会话）' })
+    expect((await $.command.run(anvil('keepalive'))).text).toBe('Cache keepalive on (this session)')
+    expect(await keepaliveRow($)).toEqual({ text: 'on (this session)' })
     await w.clock.advance(50 * MIN)
     expect(w.forks).toHaveLength(1)
   })
@@ -190,16 +190,16 @@ describe('/anvil keepalive', () => {
     await $.session.start(SESSION)
     await turn($)
     await w.clock.advance(50 * MIN)
-    expect((await keepaliveRow($)).text).toBe('已停止（续期时缓存已过期）')
+    expect((await keepaliveRow($)).text).toBe('stopped (cache had expired by renewal)')
 
-    expect((await $.command.run(anvil('keepalive'))).text).toBe('缓存保活已开启（本会话）')
-    expect(await keepaliveRow($)).toEqual({ text: '已启用（本会话）' })
+    expect((await $.command.run(anvil('keepalive'))).text).toBe('Cache keepalive on (this session)')
+    expect(await keepaliveRow($)).toEqual({ text: 'on (this session)' })
     // 缓存还有效、已过发请求的时刻：马上补一次
     await w.clock.advance(1 * SEC)
     expect(w.forks).toHaveLength(2)
-    expect((await keepaliveRow($)).text).toBe('进行中（本会话）')
+    expect((await keepaliveRow($)).text).toBe('renewing (this session)')
 
-    expect((await $.command.run(anvil('keepalive'))).text).toBe('缓存保活已关闭（本会话）')
+    expect((await $.command.run(anvil('keepalive'))).text).toBe('Cache keepalive off (this session)')
   })
 
   test('本会话的开关只记在 $.state 里：新会话（引擎重置 $.state）回到默认', async ($, on) => {
@@ -217,9 +217,9 @@ describe('/anvil keepalive', () => {
     await $.session.start(SESSION)
     await turn($)
     const list = (await $.command.run(anvil(''))).text ?? ''
-    expect(list).toMatch(/^ {2}\/anvil keepalive +开启或关闭缓存保活（现在：已启用）$/m)
-    expect((await $.command.run(anvil('keepalive off'))).text).toStartWith('没有子命令 keepalive off。')
-    expect((await $.command.run(anvil('keepalive on'))).text).toStartWith('没有子命令 keepalive on。')
+    expect(list).toMatch(/^ {2}\/anvil keepalive +Turn prompt-cache keepalive on or off \(now: on\)$/m)
+    expect((await $.command.run(anvil('keepalive off'))).text).toStartWith('Unknown subcommand: keepalive off')
+    expect((await $.command.run(anvil('keepalive on'))).text).toStartWith('Unknown subcommand: keepalive on')
   })
 })
 
@@ -231,10 +231,10 @@ describe('停下', () => {
     await w.clock.advance(IDLE_LIMIT_MS - 1 * SEC)
     // 50 分钟一次，12 小时内 14 次（最后一次在 11h40m）
     expect(w.forks).toHaveLength(Math.floor(IDLE_LIMIT_MS / PING_AFTER_MS))
-    expect((await keepaliveRow($)).text).toBe('进行中')
+    expect((await keepaliveRow($)).text).toBe('renewing')
 
     await w.clock.advance(1 * SEC)
-    expect(await keepaliveRow($)).toEqual({ text: '已停止（空闲超过 12 小时）' })
+    expect(await keepaliveRow($)).toEqual({ text: 'stopped (idle for over 12 hours)' })
     await w.clock.advance(3 * HOUR)
     expect(w.forks).toHaveLength(14)
   })
@@ -244,11 +244,11 @@ describe('停下', () => {
     await $.session.start(SESSION)
     await turn($)
     await w.clock.advance(IDLE_LIMIT_MS)
-    expect((await keepaliveRow($)).text).toBe('已停止（空闲超过 12 小时）')
+    expect((await keepaliveRow($)).text).toBe('stopped (idle for over 12 hours)')
     // 最后一次续期在 11h40m，缓存到 12h40m 过期；过期前 10 分钟敲一次
     await w.clock.advance(10 * MIN)
-    expect((await $.command.run(anvil('keepalive'))).text).toBe('缓存保活已开启（本会话）')
-    expect(await keepaliveRow($)).toEqual({ text: '进行中（本会话）' })
+    expect((await $.command.run(anvil('keepalive'))).text).toBe('Cache keepalive on (this session)')
+    expect(await keepaliveRow($)).toEqual({ text: 'renewing (this session)' })
 
     // 上一次续期之后 50 分钟（12h30m）照常发、续期
     await w.clock.advance(20 * MIN)
@@ -258,9 +258,9 @@ describe('停下', () => {
     // 新的上限在开启后 12 小时（24h10m）：之前每 50 分钟一次，最后一次在 23h20m
     await w.clock.advance(IDLE_LIMIT_MS - 20 * MIN - 1 * SEC)
     expect(w.forks).toHaveLength(28)
-    expect((await keepaliveRow($)).text).toBe('进行中（本会话）')
+    expect((await keepaliveRow($)).text).toBe('renewing (this session)')
     await w.clock.advance(1 * SEC)
-    expect(await keepaliveRow($)).toEqual({ text: '已停止（空闲超过 12 小时）' })
+    expect(await keepaliveRow($)).toEqual({ text: 'stopped (idle for over 12 hours)' })
     await w.clock.advance(3 * HOUR)
     expect(w.forks).toHaveLength(28)
   })
@@ -277,24 +277,24 @@ describe('停下', () => {
       await w.clock.advance(50 * MIN)
       expect(w.forks).toHaveLength(1)
       expect(cacheOf(w.state).expiresAt).toBe(START + HOUR)
-      expect(await keepaliveRow($)).toEqual({ text: '已停止（续期时缓存已过期）' })
+      expect(await keepaliveRow($)).toEqual({ text: 'stopped (cache had expired by renewal)' })
       await w.clock.advance(3 * HOUR)
       expect(w.forks).toHaveLength(1)
     })
   }
 
   for (const [answer, reason] of [
-    [{ isAnswered: false, reason: 'api-error', status: 429, error: 'rate_limit', usage: usage() }, '续期请求出错：HTTP 429'],
-    [{ isAnswered: false, reason: 'empty-reply', usage: usage() }, '续期请求没有回复'],
-    [{ isAnswered: false, reason: 'aborted', usage: usage() }, '续期请求被中断'],
-    [{ isAnswered: false, reason: 'nothing-to-fork' }, '还没有可续期的对话'],
+    [{ isAnswered: false, reason: 'api-error', status: 429, error: 'rate_limit', usage: usage() }, 'renewal failed: HTTP 429'],
+    [{ isAnswered: false, reason: 'empty-reply', usage: usage() }, 'renewal got no reply'],
+    [{ isAnswered: false, reason: 'aborted', usage: usage() }, 'renewal was aborted'],
+    [{ isAnswered: false, reason: 'nothing-to-fork' }, 'no conversation to renew yet'],
   ] satisfies [ModelForkResult, string][]) {
     test(`请求出错停下，原因为红：${reason}`, async ($, on) => {
       const w = engine(on, { forks: [answer, WARM] })
       await $.session.start(SESSION)
       await turn($)
       await w.clock.advance(50 * MIN)
-      expect(await keepaliveRow($)).toEqual({ text: `已停止（${reason}）` })
+      expect(await keepaliveRow($)).toEqual({ text: `stopped (${reason})` })
       await w.clock.advance(3 * HOUR)
       expect(w.forks).toHaveLength(1)
     })
@@ -307,7 +307,7 @@ describe('停下', () => {
     await turn($)
     await w.clock.advance(50 * MIN)
     const row = await keepaliveRow($)
-    expect(row.text).toStartWith('已停止（续期请求出错：')
+    expect(row.text).toStartWith('stopped (renewal failed: ')
     await w.clock.advance(3 * HOUR)
     expect(w.forks).toHaveLength(1)
   })
@@ -317,15 +317,15 @@ describe('停下', () => {
     await $.session.start(SESSION)
     await turn($)
     await w.clock.advance(50 * MIN)
-    expect((await keepaliveRow($)).text).toBe('已停止（续期时缓存已过期）')
+    expect((await keepaliveRow($)).text).toBe('stopped (cache had expired by renewal)')
 
     await w.clock.advance(1 * HOUR)
     await drain($.turn.step(stepInput()))
-    expect((await keepaliveRow($)).text).toBe('已启用')
+    expect((await keepaliveRow($)).text).toBe('on')
     await $.turn.complete(turnInput())
     await w.clock.advance(50 * MIN)
     expect(w.forks).toHaveLength(2)
-    expect((await keepaliveRow($)).text).toBe('进行中')
+    expect((await keepaliveRow($)).text).toBe('renewing')
   })
 })
 
@@ -337,12 +337,12 @@ describe('恢复会话', () => {
       await turn($)
       await turn($, { usage: usage({ cache_read_input_tokens: 0, cache_creation_input_tokens: 150500 }) })
       await w.clock.advance(50 * MIN)
-      expect((await keepaliveRow($)).text).toBe('已停止（续期时缓存已过期）')
+      expect((await keepaliveRow($)).text).toBe('stopped (cache had expired by renewal)')
       expect(cacheOf(w.state).coldWrites.count).toBe(1)
 
       // 会话 B：10 分钟前还有响应，缓存没过期
       await $.classic.SessionStart({ source, seconds_since_last_response: 600, context_tokens: 200000, prompt_cache_likely_expired: false })
-      expect(await keepaliveRow($)).toEqual({ text: '已启用' })
+      expect(await keepaliveRow($)).toEqual({ text: 'on' })
       const b = cacheOf(w.state)
       expect(b.hitRate).toEqual({ last: null, session: null })
       expect(b.coldWrites).toEqual({ count: 0, usd: 0 })
@@ -354,7 +354,7 @@ describe('恢复会话', () => {
       expect(w.forks).toHaveLength(1)
       await w.clock.advance(2 * SEC)
       expect(w.forks).toHaveLength(2)
-      expect((await keepaliveRow($)).text).toBe('进行中')
+      expect((await keepaliveRow($)).text).toBe('renewing')
     })
   }
 })
@@ -426,7 +426,7 @@ describe('热重载', () => {
     await $.session.start(SESSION)
     await reload($, w)
     expect(cacheOf(w.state)).toEqual(view(cacheMemory()))
-    expect(await keepaliveRow($)).toEqual({ text: '已启用' })
+    expect(await keepaliveRow($)).toEqual({ text: 'on' })
 
     // 上一次请求之后满 50 分钟（START + 20 分钟）发 fork，以这次请求顺延过期时刻
     await w.clock.advance(20 * MIN - 2 * SEC)
@@ -434,7 +434,7 @@ describe('热重载', () => {
     await w.clock.advance(2 * SEC)
     expect(w.forks).toHaveLength(1)
     expect(cacheOf(w.state).expiresAt).toBe(START + 20 * MIN + HOUR)
-    expect((await keepaliveRow($)).text).toBe('进行中')
+    expect((await keepaliveRow($)).text).toBe('renewing')
     await w.clock.advance(50 * MIN)
     expect(w.forks).toHaveLength(2)
   })
@@ -445,22 +445,22 @@ describe('热重载', () => {
     const w = engine(on, { forks: Array.from({ length: 5 }, () => WARM), rewrite: previous(cache, loopMemory({ renewals: 13 })) })
     await $.session.start(SESSION)
     await reload($, w)
-    expect(await keepaliveRow($)).toEqual({ text: '进行中' })
+    expect(await keepaliveRow($)).toEqual({ text: 'renewing' })
 
     await w.clock.advance(10 * MIN)
     expect(w.forks).toHaveLength(1)
     await w.clock.advance(20 * MIN)
-    expect(await keepaliveRow($)).toEqual({ text: '已停止（空闲超过 12 小时）' })
+    expect(await keepaliveRow($)).toEqual({ text: 'stopped (idle for over 12 hours)' })
     await w.clock.advance(3 * HOUR)
     expect(w.forks).toHaveLength(1)
   })
 
   test('重载时保活已停下：保持停下和原因，不发；下一次主会话请求之后照常', async ($, on) => {
-    const stopped = { kind: 'reading', reason: '续期时缓存已过期' } as const
+    const stopped = { kind: 'reading', reason: 'cache had expired by renewal' } as const
     const w = engine(on, { forks: [WARM], rewrite: previous(cacheMemory(), loopMemory({ stopped })) })
     await $.session.start(SESSION)
     await reload($, w)
-    expect(await keepaliveRow($)).toEqual({ text: '已停止（续期时缓存已过期）' })
+    expect(await keepaliveRow($)).toEqual({ text: 'stopped (cache had expired by renewal)' })
     await w.clock.advance(3 * HOUR)
     expect(w.forks).toHaveLength(0)
 
@@ -476,7 +476,7 @@ describe('热重载', () => {
     await reload($, w)
     await w.clock.advance(2 * HOUR)
     expect(w.forks).toHaveLength(0)
-    expect((await $.prompt.submit(typed('继续'))).drop ?? '').toStartWith('anvil：缓存已过期')
+    expect((await $.prompt.submit(typed('继续'))).drop ?? '').toStartWith('anvil: the cache expired')
   })
 
   test('重载前续期请求还在路上：那次请求随旧模块丢了，重载后补发一次', async ($, on) => {
@@ -497,7 +497,7 @@ describe('热重载', () => {
     await $.session.start(SESSION)
     await reload($, w)
     expect(cacheOf(w.state)).toMatchObject({ expiresAt: null, context: 150000, hitRate: { last: null, session: null } })
-    expect((await keepaliveRow($)).text).toBe('已启用')
+    expect((await keepaliveRow($)).text).toBe('on')
     await w.clock.advance(2 * HOUR)
     expect(w.forks).toHaveLength(0)
   })
@@ -516,7 +516,7 @@ describe('热重载', () => {
     await turn($)
     await $.command.run(anvil('keepalive'))
     await reload($, w)
-    expect((await keepaliveRow($)).text).toBe('已关闭（本会话）')
+    expect((await keepaliveRow($)).text).toBe('off (this session)')
     await w.clock.advance(2 * HOUR)
     expect(w.forks).toHaveLength(0)
   })
@@ -548,33 +548,33 @@ describe('保活状态', () => {
   test('保活状态：自动开启的五种，加上本会话手动开、手动关', () => {
     const idle = { stopped: null, renewing: false, inFlight: false }
     const base = { settings: SETTINGS, override: null, context: 151000, loop: idle }
-    expect(keepaliveStatus(base)).toEqual({ text: '已启用' })
-    expect(keepaliveStatus({ ...base, loop: { stopped: null, renewing: true, inFlight: false } })).toEqual({ text: '进行中' })
-    expect(keepaliveStatus({ ...base, override: false })).toEqual({ text: '已关闭（本会话）', color: COLOR.secondary })
-    expect(keepaliveStatus({ ...base, context: 32000 })).toEqual({ text: '未启用（低于 50k）', color: COLOR.secondary })
+    expect(keepaliveStatus(base)).toEqual({ text: 'on' })
+    expect(keepaliveStatus({ ...base, loop: { stopped: null, renewing: true, inFlight: false } })).toEqual({ text: 'renewing' })
+    expect(keepaliveStatus({ ...base, override: false })).toEqual({ text: 'off (this session)', color: COLOR.secondary })
+    expect(keepaliveStatus({ ...base, context: 32000 })).toEqual({ text: 'not on (context below 50k)', color: COLOR.secondary })
     expect(keepaliveStatus({ ...base, settings: { ...SETTINGS, autoKeepalive: false } })).toEqual({
-      text: '未启用（自动开启已关闭）',
+      text: 'not on (auto-enable is off)',
       color: COLOR.secondary,
     })
-    expect(keepaliveStatus({ ...base, loop: { stopped: { kind: 'limit', reason: '空闲超过 12 小时' }, renewing: true, inFlight: false } })).toEqual({
-      text: '已停止（空闲超过 12 小时）',
+    expect(keepaliveStatus({ ...base, loop: { stopped: { kind: 'limit', reason: 'idle for over 12 hours' }, renewing: true, inFlight: false } })).toEqual({
+      text: 'stopped (idle for over 12 hours)',
       color: COLOR.secondary,
     })
-    expect(keepaliveStatus({ ...base, loop: { stopped: { kind: 'reading', reason: '续期时缓存已过期' }, renewing: false, inFlight: false } })).toEqual({
-      text: '已停止（续期时缓存已过期）',
+    expect(keepaliveStatus({ ...base, loop: { stopped: { kind: 'reading', reason: 'cache had expired by renewal' }, renewing: false, inFlight: false } })).toEqual({
+      text: 'stopped (cache had expired by renewal)',
       color: COLOR.danger,
     })
-    expect(keepaliveStatus({ ...base, loop: { stopped: { kind: 'error', reason: '续期请求被中断' }, renewing: false, inFlight: false } }).color).toBe(COLOR.danger)
+    expect(keepaliveStatus({ ...base, loop: { stopped: { kind: 'error', reason: 'renewal was aborted' }, renewing: false, inFlight: false } }).color).toBe(COLOR.danger)
 
     // 本会话手动开：不看自动开启和阈值；手动关：不看停下
     const manual = { ...base, override: true, context: 0, settings: { ...SETTINGS, autoKeepalive: false } }
-    expect(keepaliveStatus(manual)).toEqual({ text: '已启用（本会话）' })
-    expect(keepaliveStatus({ ...manual, loop: { stopped: null, renewing: true, inFlight: false } })).toEqual({ text: '进行中（本会话）' })
-    expect(keepaliveStatus({ ...manual, loop: { stopped: { kind: 'limit', reason: '空闲超过 12 小时' }, renewing: true, inFlight: false } }).text).toBe(
-      '已停止（空闲超过 12 小时）',
+    expect(keepaliveStatus(manual)).toEqual({ text: 'on (this session)' })
+    expect(keepaliveStatus({ ...manual, loop: { stopped: null, renewing: true, inFlight: false } })).toEqual({ text: 'renewing (this session)' })
+    expect(keepaliveStatus({ ...manual, loop: { stopped: { kind: 'limit', reason: 'idle for over 12 hours' }, renewing: true, inFlight: false } }).text).toBe(
+      'stopped (idle for over 12 hours)',
     )
-    expect(keepaliveStatus({ ...base, override: false, loop: { stopped: { kind: 'error', reason: '续期请求被中断' }, renewing: false, inFlight: false } }).text).toBe(
-      '已关闭（本会话）',
+    expect(keepaliveStatus({ ...base, override: false, loop: { stopped: { kind: 'error', reason: 'renewal was aborted' }, renewing: false, inFlight: false } }).text).toBe(
+      'off (this session)',
     )
   })
 
@@ -585,8 +585,8 @@ describe('保活状态', () => {
     expect(statuslineFile({ ...base, context: 1000 }, null, 7)).toEqual({ renews: false, error: null, expiresAt: null, at: 7 })
     expect(statuslineFile({ ...base, override: true, context: 1000 }, null, 7).renews).toBe(true)
     expect(statuslineFile({ ...base, override: false }, null, 7).renews).toBe(false)
-    expect(statuslineFile({ ...base, loop: { ...idle, stopped: { kind: 'limit', reason: '空闲超过 12 小时' } } }, null, 7)).toEqual({ renews: false, error: null, expiresAt: null, at: 7 })
-    expect(statuslineFile({ ...base, loop: { ...idle, stopped: { kind: 'error', reason: '续期请求被中断' } } }, null, 7)).toEqual({ renews: false, error: '续期请求被中断', expiresAt: null, at: 7 })
+    expect(statuslineFile({ ...base, loop: { ...idle, stopped: { kind: 'limit', reason: 'idle for over 12 hours' } } }, null, 7)).toEqual({ renews: false, error: null, expiresAt: null, at: 7 })
+    expect(statuslineFile({ ...base, loop: { ...idle, stopped: { kind: 'error', reason: 'renewal was aborted' } } }, null, 7)).toEqual({ renews: false, error: 'renewal was aborted', expiresAt: null, at: 7 })
   })
 
   test('状态文件写在 ~/.claude/anvil/sessions/<session_id>.json，按引擎的会话 id；变了才写', async ($, on) => {
@@ -603,7 +603,7 @@ describe('保活状态', () => {
     expect(w.writes.length).toBe(settled)
     // 续期读数不达标：停下，写原因
     await w.clock.advance(50 * MIN)
-    expect(file()).toMatchObject({ renews: false, error: '续期时缓存已过期' })
+    expect(file()).toMatchObject({ renews: false, error: 'cache had expired by renewal' })
     // 本会话手动关掉
     await turn($)
     await $.command.run(anvil('keepalive'))

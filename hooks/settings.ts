@@ -7,13 +7,13 @@ import type { Settings } from '../types'
 
 function number(options: PluginOptions, key: keyof Settings): number {
   const value = options[key]
-  if (typeof value !== 'number') throw new Error(`anvil：设置 ${key} 应为数字，收到 ${JSON.stringify(value)}`)
+  if (typeof value !== 'number') throw new Error(`anvil: setting ${key} should be a number, got ${JSON.stringify(value)}`)
   return value
 }
 
 function boolean(options: PluginOptions, key: keyof Settings): boolean {
   const value = options[key]
-  if (typeof value !== 'boolean') throw new Error(`anvil：设置 ${key} 应为开关，收到 ${JSON.stringify(value)}`)
+  if (typeof value !== 'boolean') throw new Error(`anvil: setting ${key} should be a boolean, got ${JSON.stringify(value)}`)
   return value
 }
 

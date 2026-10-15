@@ -89,8 +89,8 @@ test('每段末尾：原生那行画出的字和接在后面的读数；有子 a
   expect(engineTurnText({ word: 'Baked', durationMs: 64_000 }, { ...turn, waitingAgents: 1 })).toBe('Waiting for 1 background agent to finish')
   expect(engineTurnText({ word: 'Baked', durationMs: 64_000 }, { ...turn, waitingAgents: 2 })).toBe('Waiting for 2 background agents to finish')
   // 首字取这一段第一次请求的，不是平均
-  expect(turnSuffix(turn)).toBe(' · 68 token/s · 首字 2.0s')
-  expect(turnSuffix({ ...turn, tally: one(99, 1842, 1792, true), firstTokenMs: 1792 })).toBe(' · ≥54 token/s · 首字 1.8s')
+  expect(turnSuffix(turn)).toBe(' · 68 token/s · TTFT 2.0s')
+  expect(turnSuffix({ ...turn, tally: one(99, 1842, 1792, true), firstTokenMs: 1792 })).toBe(' · ≥54 token/s · TTFT 1.8s')
 })
 
 test('秒数：不到 60 秒一位小数，60 秒起按 1m35s', () => {
@@ -153,8 +153,8 @@ test('每段回复末尾接这一段的 token/s（这一段各次请求加权，
   await turn($, clock, timing, 't1', 'u1', [{ firstMs: 2000, streamMs: 8000, output: 400 }, { firstMs: 1000, streamMs: 2000, output: 280 }])
   // 第二段一次请求，整段一起到
   await turn($, clock, timing, 't2', 'u2', [{ firstMs: 1800, streamMs: 50, output: 99 }])
-  expect(await turnRow($, 'u1')).toContain(' · 68 token/s · 首字 2.0s')
-  expect(await turnRow($, 'u2')).toContain(' · ≥54 token/s · 首字 1.8s')
+  expect(await turnRow($, 'u1')).toContain(' · 68 token/s · TTFT 2.0s')
+  expect(await turnRow($, 'u2')).toContain(' · ≥54 token/s · TTFT 1.8s')
   // 读数压在原生那行的最后一行上，从原生的字（图标占 2 格）之后起
   const ui = await $.ui.mount({ plugin: 'anvil', surface: 'terminal', component: 'TurnDuration', requestId: 'u1', props: { word: 'Baked', durationMs: 12_000 } })
   const overlay = (await ui.findAll({ type: 'Box' })).find(box => box.props.position === 'absolute')
@@ -175,7 +175,7 @@ test('换了对话（/clear）：之前的收尾行不再接读数，之后的�
   await $.classic.SessionStart({ source: 'clear' })
   expect(await turnRow($, 'u1')).not.toContain('token/s')
   await turn($, clock, timing, 't2', 'u2', [{ firstMs: 1000, streamMs: 4000, output: 400 }])
-  expect(await turnRow($, 'u2')).toContain(' · 100 token/s · 首字 1.0s')
+  expect(await turnRow($, 'u2')).toContain(' · 100 token/s · TTFT 1.0s')
 })
 
 test('收尾时还有子 agent 在跑：原生那行写成在等它，读数接在那句后面；子 agent 结束后照常', async ($, on) => {

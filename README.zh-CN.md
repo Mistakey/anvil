@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code 2.1.296+](https://img.shields.io/badge/Claude%20Code-2.1.296%2B%20mod-d97757.svg)](https://docs.claude.com/en/docs/claude-code)
-[![界面：中文](https://img.shields.io/badge/UI-%E4%B8%AD%E6%96%87-c0392b.svg)](#语言)
+[![界面：英文](https://img.shields.io/badge/UI-English-c0392b.svg)](#语言)
 
 [English](README.md) | 简体中文
 
@@ -17,7 +17,7 @@
 - **缓存保活**：上下文较大的会话空闲时，anvil 在 prompt 缓存快过期前发一个后台请求，读一遍缓存，不进对话记录，你回来发的下一条消息就不用为整段重建付钱。每段空闲最多续 12 小时。
 - **冷发送守卫**：缓存已经过期、上下文又大时，anvil 把你的下一条消息拦下一次，告诉你发出去要重建多少（token 数和按 API 牌价估的金额）。再按一次 Enter 就发出；不需要这段上下文时用 `/clear` 重新开始。
 - **主输入框上方一行**：目录名 · git · 5 小时用量 · 7 天用量 · 本会话花费。git 写分支和领先落后、停在一半的 merge 或 rebase、冲突、已暂存、已修改、未跟踪、储藏和未提交的行数；两个用量窗口各有 10 格热度进度条、百分比和重置时刻。
-- **每段回复的速度**：输出 token/s 和首字等待接在 Claude Code 原生的「Worked for …」那行后面。
+- **每段回复的速度**：输出 token/s 和首字等待（TTFT）接在 Claude Code 原生的「Worked for …」那行后面。
 
 模型、effort、上下文和缓存的真实过期时刻归主输入框下方那一行，也就是你自己的 [statusline](#主输入框下方那一行)。anvil 把保活状态写进一个小文件，供 statusline 读。
 
@@ -29,7 +29,7 @@
 
 ### 语言
 
-界面目前只有中文，其他语言在计划中。
+界面文字是英文。只有几处短标签和提示，不打算做多语言。
 
 ## 安装
 
@@ -75,7 +75,7 @@ claude --plugin-dir ./anvil
 | 部分 | 显示 |
 | --- | --- |
 | 目录名 | 仓库名（加粗）、linked worktree 名、所在的子目录；不在 git 里时是会话目录名 |
-| git | 分支、`↑` 领先 `↓` 落后、`无上游`、停在一半的 `merge` 或 `rebase 2/5`、`=` 冲突、`+` 已暂存、`!` 已修改、`?` 未跟踪、储藏、未提交的 `+行 −行` |
+| git | 分支、`↑` 领先 `↓` 落后、`no upstream`（无上游）、停在一半的 `merge` 或 `rebase 2/5`、`=` 冲突、`+` 已暂存、`!` 已修改、`?` 未跟踪、储藏、未提交的 `+行 −行` |
 | 5h、7d | 10 格热度进度条、已用百分比、重置时刻（当天写 `22:00`，不是当天写 `09:00 10-15`）；窗口还没开始时写 `—` |
 | 花费 | Claude Code 报的本会话花费（`/cost` 同源） |
 
@@ -101,7 +101,7 @@ claude --plugin-dir ./anvil
 
 ### 守卫怎么工作
 
-- 缓存已过期、上下文达到阈值时，anvil 把你的下一条消息拦下一次、放回主输入框，提示一行，如：*anvil：缓存已过期 1h10m，发送这条消息要重建 152k tokens（约 $3.04）……*
+- 缓存已过期、上下文达到阈值时，anvil 把你的下一条消息拦下一次、放回主输入框，提示一行，如：*anvil: the cache expired 1h10m ago; sending this message rebuilds 152k tokens (~$3.04). …*（缓存已过期 1h10m，发送这条消息要重建 152k tokens，约 $3.04）
 - 再按一次 Enter 就发出；不需要旧的上下文时用 `/clear`。
 - 斜杠命令和插件发起的消息直接放行；刚压缩完、刚 `/clear` 后不拦。
 

@@ -222,7 +222,7 @@ async function toggleKeepalive($: EngineInterface, cache: Cache, loop: Loop, set
   await update($, keepaliveOverride, () => isOn)
   if (isOn) restart(loop, await $.clock.now())
   await armKeepalive($, cache, loop, settings)
-  return isOn ? '缓存保活已开启（本会话）' : '缓存保活已关闭（本会话）'
+  return isOn ? 'Cache keepalive on (this session)' : 'Cache keepalive off (this session)'
 }
 
 /** 保活状态的输入：设置、本会话的切换、上下文、循环的读数 */

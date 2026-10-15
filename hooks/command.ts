@@ -7,7 +7,7 @@
  */
 export function describe(subcommands: readonly Subcommand[]): { description: string; argumentHint: string } {
   return {
-    description: '在本会话切换缓存保活；不带参数时列出现在的状态',
+    description: 'Toggle prompt-cache keepalive for this session; with no argument, list the current state',
     argumentHint: `[${subcommands.map(({ name }) => name).join('|')}]`,
   }
 }
@@ -28,12 +28,12 @@ export type Subcommand = {
 /** 列表里的一行：子命令和它在本会话现在的状态 */
 export type Listed = Subcommand & { state: string }
 
-const USAGE = '用法：/anvil <子命令>，敲一次切换一次，只作用于当前会话'
+const USAGE = 'Usage: /anvil <subcommand>. Each run toggles it, for this session only'
 
 function list(subcommands: readonly Listed[]): string {
-  if (subcommands.length === 0) return `${USAGE}\n  暂无可用的子命令`
+  if (subcommands.length === 0) return `${USAGE}\n  No subcommands available`
   const width = Math.max(...subcommands.map(subcommand => subcommand.name.length))
-  const rows = subcommands.map(({ name, summary, state }) => `  /anvil ${name.padEnd(width)}  ${summary}（现在：${state}）`)
+  const rows = subcommands.map(({ name, summary, state }) => `  /anvil ${name.padEnd(width)}  ${summary} (now: ${state})`)
   return [USAGE, ...rows].join('\n')
 }
 
@@ -41,5 +41,5 @@ function list(subcommands: readonly Listed[]): string {
 export function answer(subcommands: readonly Listed[], args: string): string {
   const asked = args.trim().split(/\s+/).join(' ')
   if (asked === '') return list(subcommands)
-  return `没有子命令 ${asked}。\n${list(subcommands)}`
+  return `Unknown subcommand: ${asked}\n${list(subcommands)}`
 }

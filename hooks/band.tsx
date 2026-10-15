@@ -175,7 +175,7 @@ export function gitSegments(git: GitView | null, names: number = NAME_CELLS, sho
   if (branch.length > 0) {
     if (git.ahead > 0) branch.push({ text: ` ↑${git.ahead}`, color: COLOR.warn })
     if (git.behind > 0) branch.push({ text: ` ↓${git.behind}`, color: COLOR.warn })
-    if (git.noUpstream) branch.push({ text: ' 无上游', color: COLOR.secondary })
+    if (git.noUpstream) branch.push({ text: ' no upstream', color: COLOR.secondary })
   }
   const operation = git.operation ? opSegments(git.operation) : []
   if (short) return spaced([branch, operation])

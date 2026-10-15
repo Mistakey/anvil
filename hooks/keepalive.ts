@@ -24,7 +24,7 @@ export const IDLE_LIMIT_MS = 12 * 60 * 60 * 1000
 /** 只读一遍缓存，回复越短越好：fork 不能设输出上限（cache-tax 的提示词） */
 export const PING_PROMPT = 'Reply with the single word: warm'
 
-export const KEEPALIVE_SUBCOMMAND: Subcommand = { name: 'keepalive', summary: '开启或关闭缓存保活' }
+export const KEEPALIVE_SUBCOMMAND: Subcommand = { name: 'keepalive', summary: 'Turn prompt-cache keepalive on or off' }
 
 /** 保活循环，在 register.ts 的闭包里；定时器和路上的请求随模块丢掉，其余写进 anvil.keepaliveMemory，热重载后接上 */
 export type Loop = {
@@ -113,7 +113,7 @@ const pingAtOf = (cache: Cache) => cache.expiresAt - TTL_MS + PING_AFTER_MS
 /** 缓存还没有、已过期、刚压缩完：不发请求，等下一次主会话请求（cache-tax：冷了不发） */
 const isCold = (cache: Cache, now: number) => cache.lastRequestAt === 0 || cache.expiresAt === 0 || cache.compacted || isExpired(cache, now)
 
-export const LIMIT_STOP: KeepaliveStop = { kind: 'limit', reason: '空闲超过 12 小时' }
+export const LIMIT_STOP: KeepaliveStop = { kind: 'limit', reason: 'idle for over 12 hours' }
 
 /**
  * 定时器该等多久（cache-tax 的 arm）：到发请求的时刻，但不晚于过期和这段空闲的截止。
@@ -145,22 +145,22 @@ export function isWarm(reply: Extract<ModelForkResult, { isAnswered: true }>): b
 
 /** fork 的结果为什么不算续上；null 表示续上了 */
 export function stopFor(reply: ModelForkResult): KeepaliveStop | null {
-  if (reply.isAnswered) return isWarm(reply) ? null : { kind: 'reading', reason: '续期时缓存已过期' }
+  if (reply.isAnswered) return isWarm(reply) ? null : { kind: 'reading', reason: 'cache had expired by renewal' }
   switch (reply.reason) {
     case 'api-error':
-      return { kind: 'error', reason: `续期请求出错：${reply.status === null ? reply.error : `HTTP ${reply.status}`}` }
+      return { kind: 'error', reason: `renewal failed: ${reply.status === null ? reply.error : `HTTP ${reply.status}`}` }
     case 'empty-reply':
-      return { kind: 'error', reason: '续期请求没有回复' }
+      return { kind: 'error', reason: 'renewal got no reply' }
     case 'aborted':
-      return { kind: 'error', reason: '续期请求被中断' }
+      return { kind: 'error', reason: 'renewal was aborted' }
     case 'nothing-to-fork':
-      return { kind: 'error', reason: '还没有可续期的对话' }
+      return { kind: 'error', reason: 'no conversation to renew yet' }
   }
 }
 
 export const thrownStop = (error: unknown): KeepaliveStop => ({
   kind: 'error',
-  reason: `续期请求出错：${error instanceof Error ? error.message : String(error)}`,
+  reason: `renewal failed: ${error instanceof Error ? error.message : String(error)}`,
 })
 
 /** 续上了：过期时刻以这次请求的时刻顺延（D1）；用户在请求路上回来过，就不往回拨 */
@@ -178,13 +178,13 @@ export type StatusInput = { settings: Settings; override: boolean | null; contex
  * 已停止：空闲到上限为灰，读数不达标和出错为红；其余开着为正文色，没开为灰（颜色现在没人画，留着给以后的显示）。
  */
 export function keepaliveStatus({ settings, override, context, loop }: StatusInput): Segment {
-  if (override === false) return { text: '已关闭（本会话）', color: COLOR.secondary }
-  if (loop.stopped) return { text: `已停止（${loop.stopped.reason}）`, color: loop.stopped.kind === 'limit' ? COLOR.secondary : COLOR.danger }
-  if (override === null && !settings.autoKeepalive) return { text: '未启用（自动开启已关闭）', color: COLOR.secondary }
-  if (override === null && context < settings.threshold) return { text: `未启用（低于 ${formatTokens(settings.threshold)}）`, color: COLOR.secondary }
-  const mark = override ? '（本会话）' : ''
+  if (override === false) return { text: 'off (this session)', color: COLOR.secondary }
+  if (loop.stopped) return { text: `stopped (${loop.stopped.reason})`, color: loop.stopped.kind === 'limit' ? COLOR.secondary : COLOR.danger }
+  if (override === null && !settings.autoKeepalive) return { text: 'not on (auto-enable is off)', color: COLOR.secondary }
+  if (override === null && context < settings.threshold) return { text: `not on (context below ${formatTokens(settings.threshold)})`, color: COLOR.secondary }
+  const mark = override ? ' (this session)' : ''
   // 正常在保活是好状态：正文色，不上色（好状态安静，anvil-k0t.46）
-  return { text: `${loop.renewing ? '进行中' : '已启用'}${mark}` }
+  return { text: `${loop.renewing ? 'renewing' : 'on'}${mark}` }
 }
 
 /**

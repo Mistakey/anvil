@@ -104,10 +104,10 @@ export function engineTurnText(props: { word: string; durationMs: number }, turn
   return `${props.word} for ${engineDuration(props.durationMs)} · done ${clockTime(turn.doneAt)}`
 }
 
-/** 接在原生那行后面的字：` · N token/s · 首字 N s`，这一段的请求都用了退路时 token/s 前标 ≥ */
+/** 接在原生那行后面的字：` · N token/s · TTFT Ns`，这一段的请求都用了退路时 token/s 前标 ≥ */
 export function turnSuffix(turn: TurnSpeed): string {
   const speed = speedNumber(turn.tally)
-  return `${speed === null ? '' : ` · ${speed} token/s`} · 首字 ${formatSeconds(turn.firstTokenMs)}`
+  return `${speed === null ? '' : ` · ${speed} token/s`} · TTFT ${formatSeconds(turn.firstTokenMs)}`
 }
 
 /** 原生那行的图标占 2 格（minWidth 2），字从第 3 格起 */

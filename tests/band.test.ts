@@ -186,7 +186,7 @@ test('分离 HEAD 显示 @提交号，不标无上游', async ($, on) => {
 
 test('没有上游时标"无上游"', async ($, on) => {
   const local = sample({ status: ['# branch.oid 1', '# branch.head feature/cache', '1 A. N... 0 1 1 0 a x.ts', '1 A. N... 0 1 1 0 a y.ts'].join('\n'), numstat: '57\t0\tx.ts' })
-  expect(await gitOf($, on, local)).toBe(`${D} anvil · ${B} feature/cache 无上游  +2  ${L} +57 −0`)
+  expect(await gitOf($, on, local)).toBe(`${D} anvil · ${B} feature/cache no upstream  +2  ${L} +57 −0`)
 })
 
 // ---------------------------------------------------------------- git：停在一半的命令

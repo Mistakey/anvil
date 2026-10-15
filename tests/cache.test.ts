@@ -184,7 +184,7 @@ describe('重建量、命中率、冷写', () => {
   })
 })
 
-const DROP = 'anvil：缓存已过期 1h10m，发送这条消息要重建 152k tokens（约 $1.52）。消息已放回主输入框，再按 Enter 即发送；不需要这段上下文时，可用 /clear 开始新会话。'
+const DROP = 'anvil: the cache expired 1h10m ago; sending this message rebuilds 152k tokens (~$1.52). The message is back in the prompt: press Enter again to send it, or /clear to start a new session if you no longer need this context.'
 
 describe('冷发送守卫', () => {
   test('过期且达到阈值时拦一次，原文放回主输入框，再提交就放行', async ($, on) => {
@@ -213,7 +213,7 @@ describe('冷发送守卫', () => {
     await $.session.start(SESSION)
     await drain($.turn.step(stepInput()))
     await clock.advance(2 * HOUR)
-    expect((await $.prompt.submit(typed('继续'))).drop).toMatch(/^anvil：缓存已过期 1h00m/)
+    expect((await $.prompt.submit(typed('继续'))).drop).toMatch(/^anvil: the cache expired 1h00m/)
     await clock.settle()
     expect(w.fills).toEqual([])
   })
@@ -239,7 +239,7 @@ describe('冷发送守卫', () => {
     await $.session.start(SESSION)
     await $.classic.SessionStart({ source: 'resume', model: 'claude-opus-5-5', seconds_since_last_response: 3 * 3600, context_tokens: 152000, prompt_cache_likely_expired: true })
     const first = await $.prompt.submit(typed('hi'))
-    expect(first.drop).toBe('anvil：缓存已过期 2h00m，发送这条消息要重建 152k tokens（约 $1.52）。消息已放回主输入框，再按 Enter 即发送；不需要这段上下文时，可用 /clear 开始新会话。')
+    expect(first.drop).toBe('anvil: the cache expired 2h00m ago; sending this message rebuilds 152k tokens (~$1.52). The message is back in the prompt: press Enter again to send it, or /clear to start a new session if you no longer need this context.')
     expect(w.entered).toEqual([])
   })
 

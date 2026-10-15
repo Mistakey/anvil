@@ -216,7 +216,7 @@ export function shouldGuard(c: Cache, submission: Submission, threshold: number,
 export function guardText(c: Cache, now: number): string {
   const rebuild = rebuildTokens(c)
   const usd = writeUsd(rebuild, c.model)
-  const cost = usd === null ? '' : `（约 ${formatUsd(usd)}）`
-  return `anvil：缓存已过期 ${formatDuration(now - c.expiresAt)}，发送这条消息要重建 ${formatTokens(rebuild)} tokens${cost}。` +
-    '消息已放回主输入框，再按 Enter 即发送；不需要这段上下文时，可用 /clear 开始新会话。'
+  const cost = usd === null ? '' : ` (~${formatUsd(usd)})`
+  return `anvil: the cache expired ${formatDuration(now - c.expiresAt)} ago; sending this message rebuilds ${formatTokens(rebuild)} tokens${cost}. ` +
+    'The message is back in the prompt: press Enter again to send it, or /clear to start a new session if you no longer need this context.'
 }
