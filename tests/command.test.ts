@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import { answer, describe } from '../hooks/command'
 import type { Listed } from '../hooks/command'
-import { SESSION, anvil, panes, world } from './world'
+import { SESSION, anvil, world } from './world'
 
 test('会话开始时注册 /anvil', async ($, on) => {
   const { commands } = world(on)
@@ -18,42 +18,32 @@ test('补全菜单里 /anvil 的灰字：一句命令说明，参数提示列出
   expect(registered).toEqual([
     {
       name: 'anvil',
-      argumentHint: '[panel|translate|keepalive]',
-      description: '在本会话切换 anvil 面板、翻译框或缓存保活；不带参数时列出现在的状态',
+      argumentHint: '[keepalive]',
+      description: '在本会话切换缓存保活；不带参数时列出现在的状态',
     },
   ])
 })
 
-test('/anvil 不带参数时列出三个子命令和本会话的当前状态', async ($, on) => {
+test('/anvil 不带参数时列出子命令和本会话的当前状态', async ($, on) => {
   mock.clock(on)
   world(on)
-  panes(on)
   await $.session.start(SESSION)
 
   const { text } = await $.command.run(anvil(''))
-  expect(text).toBe(
-    [
-      '用法：/anvil <子命令>，敲一次切换一次，只作用于当前会话',
-      '  /anvil panel      显示或隐藏 anvil 面板（现在：显示）',
-      '  /anvil translate  显示或隐藏翻译框（现在：显示）',
-      '  /anvil keepalive  开启或关闭缓存保活（现在：未启用（低于 50k））',
-    ].join('\n'),
-  )
+  expect(text).toBe(['用法：/anvil <子命令>，敲一次切换一次，只作用于当前会话', '  /anvil keepalive  开启或关闭缓存保活（现在：未启用（低于 50k））'].join('\n'))
 
-  await $.command.run(anvil('panel'))
   await $.command.run(anvil('keepalive'))
   const after = (await $.command.run(anvil(' '))).text ?? ''
-  expect(after).toContain('/anvil panel      显示或隐藏 anvil 面板（现在：隐藏）')
   expect(after).toContain('/anvil keepalive  开启或关闭缓存保活（现在：已启用（本会话））')
 })
 
-test('/anvil 带未知子命令、旧写法或多余参数时说明并列出子命令', async ($, on) => {
+test('/anvil 带未知子命令、已去掉的子命令或多余参数时说明并列出子命令', async ($, on) => {
   world(on)
   await $.session.start(SESSION)
 
   for (const [args, name] of [
     ['nope', 'nope'],
-    ['panel hide', 'panel hide'],
+    ['panel', 'panel'],
     [' translate  show ', 'translate show'],
     ['keepalive off', 'keepalive off'],
     ['keepalive on', 'keepalive on'],

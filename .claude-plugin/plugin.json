@@ -1,7 +1,7 @@
 {
   "name": "anvil",
-  "version": "0.2.0",
-  "description": "Keeps the prompt cache warm while you are away and stops an accidental cold send, docks a panel with cache, usage, subagents, auto-mode denials, your messages and git status beside the transcript, and translates Chinese drafts into English before you send them",
+  "version": "0.3.0",
+  "description": "Keeps the prompt cache warm while you are away and stops an accidental cold send, draws a line above the prompt with the folder, git status, 5h and 7d usage and session cost, and adds each reply's output speed to its closing line",
   "author": {
     "name": "kelch",
     "url": "https://github.com/Mistakey"
@@ -16,25 +16,12 @@
     "prompt-cache",
     "keepalive",
     "statusline",
-    "dashboard",
-    "subagents",
-    "translation",
+    "git",
+    "rate-limits",
     "tui"
   ],
   "types": "./types/index.d.ts",
   "userConfig": {
-    "showPanel": {
-      "title": "显示 anvil 面板",
-      "description": "决定默认：开着时每个会话自动打开 anvil 面板；单个会话可用 /anvil panel 切换，不受这项限制",
-      "type": "boolean",
-      "default": true
-    },
-    "showTranslate": {
-      "title": "显示翻译框",
-      "description": "决定默认：开着时主输入框上方常驻翻译框；单个会话可用 /anvil translate 切换，不受这项限制",
-      "type": "boolean",
-      "default": true
-    },
     "threshold": {
       "title": "上下文阈值",
       "description": "单位 token。上下文达到它的会话自动开启缓存保活，冷发送守卫也只拦这类会话",
@@ -52,25 +39,6 @@
       "description": "缓存已过期且上下文达到阈值时，拦下发给模型的第一条消息一次，提示重建代价",
       "type": "boolean",
       "default": true
-    },
-    "translateBackend": {
-      "title": "翻译后端",
-      "description": "haiku、sonnet 用订阅内的模型；api 用下面两项的 OpenAI 兼容接口，key 读环境变量 ANVIL_TRANSLATE_API_KEY",
-      "type": "string",
-      "options": ["haiku", "sonnet", "api"],
-      "default": "haiku"
-    },
-    "translateApiUrl": {
-      "title": "自有 API 接口地址",
-      "description": "OpenAI 兼容接口的地址，翻译后端选 api 时使用",
-      "type": "string",
-      "default": ""
-    },
-    "translateApiModel": {
-      "title": "自有 API 模型名",
-      "description": "翻译后端选 api 时请求的模型名",
-      "type": "string",
-      "default": ""
     }
   }
 }

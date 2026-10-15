@@ -1,4 +1,4 @@
-// 缓存保活（spec D3）的纯逻辑：开没开、什么时候发请求、读数判据、停下的原因和缓存框里的保活状态。
+// 缓存保活（spec D3）的纯逻辑：开没开、什么时候发请求、读数判据、停下的原因、`/anvil` 列表里的保活状态和写给 statusline 的状态。
 // 循环本身（定时器、`$.model.fork`）在 register.ts。
 //
 // 循环照 cache-tax 的 keepwarm 改写（https://github.com/karanb192/cache-tax，HEAD 06cac47）：
@@ -7,7 +7,7 @@
 
 import type { ModelForkResult } from 'claude-code'
 
-import type { KeepaliveMemory, KeepaliveStop, KeepaliveView, Settings } from '../types'
+import type { KeepaliveMemory, KeepaliveStop, KeepaliveView, Settings, StatuslineFile } from '../types'
 import { TTL_MS, isExpired } from './cache'
 import type { Cache } from './cache'
 import type { Subcommand } from './command'
@@ -168,14 +168,14 @@ export function renew(cache: Cache, requestedAt: number) {
   cache.expiresAt = Math.max(cache.expiresAt, requestedAt + TTL_MS)
 }
 
-// ---------------------------------------------------------------- 缓存框里的保活状态（D3、D10）
+// ---------------------------------------------------------------- 保活状态
 
 export type StatusInput = { settings: Settings; override: boolean | null; context: number; loop: KeepaliveView }
 
 /**
  * 按默认的五种：已启用、进行中（这段空闲里续期过或正在续期）、未启用（自动开启已关闭 / 上下文低于阈值）、已停止（原因）。
  * 本会话切换过的：已关闭（本会话）；开着时已启用、进行中带"（本会话）"，停下照样写已停止（原因）。
- * 已停止：空闲到上限为灰，读数不达标和出错为红；其余开着为正文色，没开为灰。
+ * 已停止：空闲到上限为灰，读数不达标和出错为红；其余开着为正文色，没开为灰（颜色现在没人画，留着给以后的显示）。
  */
 export function keepaliveStatus({ settings, override, context, loop }: StatusInput): Segment {
   if (override === false) return { text: '已关闭（本会话）', color: COLOR.secondary }
@@ -185,4 +185,23 @@ export function keepaliveStatus({ settings, override, context, loop }: StatusInp
   const mark = override ? '（本会话）' : ''
   // 正常在保活是好状态：正文色，不上色（好状态安静，anvil-k0t.46）
   return { text: `${loop.renewing ? '进行中' : '已启用'}${mark}` }
+}
+
+/**
+ * 写给 statusline 的：会不会自动续期（开着、这一段空闲没停下），续期出错的原因（空闲到上限不算出错）。
+ * statusline 的缓存段据此写"有效 · 自动续期""续期出错"（用户 2026-10-15 定）
+ */
+export function statuslineFile({ settings, override, context, loop }: StatusInput, expiresAt: number | null, at: number): StatuslineFile {
+  const error = loop.stopped && loop.stopped.kind !== 'limit' ? loop.stopped.reason : null
+  return { renews: isEnabled(settings, override, context) && loop.stopped === null, error, expiresAt, at }
+}
+
+/** 读回状态文件里的过期时刻；没有、不是这个形状为 null */
+export function savedExpiry(text: string): number | null {
+  try {
+    const file = JSON.parse(text) as Partial<StatuslineFile> | null
+    return typeof file?.expiresAt === 'number' && file.expiresAt > 0 ? file.expiresAt : null
+  } catch {
+    return null
+  }
 }

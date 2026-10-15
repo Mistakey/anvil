@@ -1,7 +1,7 @@
 {
   "name": "anvil",
   "metadata": {
-    "description": "anvil: keeps the prompt cache warm while you are away, guards against cold sends, docks a session panel beside the transcript, and translates Chinese drafts into English."
+    "description": "anvil: keeps the prompt cache warm while you are away, guards against cold sends, and draws a line above the prompt with the folder, git status, 5h and 7d usage and session cost."
   },
   "owner": {
     "name": "kelch",
@@ -11,7 +11,7 @@
     {
       "name": "anvil",
       "source": "./",
-      "description": "Cache keepalive and cold-send guard, a docked session panel, and a Chinese-to-English input box for Claude Code."
+      "description": "Cache keepalive and cold-send guard, a folder, git and usage line above the prompt, and per-reply output speed for Claude Code."
     }
   ]
 }

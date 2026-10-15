@@ -7,16 +7,16 @@
  */
 export function describe(subcommands: readonly Subcommand[]): { description: string; argumentHint: string } {
   return {
-    description: '在本会话切换 anvil 面板、翻译框或缓存保活；不带参数时列出现在的状态',
+    description: '在本会话切换缓存保活；不带参数时列出现在的状态',
     argumentHint: `[${subcommands.map(({ name }) => name).join('|')}]`,
   }
 }
 
 /**
- * 功能交给 `/anvil` 的一个子命令的说明，如 `/anvil panel`。子命令都是切换：敲一次切一次，只作用于当前会话。
+ * 功能交给 `/anvil` 的一个子命令的说明，如 `/anvil keepalive`。子命令都是切换：敲一次切一次，只作用于当前会话。
  *
  * 执行在 register.ts 里注册，匹配器写字面量、和这里的 name 对上，不带别的词：
- * `on('command.run', { command: 'anvil', args: /^\s*panel\s*$/ }, async ($, e) => ...)`。
+ * `on('command.run', { command: 'anvil', args: /^\s*keepalive\s*$/ }, async ($, e) => ...)`。
  * 没被接走的 `/anvil`（不带子命令、子命令未知、后面多了词）由兜底的 command.run 用 answer 回答。
  */
 export type Subcommand = {
@@ -37,7 +37,7 @@ function list(subcommands: readonly Listed[]): string {
   return [USAGE, ...rows].join('\n')
 }
 
-/** 兜底的回答：不带子命令时列出子命令和状态；子命令未知或后面多了词（含旧写法 `panel hide`）时先说明再列出 */
+/** 兜底的回答：不带子命令时列出子命令和状态；子命令未知或后面多了词（含已去掉的 `panel`、`translate`）时先说明再列出 */
 export function answer(subcommands: readonly Listed[], args: string): string {
   const asked = args.trim().split(/\s+/).join(' ')
   if (asked === '') return list(subcommands)
