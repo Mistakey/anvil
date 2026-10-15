@@ -18,7 +18,7 @@
 - **主输入框上方一行**：目录名 · git · 5 小时用量 · 7 天用量 · 本会话花费。git 写分支和领先落后、停在一半的 merge 或 rebase、冲突、已暂存、已修改、未跟踪、储藏和未提交的行数；两个用量窗口各有 10 格热度进度条、百分比和重置时刻。
 - **每段回复的速度**：输出 token/s 和首字等待（TTFT）接在 Claude Code 原生的「Worked for …」那行后面。
 
-模型、effort、上下文和缓存的真实过期时刻归主输入框下方那一行，也就是你自己的 [statusline](#主输入框下方那一行)。anvil 把保活状态写进一个小文件，供 statusline 读。
+模型、effort、上下文和缓存的真实过期时刻归主输入框下方那一行，也就是你自己的 [statusline](#主输入框下方那一行)。anvil 把保活状态写进一个小文件，供 statusline 读；`/anvil:statusline` 帮你装一个配套的 statusline。
 
 ## 前提条件
 
@@ -74,7 +74,7 @@ claude --plugin-dir ./anvil
 | 5h、7d | 10 格热度进度条、已用百分比、重置时刻（当天写 `22:00`，不是当天写 `09:00 10-15`）；窗口还没开始时写 `—` |
 | 花费 | Claude Code 报的本会话花费（`/cost` 同源） |
 
-每段回复结束、改文件或跑命令的工具调用之后、你发消息时都重新读一遍 git。会话开始时用量读数要过几秒才到，在那之前先画本机各会话最近一次读到的。终端窄时依次让出：先把名字截短，再去掉进度条，git 只留分支，再去掉花费和 git；重置时刻一直留着。
+每段回复结束、改文件或跑命令的工具调用之后、你发消息时都重新读一遍 git。会话开始时用量读数要过几秒才到，在那之前先画本机各会话最近一次读到的。终端窄时依次让出：先把名字截短，再去掉进度条，git 只留分支，再去掉花费和 git；重置时刻一直留着。要隐藏其中几段、调顺序或整行关掉，见[设置](#设置)里的 `band`。
 
 ### 2. 命令
 
@@ -102,6 +102,8 @@ claude --plugin-dir ./anvil
 
 ### 主输入框下方那一行
 
+运行 `/anvil:statusline` 就能装上截图里那一行：模型 effort · 上下文 · 缓存（`󰆼 94% · warm · keepalive`）。Claude 会先检查有没有 node、终端字体是不是 Nerd Font，拿 anvil 的参考脚本（[`skills/statusline/statusline.mjs`](skills/statusline/statusline.mjs)）给你看预览，照你说的改（段、顺序、颜色、图标），备份你原来的 statusline，再把脚本写到 `~/.claude/statusline.mjs`、配好 `statusLine`。想换样子时再跑一次。
+
 statusline 是你自己的脚本（设置里的 [`statusLine`](https://docs.claude.com/en/docs/claude-code/statusline)），Claude Code 交给它模型、effort、上下文和缓存的真实状态（`prompt_cache` 的 `hit_ratio`、`warm`、`expires_at`）。它不知道的是 anvil 会不会续期，所以 anvil 给每个会话写一份：
 
 ```
@@ -120,6 +122,7 @@ statusline 是你自己的脚本（设置里的 [`statusLine`](https://docs.clau
 | `threshold` | `50000` | 上下文阈值（token）：达到它的会话自动开启保活，守卫也只拦这类会话 |
 | `autoKeepalive` | `true` | 上下文达到阈值的会话自动开启保活；`/anvil keepalive` 仍可按会话切换 |
 | `guard` | `true` | 缓存过期后拦下第一条消息 |
+| `band` | `dir, git, 5h, 7d, cost` | 主输入框上方那一行画哪几段、按什么顺序，逗号隔开；去掉某段就不画它，留空或写 `off` 整行不画 |
 
 ## 它碰什么
 

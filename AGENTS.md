@@ -10,7 +10,7 @@
 - 发版：语义化版本（用户 2026-10-14 定）。已安装的 anvil 按 `plugin.json` 的 `version` 判断有没有更新，版本号不变，推再多提交也不会更新；所以发版时先改 `version`，提交后打 `v<版本号>` 标签，推送 main 和标签，再用 `gh release create` 发 GitHub Release。用户机器上 anvil 市场开了自动更新，发版后会提示 `/reload-plugins`。
 - 检查：`claude plugin validate .` 列出挂的事件、调用的 API 和引擎会拒绝的内容；测试：`claude plugin test .` 跑 `*.test.ts`。
 - 类型：交互加载一次后，引擎在 `.claude-plugin/types/` 生成当前构建的声明（已忽略提交）；查 API 就 grep 其中的 `claude-code/index.d.ts`。类型检查：`npx -p typescript tsc -p .`。`plugin validate`、`plugin test` 和普通 `claude -p` 都不生成类型；不开交互会话时用 `CLAUDE_CODE_PLUGIN_DIR_WATCH=1 claude --plugin-dir <dir> -p "ok" --model haiku --max-turns 1`。新 worktree 里没有类型，先这样加载一次再跑 `tsc`。
-- 显示的判断标准是好看、精致、有生气，不往极简上设计（用户裁定，anvil-k0t.46–.48）。0.3.0 起显示是主输入框上下两行：上方一行由 anvil 画（`hooks/band.tsx`），下方是用户的 statusline 脚本 `~/.claude/statusline.mjs`（不在仓库里，改它前先备份成 `statusline.v<N>.mjs.bak`），两行用同一套色板和 Nerd Font 图标；规则写在 `hooks/style.ts`、`hooks/band.tsx` 的头注释和测试里。v1 的面板、翻译框和 Client 动效已去掉，要参考时 `git show v0.2.0:hooks/<文件>`。
+- 显示的判断标准是好看、精致、有生气，不往极简上设计（用户裁定，anvil-k0t.46–.48）。0.3.0 起显示是主输入框上下两行：上方一行由 anvil 画（`hooks/band.tsx`），下方是用户的 statusline 脚本 `~/.claude/statusline.mjs`（用户本机那份不在仓库里，改它前先备份成 `statusline.v<N>.mjs.bak`；仓库里的参考脚本和装它的 skill 在 `skills/statusline/`，用户 `/anvil:statusline` 调用，mod 和 skill 在同一个插件里共存），两行用同一套色板和 Nerd Font 图标；规则写在 `hooks/style.ts`、`hooks/band.tsx` 的头注释和测试里。v1 的面板、翻译框和 Client 动效已去掉，要参考时 `git show v0.2.0:hooks/<文件>`。
 - 代码注释里的 `spec Dn`、`§n` 指 v1 spec，交付后已从仓库删除；查原文用 `git show d21c521:docs/specs/anvil-k0t/spec.md`。
 - 参考项目源码：[cache-tax](https://github.com/karanb192/cache-tax)、[claude-flightdeck](https://github.com/scasella/claude-flightdeck)，克隆到本地对照着读；借用的代码和许可见 `THIRD_PARTY_NOTICES.md`。
 

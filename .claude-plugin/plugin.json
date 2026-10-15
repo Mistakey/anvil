@@ -1,7 +1,7 @@
 {
   "name": "anvil",
   "version": "0.3.0",
-  "description": "Keeps the prompt cache warm while you are away and stops an accidental cold send, draws a line above the prompt with the folder, git status, 5h and 7d usage and session cost, and adds each reply's output speed to its closing line",
+  "description": "Keeps the prompt cache warm while you are away and stops an accidental cold send, draws a line above the prompt with the folder, git status, 5h and 7d usage and session cost, adds each reply's output speed to its closing line, and sets up a matching status line with /anvil:statusline",
   "author": {
     "name": "kelch",
     "url": "https://github.com/Mistakey"
