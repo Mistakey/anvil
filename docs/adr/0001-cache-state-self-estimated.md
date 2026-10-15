@@ -6,6 +6,6 @@ Claude Code 自己的缓存追踪器（精确过期时刻、本次写入的 TTL�
 
 **2026-10-14**：statusline 已恢复，显示用的缓存过期时刻改由 statusline 给出真实值；anvil 的估算只供保活和冷发送守卫使用。
 
-**2026-10-15**：方向倒过来接上了：不是 statusline 写文件给 anvil，而是 anvil 把"会不会自动续期、续期出没出错"写进 `~/.claude/anvil/sessions/<session_id>.json`，statusline 按 stdin 的 `session_id` 读，缓存段据此写"有效 · 自动续期"。anvil 自己仍只用估算。
+**2026-10-15**：方向倒过来接上了：不是 statusline 写文件给 anvil，而是 anvil 把"会不会自动续期、续期出没出错"写进 `~/.claude/anvil/sessions/<session_id>.json`，statusline 按 stdin 的 `session_id` 读，缓存段据此写"warm · keepalive"。anvil 自己仍只用估算。
 
 **2026-10-15**：恢复会话不再只靠引擎的 `prompt_cache_likely_expired`：它只按最后一次主会话回复算，不知道保活续的期，用户退出前续过期的会话恢复后被守卫误拦。anvil 把自己的估算（`expiresAt`）也写进同一个文件，恢复时比引擎的晚就照它；引擎判定已过期、离最后一次回复又不到 1 小时（TTL 更短）时仍听引擎的。
