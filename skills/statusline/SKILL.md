@@ -1,6 +1,7 @@
 ---
 name: statusline
-description: Set up or change the status line under the prompt that goes with anvil (model and effort, context, prompt cache with anvil's keepalive state), starting from anvil's reference script. Use when the user asks to install, set up, restyle or fix their status line, or asks how to get the line under the prompt that anvil's README shows.
+description: Set up or change the status line under the prompt that goes with anvil (model and effort, context, prompt cache with anvil's keepalive state), starting from anvil's reference script.
+disable-model-invocation: true
 ---
 
 # anvil status line
