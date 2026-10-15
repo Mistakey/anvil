@@ -2,7 +2,6 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code 2.1.296+](https://img.shields.io/badge/Claude%20Code-2.1.296%2B%20mod-d97757.svg)](https://docs.claude.com/en/docs/claude-code)
-[![UI: English](https://img.shields.io/badge/UI-English-c0392b.svg)](#language)
 
 English | [简体中文](README.zh-CN.md)
 
@@ -26,10 +25,6 @@ Model, effort, context and the cache's real expiry belong to the line below the 
 - **Claude Code 2.1.296 or later** (tested on 2.1.299). Mods are an early-access Claude Code feature and their API can change between releases.
 - **A [Nerd Font](https://www.nerdfonts.com/)** in your terminal, for the icons.
 - **A Claude subscription** (Pro or Max) is what the keepalive is designed for: anvil assumes the main session's 1-hour cache TTL, which only holds on a subscription.
-
-### Language
-
-The interface is in English. It is a handful of short labels, so there are no plans to translate it.
 
 ## Install
 

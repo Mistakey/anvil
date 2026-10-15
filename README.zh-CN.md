@@ -2,7 +2,6 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Claude Code 2.1.296+](https://img.shields.io/badge/Claude%20Code-2.1.296%2B%20mod-d97757.svg)](https://docs.claude.com/en/docs/claude-code)
-[![界面：英文](https://img.shields.io/badge/UI-English-c0392b.svg)](#语言)
 
 [English](README.md) | 简体中文
 
@@ -26,10 +25,6 @@
 - **Claude Code 2.1.296 或更新**（在 2.1.299 上测试）。mod 是 Claude Code 的早期功能，接口在版本之间可能变化。
 - **终端字体是 [Nerd Font](https://www.nerdfonts.com/)**，图标才画得出来。
 - **Claude 订阅**（Pro 或 Max）：保活按订阅下主会话 1 小时的缓存 TTL 设计，只在订阅套餐内成立。
-
-### 语言
-
-界面文字是英文。只有几处短标签和提示，不打算做多语言。
 
 ## 安装
 
