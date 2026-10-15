@@ -1,6 +1,6 @@
 {
   "name": "anvil",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Keeps the prompt cache warm while you are away and stops an accidental cold send, draws a line above the prompt with the folder, git status, 5h and 7d usage and session cost, and adds each reply's output speed to its closing line",
   "author": {
     "name": "kelch",

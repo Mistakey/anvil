@@ -97,6 +97,7 @@ claude --plugin-dir ./anvil
 - 每次请求都检查自己的读数：读到的量接近整段上下文、写入很少，就算续上，再定下一次；否则保活停下：没读到缓存、写入过多、请求出错，或空闲满 12 小时。`/anvil` 里写明原因。
 - 停下只结束这一段空闲：你发了消息之后，下一段空闲照常保活。
 - 每次请求约等于读一遍整段上下文再加几个输出 token，计入你的套餐额度。Claude Code 要一直开着。
+- 退出 Claude Code 后保活就停了。再恢复这个会话（`claude --resume`、`/resume`）时，anvil 按自己记下的过期时刻起步，算上退出前保活续的期；Claude Code 给的恢复信息只按最后一次回复算，会把续过期的缓存当成已过期。
 
 ### 守卫怎么工作
 
@@ -110,10 +111,10 @@ statusline 是你自己的脚本（设置里的 [`statusLine`](https://docs.clau
 
 ```
 ~/.claude/anvil/sessions/<session_id>.json        # 设了 CLAUDE_CONFIG_DIR 时在它下面
-{ "renews": true, "error": null, "at": 1791995010193 }
+{ "renews": true, "error": null, "expiresAt": 1791998610193, "at": 1791995010193 }
 ```
 
-`session_id` 就是 statusline 输入里的那个。保活开着、没停下时 `renews` 为 true；续期失败停下时 `error` 是原因（空闲满 12 小时不算出错）。anvil 只写不删，愿意的话在脚本里顺手清掉一周以前的。有了它，缓存段可以写成 `󰆼 94% · 有效 · 自动续期`、`󰆼 94% · 有效至 21:40` 或 `󰆼 94% · 21:40 已失效`。
+`session_id` 就是 statusline 输入里的那个。保活开着、没停下时 `renews` 为 true；续期失败停下时 `error` 是原因（空闲满 12 小时不算出错）；`expiresAt` 是 anvil 估的过期时刻（Unix 毫秒，算上续期），恢复会话时 anvil 自己读回它。anvil 只写不删，愿意的话在脚本里顺手清掉一周以前的。有了它，缓存段可以写成 `󰆼 94% · 有效 · 自动续期`、`󰆼 94% · 有效至 21:40` 或 `󰆼 94% · 21:40 已失效`，再按状态上色：会续的绿、只到某个时刻的黄、已失效的红。
 
 ## 设置
 

@@ -97,6 +97,7 @@ A new session starts from the defaults you set in `/config`.
 - Each request checks its own usage: if it read close to the whole context and wrote little, the cache counts as renewed and the next request is scheduled. Otherwise the keepalive stops: no cache read, too much written, an error, or 12 hours idle. `/anvil` shows why.
 - Stopping only ends the current idle stretch. Once you send a message, the next idle stretch is kept warm again.
 - Each request costs about one read of the whole context plus a few output tokens, counted against your plan. Claude Code has to stay open.
+- Quitting Claude Code stops the keepalive. When you resume the session later (`claude --resume`, `/resume`), anvil starts from the expiry it recorded, renewals included; the resume info Claude Code provides counts only from the last reply and would call a renewed cache expired.
 
 ### How the guard works
 
@@ -110,10 +111,10 @@ The status line is your own script ([`statusLine`](https://docs.claude.com/en/do
 
 ```
 ~/.claude/anvil/sessions/<session_id>.json        # under CLAUDE_CONFIG_DIR when it is set
-{ "renews": true, "error": null, "at": 1791995010193 }
+{ "renews": true, "error": null, "expiresAt": 1791998610193, "at": 1791995010193 }
 ```
 
-`session_id` is the one in the status line's input. `renews` is true while the keepalive is on and hasn't stopped; `error` is the reason it stopped on a failed renewal (12 hours idle isn't an error). anvil only writes these files; clean up the ones older than a week from your script if you like. With it, a cache segment can read `󰆼 94% · 有效 · 自动续期` (valid, renewing), `󰆼 94% · 有效至 21:40` (valid until 21:40) or `󰆼 94% · 21:40 已失效` (expired at 21:40).
+`session_id` is the one in the status line's input. `renews` is true while the keepalive is on and hasn't stopped; `error` is the reason it stopped on a failed renewal (12 hours idle isn't an error); `expiresAt` is anvil's estimate of the expiry (Unix milliseconds, renewals included), which anvil reads back itself when the session is resumed. anvil only writes these files; clean up the ones older than a week from your script if you like. With it, a cache segment can read `󰆼 94% · 有效 · 自动续期` (valid, renewing), `󰆼 94% · 有效至 21:40` (valid until 21:40) or `󰆼 94% · 21:40 已失效` (expired at 21:40), colored by state: green when it will renew, yellow when it lasts only until a set time, red once expired.
 
 ## Configure
 
