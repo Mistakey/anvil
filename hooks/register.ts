@@ -28,6 +28,7 @@ import {
   renew,
   restart,
   restoreLoop,
+  savedExpiry,
   startStretch,
   statuslineFile,
   stopFor,
@@ -95,7 +96,7 @@ async function startCache($: EngineInterface, cache: Cache) {
 /** `classic.SessionStart`：`/clear` 清零；恢复会话按引擎给的字段起步 */
 async function resumeCache($: EngineInterface, cache: Cache, e: ResumeFields) {
   if (e.source === 'clear') cacheState.resetForClear(cache)
-  else cacheState.seedFromResume(cache, e, await $.clock.now())
+  else cacheState.seedFromResume(cache, e, await $.clock.now(), await resumedExpiry($))
   await publishCache($, cache)
 }
 
@@ -245,6 +246,33 @@ async function cacheChanged($: EngineInterface, cache: Cache, loop: Loop, settin
 /** 上一次写下的文件和内容（不含时刻）：没变就不写 */
 let statuslineWritten = ''
 
+/** 会话开始时、写状态文件之前读到的那份：新进程里恢复会话时 session.start 会先把文件写掉，恢复时用这份 */
+let savedAtStart: { path: string; expiresAt: number | null } | null = null
+
+/** 这个会话的状态文件；拿不到配置目录或会话 id 时为 null */
+async function statuslinePath($: EngineInterface): Promise<string | null> {
+  const [dir, id] = await Promise.all([configDir($), $.session.id()])
+  return dir === null || id === '' ? null : `${dir}/anvil/sessions/${id}.json`
+}
+
+async function readSavedExpiry($: EngineInterface, path: string): Promise<number | null> {
+  const text = await $.fs.read(path).catch(() => undefined)
+  return typeof text === 'string' ? savedExpiry(text) : null
+}
+
+/** session.start 一开始：先记下上一次写下的过期时刻 */
+async function rememberSaved($: EngineInterface) {
+  const path = await statuslinePath($)
+  savedAtStart = path === null ? null : { path, expiresAt: await readSavedExpiry($, path) }
+}
+
+/** 恢复会话：这个会话上一次写下的过期时刻（会话开始时记下的那份，或会话内 `/resume` 到的别的会话的文件） */
+async function resumedExpiry($: EngineInterface): Promise<number | null> {
+  const path = await statuslinePath($)
+  if (path === null) return null
+  return savedAtStart?.path === path ? savedAtStart.expiresAt : readSavedExpiry($, path)
+}
+
 /** `~/.claude`；设了 CLAUDE_CONFIG_DIR 时按它 */
 async function configDir($: EngineInterface): Promise<string | null> {
   const dir = await $.env.get('CLAUDE_CONFIG_DIR')
@@ -258,11 +286,10 @@ async function configDir($: EngineInterface): Promise<string | null> {
  * statusline 按 stdin 的 session_id 读（用户 2026-10-15 定）。内容没变就不写
  */
 async function writeStatusline($: EngineInterface, settings: Settings) {
-  const [dir, id, input, now] = await Promise.all([configDir($), $.session.id(), keepaliveInput($, settings), $.clock.now()])
-  if (dir === null || id === '') return
-  const path = `${dir}/anvil/sessions/${id}.json`
-  const file = statuslineFile(input, now)
-  const key = `${path}\n${file.renews}\n${file.error}`
+  const [path, input, cached, now] = await Promise.all([statuslinePath($), keepaliveInput($, settings), read($, cacheView), $.clock.now()])
+  if (path === null) return
+  const file = statuslineFile(input, normalized(cacheView, cached).expiresAt, now)
+  const key = `${path}\n${file.renews}\n${file.error}\n${file.expiresAt}`
   if (key === statuslineWritten) return
   await $.fs.write(path, JSON.stringify(file))
   statuslineWritten = key
@@ -481,6 +508,7 @@ export const register: Register = (on, options) => {
   const gitRefresh: GitRefresh = { isRunning: false, isWanted: false }
 
   on('session.start', async ($, e, next) => {
+    await rememberSaved($).catch(() => undefined)
     await publishSettings($, settings)
     // 功能在这里按顺序接入
     // 热重载换掉模块内存、撤掉定时器：缓存状态和保活循环从 `$.state` 接上，按接上的状态重新定时

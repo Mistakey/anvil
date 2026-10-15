@@ -359,6 +359,43 @@ describe('恢复会话', () => {
   }
 })
 
+describe('退出再恢复：读回状态文件里的过期时刻（引擎的恢复字段不知道续期）', () => {
+  const ME = { USERPROFILE: 'C:/Users/me' }
+  const PATH = `C:/Users/me/.claude/anvil/sessions/${SESSION_ID}.json`
+
+  test('退出前续过期：恢复时照文件里的过期时刻，不按引擎判的过期', async ($, on) => {
+    const w = engine(on, { forks: [WARM], env: ME })
+    await $.session.start(SESSION)
+    await turn($)
+    await w.clock.advance(50 * MIN)
+    expect(w.forks).toHaveLength(1)
+    const renewed = START + 50 * MIN + HOUR
+    expect(JSON.parse(w.written.get(PATH) ?? 'null')).toMatchObject({ expiresAt: renewed })
+    // 退出 20 分钟后恢复：离最后一次回复 70 分钟，引擎判定很可能已过期
+    await w.clock.advance(20 * MIN)
+    await $.session.start(SESSION)
+    await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 70 * 60, context_tokens: 200000, prompt_cache_likely_expired: true })
+    expect(cacheOf(w.state).expiresAt).toBe(renewed)
+  })
+
+  test('新进程开局先把文件写掉：恢复时用开局前读到的那份', async ($, on) => {
+    const w = engine(on, { env: ME })
+    w.written.set(PATH, JSON.stringify({ renews: true, error: null, expiresAt: START + 30 * MIN, at: START - 30 * MIN }))
+    await $.session.start(SESSION)
+    expect(JSON.parse(w.written.get(PATH) ?? 'null')).toMatchObject({ expiresAt: null })
+    await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 2 * 3600, context_tokens: 200000, prompt_cache_likely_expired: true })
+    expect(cacheOf(w.state).expiresAt).toBe(START + 30 * MIN)
+  })
+
+  test('引擎判定已过期而离最后一次回复不到 1 小时（TTL 更短）：不照文件', async ($, on) => {
+    const w = engine(on, { env: ME })
+    w.written.set(PATH, JSON.stringify({ renews: true, error: null, expiresAt: START + 50 * MIN, at: START - 10 * MIN }))
+    await $.session.start(SESSION)
+    await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 600, context_tokens: 200000, prompt_cache_likely_expired: true })
+    expect(cacheOf(w.state).expiresAt).toBe(START)
+  })
+})
+
 describe('热重载', () => {
   // 热重载：模块内存（缓存状态、保活循环）是新的，`$.clock.after` 的定时器被引擎撤掉，`$.state` 还在。
   // 先让插件按冷启动加载一次、把它写下的读数换成"上一次加载留下的"（rewrite），再收一次 session.start
@@ -544,12 +581,12 @@ describe('保活状态', () => {
   test('写给 statusline：开着、没停下就会续；读数不达标、请求出错写原因，空闲到上限不算出错', () => {
     const idle = { stopped: null, renewing: false, inFlight: false }
     const base = { settings: SETTINGS, override: null, context: 151000, loop: idle }
-    expect(statuslineFile(base, 7)).toEqual({ renews: true, error: null, at: 7 })
-    expect(statuslineFile({ ...base, context: 1000 }, 7)).toEqual({ renews: false, error: null, at: 7 })
-    expect(statuslineFile({ ...base, override: true, context: 1000 }, 7).renews).toBe(true)
-    expect(statuslineFile({ ...base, override: false }, 7).renews).toBe(false)
-    expect(statuslineFile({ ...base, loop: { ...idle, stopped: { kind: 'limit', reason: '空闲超过 12 小时' } } }, 7)).toEqual({ renews: false, error: null, at: 7 })
-    expect(statuslineFile({ ...base, loop: { ...idle, stopped: { kind: 'error', reason: '续期请求被中断' } } }, 7)).toEqual({ renews: false, error: '续期请求被中断', at: 7 })
+    expect(statuslineFile(base, null, 7)).toEqual({ renews: true, error: null, expiresAt: null, at: 7 })
+    expect(statuslineFile({ ...base, context: 1000 }, null, 7)).toEqual({ renews: false, error: null, expiresAt: null, at: 7 })
+    expect(statuslineFile({ ...base, override: true, context: 1000 }, null, 7).renews).toBe(true)
+    expect(statuslineFile({ ...base, override: false }, null, 7).renews).toBe(false)
+    expect(statuslineFile({ ...base, loop: { ...idle, stopped: { kind: 'limit', reason: '空闲超过 12 小时' } } }, null, 7)).toEqual({ renews: false, error: null, expiresAt: null, at: 7 })
+    expect(statuslineFile({ ...base, loop: { ...idle, stopped: { kind: 'error', reason: '续期请求被中断' } } }, null, 7)).toEqual({ renews: false, error: '续期请求被中断', expiresAt: null, at: 7 })
   })
 
   test('状态文件写在 ~/.claude/anvil/sessions/<session_id>.json，按引擎的会话 id；变了才写', async ($, on) => {

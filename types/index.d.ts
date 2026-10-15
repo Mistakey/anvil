@@ -103,6 +103,11 @@ export type StatuslineFile = {
   renews: boolean
   /** 这一段空闲里续期出错（读数不达标或请求出错）的原因；没出错为 null */
   error: string | null
+  /**
+   * anvil 估的缓存过期时刻（Unix 毫秒）：最后一次读到缓存（主会话请求或续期）加 1 小时；还没有为 null。
+   * 退出再恢复这个会话时 anvil 读回它：引擎给的恢复字段只按最后一次主会话回复算，不知道续期
+   */
+  expiresAt: number | null
   /** 写下的时刻，Unix 毫秒 */
   at: number
 }

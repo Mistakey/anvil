@@ -142,14 +142,22 @@ export type ResumeFields = {
  * 计价用的模型保留），再只按引擎给的字段起步。
  * `context_tokens` 是上一条回复的输入加输出，正是重建量；输出部分不单列，记在 context 里。
  * 引擎判定 `prompt_cache_likely_expired` 时，过期时刻最晚取现在：哪怕按 1 小时还没到（引擎知道真实 TTL）。
+ *
+ * saved 是 anvil 上次写进状态文件的过期时刻，算上了续期；引擎的两个字段只看最后一次主会话回复、不知道续期，
+ * 退出前续过期的会话恢复后会被误判过期（用户 2026-10-15 实测被守卫拦下；同一分钟里跨进程 resume 实测缓存全部读到）。
+ * saved 比引擎给的晚就照它；但引擎判定已过期、离最后一次回复又不到 1 小时（或没给），说明引擎知道 TTL 更短
+ * （超额后 5 分钟），不照它。cache-tax 的 seedFromResume 只看引擎的字段。
  */
-export function seedFromResume(c: Cache, e: ResumeFields, now: number) {
+export function seedFromResume(c: Cache, e: ResumeFields, now: number, saved: number | null = null) {
   if (e.source !== 'resume' && e.source !== 'fork') return
   resetForClear(c)
   if (typeof e.context_tokens === 'number' && e.context_tokens > 0) c.context = e.context_tokens
   if (typeof e.model === 'string') c.model = e.model
   if (typeof e.seconds_since_last_response === 'number') stampRequest(c, now - e.seconds_since_last_response * 1000)
   if (e.prompt_cache_likely_expired === true) c.expiresAt = Math.min(c.expiresAt || now, now)
+  const since = e.seconds_since_last_response
+  const shortTtl = e.prompt_cache_likely_expired === true && (typeof since !== 'number' || since * 1000 < TTL_MS)
+  if (saved !== null && !shortTtl && saved > c.expiresAt) c.expiresAt = saved
 }
 
 const ratio = (part: { read: number; input: number } | null) => part && part.input > 0 ? part.read / part.input : null

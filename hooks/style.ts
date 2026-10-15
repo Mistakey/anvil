@@ -23,6 +23,8 @@ export const COLOR = {
   warn: '#d7bd6f',
   high: '#d79a6f',
   danger: '#e07a7a',
+  /** 目录图标：一行的开头，给个识别色，不和图标的灰混在一起 */
+  dir: '#82aadf',
   /** 分支（git 的识别色，statusline 同色） */
   branch: '#b18bd0',
   /** 花费（statusline 同色） */

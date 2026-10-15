@@ -147,7 +147,7 @@ function spaced(groups: readonly Segment[][]): Segment[] {
 /** 目录名：仓库名加粗，linked worktree 接 worktree 名，子目录接相对路径；不在 git 里时是会话目录名。bare 时只写仓库名（窄屏） */
 export function dirSegments(place: Place, names: number = NAME_CELLS, bare = false): Segment[] {
   const git = place.git
-  const out: Segment[] = [{ text: `${ICON.dir} `, color: COLOR.icon }, { text: git ? git.repo : place.dir || '—', bold: true }]
+  const out: Segment[] = [{ text: `${ICON.dir} `, color: COLOR.dir }, { text: git ? git.repo : place.dir || '—', bold: true }]
   if (!git || bare) return out
   if (git.worktree) out.push({ text: ` ${ICON.worktree} `, color: COLOR.icon }, { text: fitTail(git.worktree, names) })
   if (git.sub) out.push({ text: fitTail(`/${git.sub}`, names), color: COLOR.secondary })
@@ -252,7 +252,7 @@ export function bandLine(place: Place, usage: Usage, now: number, columns: numbe
 export function drawBand(els: Pick<Elements['terminal'], 'Box' | 'Text'>, segments: readonly Segment[], columns: number): RenderElement {
   const { Box, Text } = els
   return (
-    <Box key="band" width={columns} flexShrink={0} paddingLeft={PAD_LEFT}>
+    <Box key="band" width={columns} flexShrink={0} paddingLeft={PAD_LEFT} marginTop={1}>
       <Text wrap="truncate">
         {segments.map(segment => (
           <Text color={segment.color} bold={segment.bold}>

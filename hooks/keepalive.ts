@@ -191,7 +191,17 @@ export function keepaliveStatus({ settings, override, context, loop }: StatusInp
  * 写给 statusline 的：会不会自动续期（开着、这一段空闲没停下），续期出错的原因（空闲到上限不算出错）。
  * statusline 的缓存段据此写"有效 · 自动续期""续期出错"（用户 2026-10-15 定）
  */
-export function statuslineFile({ settings, override, context, loop }: StatusInput, at: number): StatuslineFile {
+export function statuslineFile({ settings, override, context, loop }: StatusInput, expiresAt: number | null, at: number): StatuslineFile {
   const error = loop.stopped && loop.stopped.kind !== 'limit' ? loop.stopped.reason : null
-  return { renews: isEnabled(settings, override, context) && loop.stopped === null, error, at }
+  return { renews: isEnabled(settings, override, context) && loop.stopped === null, error, expiresAt, at }
+}
+
+/** 读回状态文件里的过期时刻；没有、不是这个形状为 null */
+export function savedExpiry(text: string): number | null {
+  try {
+    const file = JSON.parse(text) as Partial<StatuslineFile> | null
+    return typeof file?.expiresAt === 'number' && file.expiresAt > 0 ? file.expiresAt : null
+  } catch {
+    return null
+  }
 }

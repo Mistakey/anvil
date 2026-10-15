@@ -200,6 +200,9 @@ export function world(on: On, options: WorldOptions = {}) {
     return { value: entries }
   })
   on('fs.read', ($, e) => {
+    // 插件自己写过的文件（状态文件）读得回来
+    const own = written.get(slashed(e.path))
+    if (own !== undefined) return { value: own }
     const text = repo.current.files?.[inGitDir(e.path)]
     if (text === undefined) throw new Error(`ENOENT ${e.path}`)
     return { value: text }
