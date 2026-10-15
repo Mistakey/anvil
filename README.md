@@ -109,7 +109,7 @@ The status line is your own script ([`statusLine`](https://docs.claude.com/en/do
 { "renews": true, "error": null, "expiresAt": 1791998610193, "at": 1791995010193 }
 ```
 
-`session_id` is the one in the status line's input. `renews` is true while the keepalive is on and hasn't stopped; `error` is the reason it stopped on a failed renewal (12 hours idle isn't an error); `expiresAt` is anvil's estimate of the expiry (Unix milliseconds, renewals included), which anvil reads back itself when the session is resumed. anvil only writes these files; clean up the ones older than a week from your script if you like. With it, a cache segment can read `󰆼 94% · valid · renewing`, `󰆼 94% · valid until 21:40` or `󰆼 94% · expired 21:40`, colored by state: green when it will renew, yellow when it lasts only until a set time, red once expired.
+`session_id` is the one in the status line's input. `renews` is true while the keepalive is on and hasn't stopped; `error` is the reason it stopped on a failed renewal (12 hours idle isn't an error); `expiresAt` is anvil's estimate of the expiry (Unix milliseconds, renewals included), which anvil reads back itself when the session is resumed. anvil only writes these files; clean up the ones older than a week from your script if you like. With it, a cache segment can read `󰆼 94% · warm · keepalive`, `󰆼 94% · expires 21:40` or `󰆼 94% · expired 21:40`, colored by state: green when the keepalive will renew it, yellow when it lasts only until a set time, red once expired.
 
 ## Configure
 

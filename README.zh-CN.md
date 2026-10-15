@@ -109,7 +109,7 @@ statusline 是你自己的脚本（设置里的 [`statusLine`](https://docs.clau
 { "renews": true, "error": null, "expiresAt": 1791998610193, "at": 1791995010193 }
 ```
 
-`session_id` 就是 statusline 输入里的那个。保活开着、没停下时 `renews` 为 true；续期失败停下时 `error` 是原因（空闲满 12 小时不算出错）；`expiresAt` 是 anvil 估的过期时刻（Unix 毫秒，算上续期），恢复会话时 anvil 自己读回它。anvil 只写不删，愿意的话在脚本里顺手清掉一周以前的。有了它，缓存段可以写成 `󰆼 94% · 有效 · 自动续期`、`󰆼 94% · 有效至 21:40` 或 `󰆼 94% · 21:40 已失效`，再按状态上色：会续的绿、只到某个时刻的黄、已失效的红。
+`session_id` 就是 statusline 输入里的那个。保活开着、没停下时 `renews` 为 true；续期失败停下时 `error` 是原因（空闲满 12 小时不算出错）；`expiresAt` 是 anvil 估的过期时刻（Unix 毫秒，算上续期），恢复会话时 anvil 自己读回它。anvil 只写不删，愿意的话在脚本里顺手清掉一周以前的。有了它，缓存段可以写成 `󰆼 94% · warm · keepalive`（会自动续期）、`󰆼 94% · expires 21:40`（到点过期）或 `󰆼 94% · expired 21:40`（已失效），再按状态上色：会续的绿、只到某个时刻的黄、已失效的红。
 
 ## 设置
 
