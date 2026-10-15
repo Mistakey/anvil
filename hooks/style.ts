@@ -40,8 +40,6 @@ export const ICON = {
   stash: '\u{F51E}',
   lines: '\u{F440}',
   pause: '\u{F04C}',
-  /** 5h、7d（nf-md-gauge） */
-  usage: '\u{F029A}',
   /** 重置时刻 */
   reset: '\u{F0450}',
 } as const
