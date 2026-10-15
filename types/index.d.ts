@@ -8,7 +8,12 @@ export type Settings = {
   autoKeepalive: boolean
   /** 冷发送守卫 */
   guard: boolean
+  /** 输入框上方那一行画哪几段、按什么顺序；空列表时整行不画 */
+  band: readonly BandPart[]
 }
+
+/** 输入框上方那一行的段：目录名、git、5h、7d、花费 */
+export type BandPart = 'dir' | 'git' | '5h' | '7d' | 'cost'
 
 /** 一个额度窗口的读数，取自引擎的 `rateLimits` */
 export type RateLimit = {
@@ -96,7 +101,7 @@ export type KeepaliveView = {
 
 /**
  * 写给 statusline 的保活状态（`~/.claude/anvil/sessions/<session_id>.json`）：statusline 按 stdin 的 session_id 读，
- * 缓存段据此写"keepalive""keepalive failed"。statusline 不归本仓库，字段改了要一起改脚本
+ * 缓存段据此写"keepalive""keepalive failed"。字段改了要一起改参考脚本 `skills/statusline/statusline.mjs` 和 skill 里的说明，再提醒用户改本机的脚本
  */
 export type StatuslineFile = {
   /** 这个会话现在会不会自动续期：保活开着、这一段空闲没停下 */

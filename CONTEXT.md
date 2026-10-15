@@ -49,7 +49,7 @@ _Avoid_: 仪表盘、侧栏
 Claude Code 自带的提示词输入框；图片、粘贴内容、斜杠命令都由用户在这里自己处理。
 
 **statusline**：
-用户的自定义状态栏脚本 `~/.claude/statusline.mjs`，主输入框下方一行：模型 effort · 上下文 · 缓存（命中率；warm · keepalive / expires HH:MM / expired HH:MM；keepalive failed）。数据由引擎直接给，比 mod 推算的准；会不会自动续期读 anvil 写的 `~/.claude/anvil/sessions/<session_id>.json`。v1 交付时曾退役，2026-10-14 恢复，2026-10-15 改成 v4（目录、git、5h/7d、花费挪到**上方一行**），同日 v5 按状态上色（命中率、有效期：好绿、要留意黄、坏红）。同日 v6 缓存段的字改成英文。不属于本仓库。
+用户的自定义状态栏脚本 `~/.claude/statusline.mjs`，主输入框下方一行：模型 effort · 上下文 · 缓存（命中率；warm · keepalive / expires HH:MM / expired HH:MM；keepalive failed）。数据由引擎直接给，比 mod 推算的准；会不会自动续期读 anvil 写的 `~/.claude/anvil/sessions/<session_id>.json`。v1 交付时曾退役，2026-10-14 恢复，2026-10-15 改成 v4（目录、git、5h/7d、花费挪到**上方一行**），同日 v5 按状态上色（命中率、有效期：好绿、要留意黄、坏红）。同日 v6 缓存段的字改成英文。用户本机那份不属于本仓库；仓库里有一份参考脚本（`skills/statusline/statusline.mjs`），`/anvil:statusline` 照它和用户的偏好装脚本、配 `statusLine`（anvil-hy6）。
 
 **cache-tax**：
 `karanb192/cache-tax`（MIT），**缓存保活**与**冷发送守卫**的参考实现：https://github.com/karanb192/cache-tax 。

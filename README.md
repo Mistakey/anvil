@@ -18,7 +18,7 @@ English | [简体中文](README.zh-CN.md)
 - **A line above the prompt.** Directory · git · 5-hour usage · 7-day usage · session cost. Git shows the branch with ahead/behind, a paused merge or rebase, conflicts, staged, modified, untracked, stashes and uncommitted lines. Each usage window has a 10-cell heat bar, the percentage and its reset time.
 - **Each reply's speed.** Output tokens per second and time to first token (TTFT) are added to the end of Claude Code's "Worked for …" line.
 
-Model, effort, context and the cache's real expiry belong to the line below the prompt, your own [status line](#the-line-below-the-prompt). anvil writes its keepalive state to a small file the status line can read.
+Model, effort, context and the cache's real expiry belong to the line below the prompt, your own [status line](#the-line-below-the-prompt). anvil writes its keepalive state to a small file the status line can read, and `/anvil:statusline` sets up a matching status line for you.
 
 ## Requirements
 
@@ -74,7 +74,7 @@ The installer may say config options aren't set; the defaults are fine, and [`/c
 | 5h, 7d | a 10-cell heat bar, the percentage used, and the reset time (`22:00`, or `09:00 10-15` on another day); `—` until the window starts |
 | cost | the session cost Claude Code reports (`/cost`) |
 
-Git is re-read after each reply, after a tool that changes files or runs commands, and when you send a message. At session start the usage readings take a few seconds to arrive; until then anvil shows the last readings any of your local sessions saw. When the terminal is narrow, names shorten first, then the bars go, then git keeps only the branch, then the cost and git go; the reset times stay.
+Git is re-read after each reply, after a tool that changes files or runs commands, and when you send a message. At session start the usage readings take a few seconds to arrive; until then anvil shows the last readings any of your local sessions saw. When the terminal is narrow, names shorten first, then the bars go, then git keeps only the branch, then the cost and git go; the reset times stay. To hide parts, reorder them or turn the line off, see `band` under [Configure](#configure).
 
 ### 2. Commands
 
@@ -102,6 +102,8 @@ A new session starts from the defaults you set in `/config`.
 
 ### The line below the prompt
 
+Run `/anvil:statusline` to get the line shown in the screenshots: model and effort · context · cache (`󰆼 94% · warm · keepalive`). Claude checks for node and a Nerd Font, shows you a preview of anvil's reference script ([`skills/statusline/statusline.mjs`](skills/statusline/statusline.mjs)), changes whatever you ask (parts, order, colors, icons), backs up your current status line, writes the script to `~/.claude/statusline.mjs` and sets `statusLine` for you. Run it again whenever you want to restyle the line.
+
 The status line is your own script ([`statusLine`](https://docs.claude.com/en/docs/claude-code/statusline) in your settings); Claude Code hands it the model, effort, context and the cache's real state (`prompt_cache`: `hit_ratio`, `warm`, `expires_at`). What it can't know is whether anvil will renew the cache, so anvil writes that for every session to:
 
 ```
@@ -120,6 +122,7 @@ Run `/config` and open anvil's options:
 | `threshold` | `50000` | context size in tokens at which the keepalive turns on by itself and the guard starts guarding |
 | `autoKeepalive` | `true` | turn the keepalive on by itself for sessions at or above the threshold; `/anvil keepalive` still toggles it per session |
 | `guard` | `true` | hold back the first message after the cache has expired |
+| `band` | `dir, git, 5h, 7d, cost` | the parts of the line above the prompt, in display order, separated by commas; leave a part out to hide it, leave it empty or write `off` to turn the line off |
 
 ## What it touches
 

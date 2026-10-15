@@ -542,7 +542,7 @@ describe('热重载', () => {
 
 // ---------------------------------------------------------------- 保活状态与写给 statusline 的文件
 
-const SETTINGS: Settings = { threshold: 50000, autoKeepalive: true, guard: true }
+const SETTINGS: Settings = { threshold: 50000, autoKeepalive: true, guard: true, band: ['dir', 'git', '5h', '7d', 'cost'] }
 
 describe('保活状态', () => {
   test('保活状态：自动开启的五种，加上本会话手动开、手动关', () => {

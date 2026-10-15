@@ -1,0 +1,16 @@
+{
+  "session_id": "sample-session",
+  "cwd": "/home/me/project",
+  "model": { "id": "claude-opus-5-5", "display_name": "Opus 5.5" },
+  "effort": { "level": "high" },
+  "context_window": { "context_window_size": 1000000, "used_percentage": 62.4 },
+  "prompt_cache": {
+    "warm": true,
+    "caching_observed": true,
+    "ttl": "1h",
+    "expires_at": 4102444800,
+    "requests": 24,
+    "misses": 2,
+    "hit_ratio": 0.93
+  }
+}
