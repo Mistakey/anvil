@@ -1,4 +1,5 @@
 // 输入框上方那一行（AbovePrompt band）：目录名 · git · 5h · 7d · 花费（用户 2026-10-14/15 定）。
+// 设置 `band` 可隐藏其中几段、调顺序、整行关闭（anvil-hy6）。
 // 模型、effort、上下文、缓存交给输入框下方的 statusline，这一行不重复。
 // git 照原来的身份栏（0.2.0 之前的 identity.tsx）：取法照用户原来的 ~/.claude/statusline.mjs（`--no-optional-locks`、
 // 分离 HEAD 写 `@提交号`、`@{u}` 领先落后、储藏数），改成一条 `status --porcelain=v2 --branch --show-stash` 取齐分支、上游、
@@ -7,7 +8,7 @@
 
 import type { Elements, RenderElement } from 'claude-code'
 
-import type { GitOperation, GitView, Place, Usage } from '../types'
+import type { BandPart, GitOperation, GitView, Place, Usage } from '../types'
 import { COLOR, ICON, SEPARATOR, fitSegments, widthOf } from './style'
 import type { Segment } from './style'
 import { fitTail } from './text'
@@ -225,27 +226,52 @@ const LEVELS: readonly Level[] = [
 /** 左边空 1 格，和主输入框的边线错开 */
 const PAD_LEFT = 1
 
-function lineAt(place: Place, usage: Usage, now: number, level: Level): Segment[] {
-  return joined([
-    dirSegments(place, level.names, level.bareDir),
-    level.git === 'none' ? [] : gitSegments(place.git, level.names, level.git === 'short'),
-    limitSegments('five_hour', usage.rateLimits, now, level.bars),
-    limitSegments('seven_day', usage.rateLimits, now, level.bars),
-    level.cost ? costSegments(usage) : [],
-  ])
+/** 这一行能画的几段，默认全画、按这个顺序 */
+export const BAND_PARTS: readonly BandPart[] = ['dir', 'git', '5h', '7d', 'cost']
+
+/**
+ * 设置里的 `band`：逗号或空格隔开的段名，按写的顺序画；不认识的、重复的跳过，大小写不论。
+ * 一段都没有（空串、`off`）时整行不画
+ */
+export function parseBand(value: string): BandPart[] {
+  const parts: BandPart[] = []
+  for (const word of value.toLowerCase().split(/[\s,]+/)) {
+    const part = BAND_PARTS.find(one => one === word)
+    if (part && !parts.includes(part)) parts.push(part)
+  }
+  return parts
+}
+
+function partAt(part: BandPart, place: Place, usage: Usage, now: number, level: Level): Segment[] {
+  switch (part) {
+    case 'dir':
+      return dirSegments(place, level.names, level.bareDir)
+    case 'git':
+      return level.git === 'none' ? [] : gitSegments(place.git, level.names, level.git === 'short')
+    case '5h':
+      return limitSegments('five_hour', usage.rateLimits, now, level.bars)
+    case '7d':
+      return limitSegments('seven_day', usage.rateLimits, now, level.bars)
+    case 'cost':
+      return level.cost ? costSegments(usage) : []
+  }
+}
+
+function lineAt(place: Place, usage: Usage, now: number, level: Level, parts: readonly BandPart[]): Segment[] {
+  return joined(parts.map(part => partAt(part, place, usage, now, level)))
 }
 
 /**
  * 整行：放得下就全画；放不下先把名字截短，再去掉进度条、git 只留分支、去掉花费、去掉 git、目录只留仓库名，
- * 还放不下就从行尾截（窄屏退化先这样，用户再调）
+ * 还放不下就从行尾截（窄屏退化先这样，用户再调）。parts 是设置里选的段和顺序，隐藏的段不占地方
  */
-export function bandLine(place: Place, usage: Usage, now: number, columns: number): Segment[] {
+export function bandLine(place: Place, usage: Usage, now: number, columns: number, parts: readonly BandPart[] = BAND_PARTS): Segment[] {
   const room = Math.max(0, columns - PAD_LEFT)
   for (const level of LEVELS) {
-    const line = lineAt(place, usage, now, level)
+    const line = lineAt(place, usage, now, level, parts)
     if (widthOf(line) <= room) return line
   }
-  return fitSegments(lineAt(place, usage, now, LEVELS[LEVELS.length - 1] as Level), room)
+  return fitSegments(lineAt(place, usage, now, LEVELS[LEVELS.length - 1] as Level, parts), room)
 }
 
 /** 画成一行；嵌套的 Text 沿用外层的 color，所以外层不设颜色（AGENTS.md Pitfalls） */

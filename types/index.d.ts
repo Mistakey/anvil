@@ -8,7 +8,12 @@ export type Settings = {
   autoKeepalive: boolean
   /** 冷发送守卫 */
   guard: boolean
+  /** 输入框上方那一行画哪几段、按什么顺序；空列表时整行不画 */
+  band: readonly BandPart[]
 }
+
+/** 输入框上方那一行的段：目录名、git、5h、7d、花费 */
+export type BandPart = 'dir' | 'git' | '5h' | '7d' | 'cost'
 
 /** 一个额度窗口的读数，取自引擎的 `rateLimits` */
 export type RateLimit = {

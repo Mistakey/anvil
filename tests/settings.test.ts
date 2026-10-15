@@ -6,21 +6,21 @@ test('没改设置时各项取清单里的默认值', async ($, on) => {
   const { state } = world(on)
   await $.session.start(SESSION)
 
-  expect(state.get('anvil.settings')).toEqual({ threshold: 50000, autoKeepalive: true, guard: true })
+  expect(state.get('anvil.settings')).toEqual({ threshold: 50000, autoKeepalive: true, guard: true, band: ['dir', 'git', '5h', '7d', 'cost'] })
 })
 
-const GIVEN = { threshold: 80000, autoKeepalive: false, guard: false }
+const GIVEN = { threshold: 80000, autoKeepalive: false, guard: false, band: 'cost, 5h' }
 
 test('给定的设置值经 options 传到模块', { options: GIVEN }, async ($, on) => {
   const { state } = world(on)
   await $.session.start(SESSION)
 
-  expect(state.get('anvil.settings')).toEqual(GIVEN)
+  expect(state.get('anvil.settings')).toEqual({ ...GIVEN, band: ['cost', '5h'] })
 })
 
 test('只给一部分设置时，其余取默认值', { options: { threshold: 120000 } }, async ($, on) => {
   const { state } = world(on)
   await $.session.start(SESSION)
 
-  expect(state.get('anvil.settings')).toEqual({ threshold: 120000, autoKeepalive: true, guard: true })
+  expect(state.get('anvil.settings')).toEqual({ threshold: 120000, autoKeepalive: true, guard: true, band: ['dir', 'git', '5h', '7d', 'cost'] })
 })

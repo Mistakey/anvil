@@ -40,7 +40,7 @@ import { normalized, normalizing } from './shape'
 import { addTally, requestSpeed, turnDurationRow } from './speed'
 import { EMPTY_USAGE, HISTORY_KEYS, applyReading, parseHistory, parseResetsAt, recordSample, storedLimits } from './usage'
 import type { Histories, Reading } from './usage'
-import type { GitView, KeepaliveStop, Settings, SpeedTally, TurnSpeeds } from '../types'
+import type { BandPart, GitView, KeepaliveStop, Settings, SpeedTally, TurnSpeeds } from '../types'
 
 // 模块结构（照 flightdeck 的 register.tsx / core.ts），引擎扫描源码的规则见 AGENTS.md Pitfalls「模块结构」：
 // - 所有 on(...) 都写在下面的 register 里；用到 `$` 的辅助函数写在本文件顶层（`$` 不能跨文件传）。
@@ -425,12 +425,12 @@ async function refreshPlace($: EngineInterface, refresh: GitRefresh) {
 /** 会改文件或运行命令的工具：调用完 git 状态可能变了 */
 const CHANGES_FILES = new Set(['Bash', 'PowerShell', 'Edit', 'MultiEdit', 'Write', 'NotebookEdit'])
 
-/** 画那一行；有问卷占着那一栏、手机上不画，交给引擎 */
-async function drawAbovePrompt($: EngineInterface, e: RenderInput<'AbovePrompt'>) {
-  if (e.surface === 'mobile' || e.props.hasSurvey) return null
+/** 画那一行；有问卷占着那一栏、手机上不画、设置里一段都没选时，交给引擎 */
+async function drawAbovePrompt($: EngineInterface, e: RenderInput<'AbovePrompt'>, parts: readonly BandPart[]) {
+  if (e.surface === 'mobile' || e.props.hasSurvey || parts.length === 0) return null
   const [where, used, now] = await Promise.all([read($, place).then(value => normalized(place, value)), read($, usage).then(value => normalized(usage, value)), $.clock.now()])
   const columns = e.props.bodyColumns
-  return drawBand($.ui.resolve(e), bandLine(where, used, now, columns), columns)
+  return drawBand($.ui.resolve(e), bandLine(where, used, now, columns, parts), columns)
 }
 
 // ---------------------------------------------------------------- 每段回复末尾的速度
@@ -631,7 +631,7 @@ export const register: Register = (on, options) => {
   })
 
   // 主输入框上方：目录名 · git · 5h · 7d · 花费
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => (await drawAbovePrompt($, e)) ?? next(e))
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => (await drawAbovePrompt($, e, settings.band)) ?? next(e))
 
   // 功能自己的子命令在这里接入（带 args 匹配器），兜底的放最后
   on('command.run', { command: 'anvil', args: /^\s*keepalive\s*$/ }, async $ => ({ text: await toggleKeepalive($, cache, loop, settings) }))

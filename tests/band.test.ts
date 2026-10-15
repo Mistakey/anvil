@@ -2,7 +2,7 @@ import type { On, RenderPropsOf, SessionUsage } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { bandLine, gitSegments, operationOf, parseNumstat, parseRepo, parseStatus, repoNames } from '../hooks/band'
+import { bandLine, gitSegments, operationOf, parseBand, parseNumstat, parseRepo, parseStatus, repoNames } from '../hooks/band'
 import { COLOR, ICON } from '../hooks/style'
 import type { Segment } from '../hooks/style'
 import { cells } from '../hooks/text'
@@ -136,6 +136,48 @@ test('有问卷占着那一栏时让出来；手机上不画', async ($, on) => 
   const shown = await band($)
   expect(await shown.find({ key: 'band' })).toBeDefined()
   await shown.unmount()
+})
+
+// ---------------------------------------------------------------- 设置：隐藏、排序、整行关闭
+
+test('设置 band：逗号或空格隔开，按写的顺序；不认识的、重复的跳过，大小写不论；空串、off 是一段都没有', () => {
+  expect(parseBand('dir, git, 5h, 7d, cost')).toEqual(['dir', 'git', '5h', '7d', 'cost'])
+  expect(parseBand('cost 5h,DIR')).toEqual(['cost', '5h', 'dir'])
+  expect(parseBand('git, branch, git, 7d')).toEqual(['git', '7d'])
+  expect(parseBand('')).toEqual([])
+  expect(parseBand(' off ')).toEqual([])
+})
+
+test('只画选了的段，按设置的顺序', () => {
+  const usage: Usage = { rateLimits: READING.rateLimits, costUsd: 3.9 }
+  const line = text(bandLine({ dir: 'anvil', git: null }, usage, NOW, 200, ['cost', '7d', 'dir']))
+  expect(line).toBe(`$3.90 · 7d ${bar(2)} 18% ${R} 09:00 10-15 · ${D} anvil`)
+})
+
+test('隐藏的段不占地方：窄屏时少让出几步', () => {
+  // 全选时已经去掉进度条的宽度，不画 git、花费时进度条还在
+  const kept = [90, 100, 110].filter(columns => {
+    const all = text(bandLine(LONG, USAGE, NOW, columns))
+    const some = text(bandLine(LONG, USAGE, NOW, columns, ['dir', '5h', '7d']))
+    return !all.includes('━') && some.includes(bar(6)) && !some.includes(B)
+  })
+  expect(kept.length > 0).toBe(true)
+})
+
+test('设置经 options 传到那一行：隐藏、调顺序', { options: { band: '7d, dir' } }, async ($, on) => {
+  const line = await lineOf($, on, { repo: { current: sample({ status: CLEAN, numstat: '' }) } })
+  expect(line).toBe(`7d ${bar(2)} 18% ${R} 09:00 10-15 · ${D} anvil`)
+})
+
+test('设置写 off 时整行不画，交给引擎', { options: { band: 'off' } }, async ($, on) => {
+  mock.clock(on, { now: NOW })
+  world(on, { reading: { current: READING } })
+  // 引擎自己画的那一栏（替身）
+  on('ui.render', { component: 'AbovePrompt' }, () => ({ type: 'Text', children: ['引擎'] }) as never)
+  await $.session.start(SESSION)
+  const ui = await band($)
+  expect(await ui.find({ key: 'band' })).toBeUndefined()
+  await ui.unmount()
 })
 
 // ---------------------------------------------------------------- 目录名

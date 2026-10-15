@@ -39,6 +39,12 @@
       "description": "When the cache has expired and the context reaches the threshold, holds back the first message to the model once and shows what rebuilding the cache will cost",
       "type": "boolean",
       "default": true
+    },
+    "band": {
+      "title": "Line above the prompt",
+      "description": "Parts to show, in order, separated by commas: dir, git, 5h, 7d, cost. Leave a part out to hide it; leave it empty or write off to turn the line off",
+      "type": "string",
+      "default": "dir, git, 5h, 7d, cost"
     }
   }
 }
