@@ -169,7 +169,7 @@ npx -p typescript tsc -p .         # type-check
 
 Type declarations for the current Claude Code build are generated into `.claude-plugin/types/` the first time the plugin loads in an interactive session. Without one, generate them with `CLAUDE_CODE_PLUGIN_DIR_WATCH=1 claude --plugin-dir . -p "ok" --model haiku --max-turns 1`.
 
-[`CONTEXT.md`](CONTEXT.md) defines the terms, [`AGENTS.md`](AGENTS.md) collects the conventions and the known pitfalls of the mods API, and [`docs/adr/`](docs/adr) records the design decisions. These are in Chinese.
+[`GLOSSARY.md`](GLOSSARY.md) defines the terms, [`AGENTS.md`](AGENTS.md) collects the conventions and the known pitfalls of the mods API, and [`docs/adr/`](docs/adr) records the design decisions. These are in Chinese.
 
 ## Acknowledgements
 

@@ -1,6 +1,6 @@
 # Roadmap
 
-方向级，不是承诺清单；术语见 `CONTEXT.md`。v1 已在 forge 的 Epic「anvil v1 规划」（anvil-k0t）上交付，怎么用见 `README.md`。
+方向级，不是承诺清单；术语见 `GLOSSARY.md`。v1 已在 forge 的 Epic「anvil v1 规划」（anvil-k0t）上交付，怎么用见 `README.md`。
 
 - **额度利用率**：缓存保活 + 冷发送守卫。长会话中途离开时缓存不过期，回来误发冷消息前先拦一次。
 - **显示**：主输入框上下两行（2026-10-15 用户定，0.3.0）：上方一行是目录名 · git · 5h · 7d · 花费，下方是用户的 statusline（模型 effort · 上下文 · 缓存），会不会自动续期由 anvil 写文件给 statusline；每段回复末尾接速度。0.4.0 起两行都可定制：`/anvil:statusline` 照参考脚本和用户的偏好装下方一行，上方一行在 `/config` 的 `band` 里隐藏、排序、整行关闭（anvil-hy6）。anvil 面板、翻译输入框和只为面板服务的动效已去掉。

@@ -1,6 +1,6 @@
 # anvil
 
-先读 `CONTEXT.md`（是什么、术语、参考项目）和 `docs/roadmap.md`；`docs/out-of-scope/` 里是已经否决的方向，不要再提。
+先读 `GLOSSARY.md`（是什么、术语、参考项目）和 `docs/roadmap.md`；`docs/out-of-scope/` 里是已经否决的方向，不要再提。
 
 ## 开发
 

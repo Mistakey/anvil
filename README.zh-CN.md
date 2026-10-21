@@ -169,7 +169,7 @@ npx -p typescript tsc -p .         # 类型检查
 
 当前 Claude Code 构建的类型声明在插件第一次于交互会话中加载时生成到 `.claude-plugin/types/`。不开交互会话时用 `CLAUDE_CODE_PLUGIN_DIR_WATCH=1 claude --plugin-dir . -p "ok" --model haiku --max-turns 1` 生成。
 
-[`CONTEXT.md`](CONTEXT.md) 定义术语，[`AGENTS.md`](AGENTS.md) 收录开发约定和 mods 接口的已知坑，[`docs/adr/`](docs/adr) 记录设计决定。
+[`GLOSSARY.md`](GLOSSARY.md) 定义术语，[`AGENTS.md`](AGENTS.md) 收录开发约定和 mods 接口的已知坑，[`docs/adr/`](docs/adr) 记录设计决定。
 
 ## 致谢
 
