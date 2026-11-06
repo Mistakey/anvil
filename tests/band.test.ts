@@ -88,9 +88,18 @@ test('一行：目录名 · git · 5h · 7d · 花费；5h、7d 是 10 格进度
   expect(line).toBe(`${D} anvil · ${B} main · 5h ${bar(6)} 62% ${R} 22:00 · 7d ${bar(2)} 18% ${R} 09:00 10-15 · $3.90`)
 })
 
-test('5h、7d 的重置时刻一直显示：没有读数、窗口已过重置时写 0% 和 —；花费还没有读数时不画', async ($, on) => {
+test('5h、7d 的重置时刻一直显示：窗口已过重置时写 0% 和 —；读数里没有的窗口不画；花费还没有读数时不画', async ($, on) => {
   const line = await lineOf($, on, { reading: { current: { startedAt: 0, context: { window: 200_000 }, rateLimits: [{ kind: 'five_hour', percentUsed: 40, resetsAt: iso(at(13, 19)) }] } } })
-  expect(groups(line)).toEqual([`${D} work`, `5h ${bar(0)} 0% ${R} —`, `7d ${bar(0)} 0% ${R} —`])
+  expect(groups(line)).toEqual([`${D} work`, `5h ${bar(0)} 0% ${R} —`])
+})
+
+test('套餐没有 5h 时只画 7d', async ($, on) => {
+  const sevenOnly = { ...READING, rateLimits: [{ kind: 'seven_day', percentUsed: 18, resetsAt: iso(at(15, 9)) }] }
+  expect(groups(await lineOf($, on, { reading: { current: sevenOnly } }))).toEqual([`${D} work`, `7d ${bar(2)} 18% ${R} 09:00 10-15`, '$3.90'])
+})
+
+test('没有订阅（读数里一个窗口都没有）时 5h、7d 都不画', async ($, on) => {
+  expect(groups(await lineOf($, on, { reading: { current: { ...READING, rateLimits: [] } } }))).toEqual([`${D} work`, '$3.90'])
 })
 
 test('开局引擎还没有 5h、7d 时先画存档里最近的读数；读数到了再换', async ($, on) => {

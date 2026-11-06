@@ -30,4 +30,5 @@ test('5h、7d 一段：标签、10 格进度条、百分比、重置时刻；窄
   const text = (withBar: boolean) => limitSegments('seven_day', limits, NOW, withBar).map(one => one.text).join('')
   expect(text(true)).toBe('7d ━━━━────── 41% \u{F0450} 09:00 10-15')
   expect(text(false)).toBe('7d 41% \u{F0450} 09:00 10-15')
+  expect(limitSegments('five_hour', limits, NOW)).toEqual([])
 })

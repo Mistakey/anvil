@@ -81,7 +81,13 @@ function engine(on: On, rewrite: Map<string, unknown>) {
   const clock = mock.clock(on, { now: 10 * 3_600_000 })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
-  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits: [] } }))
+  // 5h、7d 的窗口都还没到重置时刻：读数里有的窗口那一行才画
+  const resetsAt = new Date(30 * 3_600_000).toISOString()
+  const rateLimits = [
+    { kind: 'five_hour', percentUsed: 10, resetsAt },
+    { kind: 'seven_day', percentUsed: 10, resetsAt },
+  ]
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200000 }, rateLimits } }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
   on('classic.SessionStart', () => ({}))
   offline(on)
@@ -160,7 +166,8 @@ for (const [key, stale] of Object.entries(STALE)) {
     await $.prompt.submit(typed('你好'))
     await turn($, clock, 't1', 'u1')
     await turnRow($, 'u1')
-    expect(await band($)).toContain('5h')
+    // 旧形状的 usage 没有 5h、7d 的读数，那一行就不画它们；这里只看那一行画出来了
+    expect((await band($)).trim()).not.toBe('')
 
     // 之后的写入不再被换掉（像新代码第一次写下自己的形状）
     rewrite.clear()

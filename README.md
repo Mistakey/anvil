@@ -71,7 +71,7 @@ The installer may say config options aren't set; the defaults are fine, and [`/c
 | --- | --- |
 | directory | the repository's name (bold), a linked worktree's name, the subdirectory you're in; outside git, the session's directory |
 | git | branch, `↑` ahead and `↓` behind, `no upstream`, a paused `merge` or `rebase 2/5`, `=` conflicts, `+` staged, `!` modified, `?` untracked, stashes, uncommitted `+lines −lines` |
-| 5h, 7d | a 10-cell heat bar, the percentage used, and the reset time (`22:00`, or `09:00 10-15` on another day); `—` until the window starts |
+| 5h, 7d | a 10-cell heat bar, the percentage used, and the reset time (`22:00`, or `09:00 10-15` on another day); `—` until the window starts; a window your plan doesn't have isn't shown |
 | cost | the session cost Claude Code reports (`/cost`) |
 
 Git is re-read after each reply, after a tool that changes files or runs commands, and when you send a message. At session start the usage readings take a few seconds to arrive; until then anvil shows the last readings any of your local sessions saw. When the terminal is narrow, names shorten first, then the bars go, then git keeps only the branch, then the cost and git go; the reset times stay. To hide parts, reorder them or turn the line off, see `band` under [Configure](#configure).
@@ -148,7 +148,7 @@ Your terminal font isn't a Nerd Font. Install one and select it in the terminal'
 The keepalive and the guard work from anvil's own estimate: a mod can't read Claude Code's cache tracker, so anvil works from request times and usage. Requests anvil doesn't see (another plugin's fork, Claude Code's built-in keepalive) can make it conservative: at worst the guard warns once too often or the keepalive sends one extra request. Your status line gets Claude Code's real figures.
 
 **Does it work on an API key, or with a 5-minute cache?**
-The line above the prompt does (5h and 7d stay at `—` without a subscription). The keepalive and the guard assume the 1-hour TTL of a subscription.
+The line above the prompt does (5h and 7d aren't shown without a subscription). The keepalive and the guard assume the 1-hour TTL of a subscription.
 
 **Why are the dollar amounts in the guard API prices if I'm on a subscription?**
 How cache reads and writes count against subscription limits isn't documented, so API prices are the only comparable measure. The cost above the prompt is the figure Claude Code reports (`/cost`).

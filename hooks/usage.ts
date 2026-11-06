@@ -163,13 +163,15 @@ const LABELS = { five_hour: '5h', seven_day: '7d' } as const
 export const BAR_CELLS = 10
 
 /**
- * 5h 或 7d：`5h ━━━━━───── 41% 󰑐 21:40`。重置时刻一直显示（用户定）；没有读数、或窗口已过重置时刻
- * （下一条消息才开始新窗口）写 0% 和 —。withBar 为 false 时不画进度条（窄屏）
+ * 5h 或 7d：`5h ━━━━━───── 41% 󰑐 21:40`。读数里没有这个窗口时整段不画：有的套餐没有 5h，
+ * 没有订阅时两个都没有，开局第一次读数到之前也先不画（用户 2026-11-06 定）。重置时刻一直显示（用户定）；
+ * 窗口已过重置时刻（下一条消息才开始新窗口）写 0% 和 —。withBar 为 false 时不画进度条（窄屏）
  */
 export function limitSegments(kind: 'five_hour' | 'seven_day', limits: readonly RateLimit[], now: number, withBar = true): Segment[] {
   const limit = limits.find(one => one.kind === kind)
-  const resetsAt = parseResetsAt(limit?.resetsAt)
-  const isCurrent = limit !== undefined && resetsAt !== null && resetsAt > now
+  if (limit === undefined) return []
+  const resetsAt = parseResetsAt(limit.resetsAt)
+  const isCurrent = resetsAt !== null && resetsAt > now
   const percent = isCurrent ? Math.min(100, Math.max(0, limit.percentUsed)) : 0
   return [
     { text: `${LABELS[kind]} `, color: COLOR.secondary },
